@@ -2,6 +2,6 @@
 .swiftpm/
 Package.resolved
 .DS_Store
-# Profil de préférences local (taste.md), jamais publié
+# Local preference profile (taste.md), never published
 .commandcode/
 *.xcuserdatad

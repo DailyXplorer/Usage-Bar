@@ -1,81 +1,79 @@
 # UsageBar
 
-Petite app macOS menu bar (SwiftUI) qui affiche tes limites d'utilisation **Codex**
-(plan ChatGPT) et **Claude Code** (plan Anthropic) en un clin d'œil :
-**pourcentage restant** et temps avant reset.
+Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan) and
+**Claude Code** (Anthropic plan) usage limits at a glance: **percentage
+remaining** and time until reset.
 
-Dans la barre de menus : `‹logo ChatGPT› 99% ‹logo Claude› 99%` — la fenêtre
-primaire Codex, puis la barre **All models** de Claude Code (la limite
-hebdomadaire tous modèles). Le popover détaille toutes les fenêtres des deux
-côtés.
+In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99%` — the Codex primary
+window, then Claude Code's **All models** bar (the weekly all-models limit). The
+popover breaks down every window on both sides.
 
-Le libellé entier est **composé hors écran en une seule image template**
-(`MenuBarLabelImage`), et c'est délibéré : `MenuBarExtra` ne rend qu'une image et
-un texte dans son label, supprime une image interpolée dans une chaîne, et fige
-la hiérarchie de vues au premier rendu — un segment ajouté ensuite par un `if`
-n'apparaîtrait jamais. Une `Image` unique dont seule la valeur change contourne
-les trois contraintes. Ne pas revenir à des vues voisines : deux tests le
-verrouillent.
+The whole label is **composed off-screen into a single template image**
+(`MenuBarLabelImage`), and that is deliberate: `MenuBarExtra` renders only one
+image and one text in its label, drops an image interpolated into a string, and
+freezes the view hierarchy on first render — a segment added later by an `if`
+would never appear. A single `Image` whose value alone changes works around all
+three constraints. Do not go back to sibling views: two tests lock this in.
 
-## Fonctionnement
+## How it works
 
 ### Codex
 
-- Lit `~/.codex/auth.json` (le même fichier que le CLI Codex) pour récupérer le
-  `access_token` et l'`account_id` ChatGPT.
-- Interroge l'endpoint officiel `https://chatgpt.com/backend-api/wham/usage`
-  (le même que celui utilisé par `codex /status`).
-- Affiche la fenêtre primaire ("weekly", "5h", … selon la durée retournée par le
-  backend, même heuristique que le CLI) et la fenêtre secondaire si présente.
+- Reads `~/.codex/auth.json` (the same file the Codex CLI uses) to get the
+  ChatGPT `access_token` and `account_id`.
+- Queries the official endpoint `https://chatgpt.com/backend-api/wham/usage`
+  (the same one `codex /status` uses).
+- Shows the primary window ("weekly", "5h", … depending on the duration the
+  backend returns, same heuristic as the CLI) and the secondary window when
+  present.
 
 ### Claude Code
 
-- Lit le jeton OAuth dans le trousseau macOS via `/usr/bin/security`, exactement
-  comme Claude Code l'écrit — c'est ce qui évite une demande d'autorisation
-  trousseau à chaque lancement. Repli sur `~/.claude/.credentials.json`.
-  Aucun jeton n'est copié ni réécrit.
-- Interroge `https://api.anthropic.com/api/oauth/usage`, l'endpoint que Claude
-  Code utilise pour sa commande `/usage`.
-- Reprend les trois barres intégrées de Claude Code : **Session 5h**,
-  **Week · All models** et **Week · ‹modèle›** (la limite par modèle épinglé,
-  ex. Opus), chacune avec son heure de reset.
-- Si aucune session Claude Code n'existe, la section est simplement masquée.
+- Reads the OAuth token from the macOS keychain through `/usr/bin/security`,
+  exactly the way Claude Code writes it — that is what avoids a keychain
+  authorization prompt on every launch. Falls back to
+  `~/.claude/.credentials.json`. No token is ever copied or rewritten.
+- Queries `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code
+  uses for its `/usage` command.
+- Mirrors Claude Code's three built-in bars: **Session 5h**,
+  **Week · All models** and **Week · ‹model›** (the pinned per-model limit,
+  e.g. Opus), each with its reset time.
+- If there is no Claude Code session, the section is simply hidden.
 
-Les deux comptes sont interrogés en parallèle : un backend lent ne bloque pas
-l'autre, et une erreur d'un côté n'efface pas les barres de l'autre.
+Both accounts are queried in parallel: a slow backend does not block the other,
+and an error on one side does not wipe out the other side's bars.
 
-### Ménager les endpoints
+### Going easy on the endpoints
 
-L'endpoint d'usage de Claude renvoie **429** si on le sollicite trop. Trois
-garde-fous :
+Claude's usage endpoint returns **429** if you hit it too often. Three
+safeguards:
 
-- le dernier état est **persisté** (`UserDefaults`) et réaffiché avant toute
-  requête, donc une relance de l'app ne coûte pas un appel réseau et n'affiche
-  jamais « – » alors qu'on connaît la valeur ;
-- une requête n'est émise que si les données ont plus de 5 minutes (l'ouverture
-  du popover ne déclenche donc pas systématiquement un appel ; le bouton
-  « Retry » force, lui) ;
-- sur 429, **recul progressif** (5 → 15 → 30 → 60 min) pendant lequel les
-  dernières valeurs connues restent affichées.
+- the last state is **persisted** (`UserDefaults`) and redisplayed before any
+  request, so restarting the app costs no network call and never shows "–" when
+  the value is already known;
+- a request is only issued when the data is more than 5 minutes old (so opening
+  the popover does not systematically trigger a call; the "Retry" button does
+  force one);
+- on 429, **progressive backoff** (5 → 15 → 30 → 60 min), during which the last
+  known values stay on screen.
 
-`Updated at` date les **données**, pas la dernière tentative : un rafraîchissement
-qui échoue ne fait pas passer un état périmé pour frais. Les pourcentages
-persistés sont figés au relevé, mais les comptes-à-rebours sont recalculés depuis
-l'heure de reset à la relecture.
+`Updated at` timestamps the **data**, not the last attempt: a failed refresh
+never passes stale state off as fresh. Persisted percentages are frozen at
+capture time, but countdowns are recomputed from the reset time when read back.
 
-- Affiche le **% restant** (ex. 66% restant = 34% utilisé).
-- Rafraîchit automatiquement toutes les 5 minutes et à l'ouverture du popover.
+- Shows the **% remaining** (e.g. 66% remaining = 34% used).
+- Refreshes automatically every 5 minutes and when the popover opens.
 
 ## Design
 
-- Interface en anglais.
-- Police **Instrument Sans** (variable, bundlée dans l'app), y compris pour le
-  libellé de la barre de menus. Attention : le fichier étant variable, une seule
-  face est enregistrée (`InstrumentSans-Regular`). Les graisses passent par l'axe
-  `wght` (`AppTheme.nsFont`) ; demander « InstrumentSans-SemiBold » par son nom
-  échoue et retombe **en silence** sur la police système.
-- Logos **Hugeicons** `chat-gpt` et `claude` (catégorie Logos, stroke · rounded),
-  bundlés en SVG et rendus en template pour suivre le thème de la barre.
+- English interface.
+- **Instrument Sans** typeface (variable, bundled in the app), including for the
+  menu bar label. Careful: since the file is variable, only one face is
+  registered (`InstrumentSans-Regular`). Weights go through the `wght` axis
+  (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
+  **silently** falls back to the system font.
+- **Hugeicons** `chat-gpt` and `claude` logos (Logos category, stroke · rounded),
+  bundled as SVG and rendered as templates so they follow the menu bar theme.
 
 ## Build & run
 
@@ -85,51 +83,51 @@ scripts/build-app.sh
 open .build/UsageBar.app
 ```
 
-Pour la version debug :
+For the debug build:
 
 ```sh
 swift build
 ./.build/debug/UsageBar
 ```
 
-## Prérequis
+## Requirements
 
-- macOS 14+ (Sonoma ou plus récent)
-- Être connecté au CLI Codex avec un compte ChatGPT : `codex login`
-- Pour la partie Claude : être connecté à Claude Code (`claude`, puis `/login`)
-- Xcode Command Line Tools : `xcode-select --install`
+- macOS 14+ (Sonoma or newer)
+- Signed in to the Codex CLI with a ChatGPT account: `codex login`
+- For the Claude side: signed in to Claude Code (`claude`, then `/login`)
+- Xcode Command Line Tools: `xcode-select --install`
 
 ## Notes
 
-- L'app tourne en agent accessoire : aucune icône dans le Dock, uniquement dans
-  la barre de menus.
-- Aucune donnée ne quitte ta machine en dehors des requêtes d'usage vers
-  chatgpt.com et api.anthropic.com, identiques à celles des deux CLI.
-- **Trousseau** : l'entrée `Claude Code-credentials` est créée par Claude Code
-  via `/usr/bin/security`, donc son ACL ne fait confiance qu'à ce binaire. L'app
-  passe par le même chemin : aucune demande d'autorisation, y compris après un
-  rebuild (l'app est signée ad hoc, sa signature change à chaque fois).
-- Le jeton Claude est rafraîchi par Claude Code lui-même. S'il a expiré et que
-  Claude Code n'a pas tourné depuis longtemps, la section affiche « Jeton Claude
-  expiré » jusqu'à la prochaine ouverture de Claude Code.
+- The app runs as an accessory agent: no Dock icon, menu bar only.
+- No data leaves your machine beyond the usage requests to chatgpt.com and
+  api.anthropic.com, identical to the ones both CLIs make.
+- **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
+  through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
+  through the same path: no authorization prompt, including after a rebuild
+  (the app is ad-hoc signed, so its signature changes every time).
+- The Claude token is refreshed by Claude Code itself. If it has expired and
+  Claude Code has not run in a while, the section shows "Claude token expired"
+  until the next time Claude Code opens.
 
-## Licence
+## License
 
-Le code de ce projet est sous licence **MIT** — voir [LICENSE](LICENSE).
+The code in this project is licensed under the **MIT** license — see
+[LICENSE](LICENSE).
 
-Les ressources tierces embarquées gardent la leur :
+Bundled third-party assets keep their own:
 
 - **Instrument Sans** (`Sources/UsageBar/Resources/Fonts/InstrumentSans.ttf`) —
-  © 2022 The Instrument Sans Project Authors, sous
-  [SIL Open Font License 1.1](https://openfontlicense.org). La licence est
-  distribuée avec la police
-  ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), comme l'OFL
-  l'exige : si tu redistribues l'app ou le repo, garde ce fichier à côté du
+  © 2022 The Instrument Sans Project Authors, under the
+  [SIL Open Font License 1.1](https://openfontlicense.org). The license ships
+  alongside the font
+  ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), as the OFL
+  requires: if you redistribute the app or the repo, keep that file next to the
   `.ttf`.
-- **Hugeicons** (`chat-gpt.svg`, `claude.svg`) — icônes du set gratuit, sous
-  licence MIT, attribution non requise.
+- **Hugeicons** (`chat-gpt.svg`, `claude.svg`) — icons from the free set, MIT
+  licensed, no attribution required.
 
-Les logos ChatGPT/OpenAI et Claude/Anthropic restent la propriété de leurs
-détenteurs respectifs ; ils sont utilisés ici pour identifier les services
-interrogés, pas pour suggérer une affiliation. Ce projet n'est affilié ni à
-OpenAI ni à Anthropic.
+The ChatGPT/OpenAI and Claude/Anthropic logos remain the property of their
+respective owners; they are used here to identify the services being queried,
+not to imply any affiliation. This project is affiliated with neither OpenAI
+nor Anthropic.
