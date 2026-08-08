@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+Package.resolved
+.DS_Store
+# Profil de préférences local (taste.md), jamais publié
+.commandcode/
+*.xcuserdatad
