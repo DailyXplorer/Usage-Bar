@@ -1,15 +1,9 @@
 import SwiftUI
 
-/// Charge la police Instrument Sans bundlée dans les ressources.
 enum AppTheme {
-    /// Instrument Sans est livrée en fichier variable : une seule face est
-    /// enregistrée (`InstrumentSans-Regular`) et les graisses s'obtiennent via
-    /// l'axe `wght`. Demander « InstrumentSans-SemiBold » par son nom échoue et
-    /// retombe silencieusement sur la police système.
     private static let baseFontName = "InstrumentSans-Regular"
-    private static let weightAxisIdentifier = 2_003_265_652 // 'wght'
+    private static let weightAxisIdentifier = 2_003_265_652
 
-    /// Bundle contenant les ressources (Bundle.module est généré par SwiftPM).
     static var resourceBundle: Bundle {
         if let bundledURL = Bundle.main.url(
             forResource: "UsageBar_UsageBar",
@@ -33,9 +27,6 @@ enum AppTheme {
         }
     }
 
-    /// Logos Hugeicons (`Logos › stroke · rounded`). AppKit rend le SVG nativement,
-    /// donc pas de rastérisation : le tracé reste net à n'importe quelle taille.
-    /// Chargés une seule fois, le libellé étant réévalué à chaque rafraîchissement.
     static let codexLogo: NSImage? = logo(named: "chat-gpt")
     static let claudeLogo: NSImage? = logo(named: "claude")
 
@@ -49,7 +40,6 @@ enum AppTheme {
         return image
     }
 
-    /// Retourne la police Instrument Sans si dispo, sinon le fallback système.
     static func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         guard let nsFont = nsFont(size: size, weight: weight) else {
             return Font.system(size: size, weight: weight)

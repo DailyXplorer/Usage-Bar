@@ -14,7 +14,6 @@ final class UsageModel: ObservableObject {
     @Published private(set) var claudeBuckets: [LimitBucket] = []
     @Published private(set) var claudePlan: String?
     @Published private(set) var claudeErrorMessage: String?
-    /// `false` quand aucune session Claude Code n'existe : la section est masquée.
     @Published private(set) var claudeAvailable = false
 
     private let service = UsageService()
@@ -30,8 +29,6 @@ final class UsageModel: ObservableObject {
         restoreSnapshot()
     }
 
-    /// Réaffiche le dernier état connu avant toute requête : la barre est juste
-    /// dès la première frame, et une relance ne coûte pas un appel réseau.
     private func restoreSnapshot() {
         guard let snapshot = UsageSnapshotStore.load()?.refreshed() else { return }
         buckets = snapshot.codexBuckets
@@ -71,7 +68,6 @@ final class UsageModel: ObservableObject {
     }
 #endif
 
-    /// La barre « All models » de Claude Code, celle qui est épinglée dans la barre de menus.
     var claudeAllModels: LimitBucket? {
         claudeBuckets.first { $0.kind == .weeklyAll } ?? claudeBuckets.first
     }
@@ -81,14 +77,9 @@ final class UsageModel: ObservableObject {
         return "\(bucket.remainingPercent)%"
     }
 
-    /// Toujours une chaîne, jamais `nil` : `MenuBarExtra` fige la hiérarchie de
-    /// vues de son label au premier rendu, donc un segment inséré plus tard par
-    /// un `if` n'apparaîtrait jamais. Seul le contenu d'un `Text` déjà en place
-    /// se rafraîchit.
     var menuBarClaudeDisplay: String {
         menuBarClaudeText ?? "–"
     }
-
 
     var menuBarClaudeAccessibilityText: String? {
         guard let bucket = claudeAllModels else { return nil }
@@ -147,8 +138,6 @@ final class UsageModel: ObservableObject {
         }
     }
 
-    /// `force` = ouverture du popover ou action explicite : on rafraîchit même
-    /// si les données sont encore jeunes, mais jamais pendant un recul 429.
     func refreshNow(force: Bool = false) {
         guard !isLoading else { return }
         if !force, let lastUpdated,
@@ -158,7 +147,6 @@ final class UsageModel: ObservableObject {
 
         isLoading = true
         Task {
-            // Les deux appels partent ensemble : un Codex lent ne retarde pas Claude.
             let codexFetch = Task { try await service.fetchUsage() }
             let claudeFetch = claudeBackoff.isBlocked
                 ? nil
@@ -186,21 +174,16 @@ final class UsageModel: ObservableObject {
                     claudeBuckets = []
                     claudeErrorMessage = nil
                 } catch ClaudeUsageError.throttled {
-                    // On garde les dernières valeurs connues et on espace les tentatives.
                     claudeBackoff.recordThrottle()
                     claudeAvailable = true
                     claudeErrorMessage = ClaudeUsageError.throttled.errorDescription
                 } catch {
-                    // Une session existe (sinon on serait passé par `notSignedIn`) :
-                    // on garde la section visible pour y afficher l'erreur.
                     claudeAvailable = true
                     claudeErrorMessage = error.localizedDescription
                 }
             }
 
             isLoading = false
-            // `lastUpdated` date les données, pas la tentative : un échec ne doit
-            // pas faire passer un état périmé pour frais.
             if succeeded {
                 let now = Date()
                 lastUpdated = now

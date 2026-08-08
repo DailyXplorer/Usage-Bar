@@ -33,9 +33,6 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded.fetchedAt, snapshot.fetchedAt)
     }
 
-    /// Le pourcentage est figé au moment du relevé, mais le compte-à-rebours
-    /// doit repartir de l'heure de reset, sinon une barre relue affiche un
-    /// délai périmé.
     func testCountdownIsRecomputedOnLoad() {
         let resetAt = Date(timeIntervalSince1970: 1_786_402_800)
         let snapshot = UsageSnapshot(

@@ -32,7 +32,6 @@ enum ClaudeUsageError: LocalizedError {
     }
 }
 
-/// Lit les quotas Claude Code : mêmes identifiants et même endpoint que `/usage`.
 actor ClaudeUsageService {
     private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let keychainService = "Claude Code-credentials"
@@ -76,8 +75,6 @@ actor ClaudeUsageService {
         }
     }
 
-    // MARK: - Identifiants
-
     private struct CredentialsFile: Decodable {
         struct OAuth: Decodable {
             let accessToken: String?
@@ -115,10 +112,6 @@ actor ClaudeUsageService {
         )
     }
 
-    /// Claude Code écrit cette entrée via `/usr/bin/security`, donc son ACL ne fait
-    /// confiance qu'à ce binaire. On l'appelle de la même façon : un `SecItemCopyMatching`
-    /// direct déclencherait une demande d'autorisation à chaque lancement.
-    /// `nil` = pas d'entrée lisible, on tentera le fichier.
     private static func keychainData() -> Data? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")

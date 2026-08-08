@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Codable models (mirror of the wham/usage response)
-
 struct UsageResponse: Decodable {
     let planType: String?
     let rateLimit: RateLimitStatus?
@@ -54,23 +52,17 @@ struct RateLimitResetCreditsSummary: Decodable {
     }
 }
 
-// MARK: - Display model
-
 struct LimitBucket: Identifiable, Codable {
     enum Provider: String, Codable {
         case codex, claude
     }
 
     enum Kind: String, Codable {
-        /// Fenêtres Codex.
         case primary, secondary
-        /// Fenêtres Claude Code.
         case session, weeklyAll, weeklyScoped
         case other
     }
 
-    /// Hors persistance : l'identité ne sert qu'au diffing SwiftUI, elle est
-    /// régénérée à la relecture.
     private enum CodingKeys: String, CodingKey {
         case provider, kind, name, usedPercent, resetAt, resetAfterSeconds
         case limitWindowSeconds, reached
@@ -86,21 +78,15 @@ struct LimitBucket: Identifiable, Codable {
     let limitWindowSeconds: Int?
     let reached: Bool
 
-    /// Pourcentage restant (ce que l'utilisateur voit).
     var remainingPercent: Int {
         max(0, min(100, 100 - usedPercent))
     }
 
-    /// Titre de carte. Les libellés Codex arrivent en minuscules (`weekly`, `5h`)
-    /// et ceux de Claude sont déjà formatés — d'où la majuscule initiale seule,
-    /// qui évite un « 5H » disgracieux.
     var displayName: String {
         guard let first = name.first else { return name }
         return String(first).uppercased() + name.dropFirst()
     }
 
-    /// Recalcule le compte-à-rebours depuis `resetAt`, pour une barre relue
-    /// depuis le disque après un délai.
     func recountingReset(from now: Date) -> LimitBucket {
         guard let resetAt else { return self }
         var copy = self
@@ -108,8 +94,6 @@ struct LimitBucket: Identifiable, Codable {
         return copy
     }
 }
-
-// MARK: - Window labeling (same heuristic as the Codex CLI's TUI)
 
 enum WindowLabels {
     static let minutesPerHour: Int = 60

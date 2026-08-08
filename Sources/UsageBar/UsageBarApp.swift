@@ -29,9 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MenuBarLabel: View {
     @ObservedObject var model: UsageModel
 
-    /// Une seule `Image`, structure constante : `MenuBarExtra` fige la hiérarchie
-    /// de vues du label au premier rendu, donc toute vue ajoutée ensuite serait
-    /// ignorée. Seule la valeur de l'image change.
     var body: some View {
         Image(nsImage: MenuBarLabelImage.make(
             codex: model.menuBarText,
@@ -48,4 +45,3 @@ struct MenuBarLabel: View {
         return "\(codex). \(claude)"
     }
 }
-

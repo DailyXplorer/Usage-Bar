@@ -2,7 +2,6 @@ import XCTest
 @testable import UsageBar
 
 final class ClaudeLimitsTests: XCTestCase {
-    /// Extrait réel de `GET /api/oauth/usage` (jetons et champs inutiles retirés).
     private let payload = """
     {
       "five_hour": {"utilization": 12.0, "resets_at": "2026-08-08T23:40:00.397667+00:00"},
@@ -46,7 +45,6 @@ final class ClaudeLimitsTests: XCTestCase {
     }
 
     func testResetCountdownIsRelativeToNow() async throws {
-        // 2026-08-08T23:40:00Z moins deux heures.
         let now = Date(timeIntervalSince1970: 1_786_225_200)
         let buckets = ClaudeLimits.buckets(from: try decode(), now: now)
 

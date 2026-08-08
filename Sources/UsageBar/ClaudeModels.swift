@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Codable models (mirror of api.anthropic.com/api/oauth/usage)
-
 struct ClaudeUsageResponse: Decodable {
     let limits: [ClaudeLimitEntry]?
     let fiveHour: ClaudeWindow?
@@ -16,7 +14,6 @@ struct ClaudeUsageResponse: Decodable {
     }
 }
 
-/// Une entrée du tableau `limits` : c'est ce que Claude Code affiche dans `/usage`.
 struct ClaudeLimitEntry: Decodable {
     struct Scope: Decodable {
         struct Model: Decodable {
@@ -30,10 +27,8 @@ struct ClaudeLimitEntry: Decodable {
         let model: Model?
     }
 
-    /// `session`, `weekly_all` ou `weekly_scoped`.
     let kind: String?
     let group: String?
-    /// Pourcentage consommé, de 0 à 100.
     let percent: Double?
     let severity: String?
     let resetsAt: String?
@@ -48,7 +43,6 @@ struct ClaudeLimitEntry: Decodable {
 }
 
 struct ClaudeWindow: Decodable {
-    /// Pourcentage consommé, de 0 à 100 (même échelle que `percent`).
     let utilization: Double?
     let resetsAt: String?
 
@@ -58,15 +52,11 @@ struct ClaudeWindow: Decodable {
     }
 }
 
-// MARK: - Mapping vers le modèle d'affichage partagé
-
 enum ClaudeLimits {
     static let sessionKind = "session"
     static let weeklyAllKind = "weekly_all"
     static let weeklyScopedKind = "weekly_scoped"
 
-    /// Convertit la réponse d'usage en barres, dans l'ordre de `/usage` :
-    /// session, semaine tous modèles, puis semaine du modèle épinglé.
     static func buckets(from response: ClaudeUsageResponse, now: Date = Date()) -> [LimitBucket] {
         let entries = response.limits ?? []
         if entries.isEmpty {
@@ -93,7 +83,6 @@ enum ClaudeLimits {
         )
     }
 
-    /// Repli si le backend ne renvoie que l'ancienne forme (`five_hour`, `seven_day`, …).
     private static func fallbackBuckets(from response: ClaudeUsageResponse, now: Date) -> [LimitBucket] {
         let windows: [(String, ClaudeWindow?)] = [
             (sessionKind, response.fiveHour),
@@ -170,12 +159,7 @@ enum ClaudeLimits {
     }
 }
 
-// MARK: - Dates
-
 enum ISODate {
-    /// Le backend renvoie des fractions de seconde à 6 chiffres
-    /// (`2026-08-08T23:40:00.397667+00:00`), que `ISO8601DateFormatter` ne digère
-    /// pas toujours : on retombe alors sur la même date sans la fraction.
     static func parse(_ value: String?) -> Date? {
         guard let value, !value.isEmpty else { return nil }
 

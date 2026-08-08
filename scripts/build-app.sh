@@ -8,9 +8,6 @@ macos_path="$contents_path/MacOS"
 resources_path="$contents_path/Resources"
 
 cd "$project_dir"
-# Le bundle de ressources généré garde les fichiers supprimés d'une build à
-# l'autre, et `ditto` fusionne au lieu de remplacer : sans ce nettoyage, une
-# ressource retirée des sources reste embarquée dans le .app.
 rm -rf "$(swift build -c release --show-bin-path)/UsageBar_UsageBar.bundle"
 swift build -c release
 release_path=$(swift build -c release --show-bin-path)

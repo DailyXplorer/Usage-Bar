@@ -1,10 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// `MenuBarExtra` ne rend qu'une image et un texte dans son label : impossible d'y
-/// poser deux logos côte à côte, et une image interpolée dans un `Text` est
-/// supprimée. On compose donc le libellé entier — logo, valeur, logo, valeur —
-/// hors écran, et on ne remet qu'une seule `Image` template à la barre.
 @MainActor
 enum MenuBarLabelImage {
     static let iconSize: CGFloat = 12
@@ -27,7 +23,6 @@ enum MenuBarLabelImage {
         guard let image = renderer.nsImage else {
             return NSImage(size: NSSize(width: 1, height: 1))
         }
-        // Template : la barre de menus le teinte elle-même selon le thème.
         image.isTemplate = true
         return image
     }

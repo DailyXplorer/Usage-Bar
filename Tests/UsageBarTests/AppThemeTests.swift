@@ -4,9 +4,6 @@ import XCTest
 @testable import UsageBar
 
 final class AppThemeTests: XCTestCase {
-    /// Garde-fou : Instrument Sans est un fichier variable, donc demander
-    /// « InstrumentSans-SemiBold » par son nom retombe en silence sur la police
-    /// système. Chaque graisse doit rester dans la famille Instrument Sans.
     func testEveryWeightStaysInInstrumentSans() throws {
         AppTheme.loadFont()
 

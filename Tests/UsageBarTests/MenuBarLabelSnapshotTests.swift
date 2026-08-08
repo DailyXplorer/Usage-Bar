@@ -22,8 +22,6 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         XCTAssertTrue(label.isTemplate)
         XCTAssertGreaterThan(label.size.width, MenuBarLabelImage.iconSize * 2)
 
-        // Les deux valeurs doivent bien atteindre le rendu : à valeurs
-        // différentes, pixels différents.
         let other = MenuBarLabelImage.make(codex: "12%", claude: "34%")
         XCTAssertNotEqual(label.tiffRepresentation, other.tiffRepresentation)
 
@@ -33,8 +31,6 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         )
     }
 
-    /// Sans session Claude, le segment reste en place avec un tiret : sa
-    /// hiérarchie doit exister dès le premier rendu pour pouvoir se remplir.
     @MainActor
     func testClaudeSegmentKeepsItsPlaceWithoutData() {
         let model = UsageModel(
