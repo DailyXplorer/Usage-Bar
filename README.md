@@ -112,3 +112,24 @@ swift build
 - Le jeton Claude est rafraîchi par Claude Code lui-même. S'il a expiré et que
   Claude Code n'a pas tourné depuis longtemps, la section affiche « Jeton Claude
   expiré » jusqu'à la prochaine ouverture de Claude Code.
+
+## Licence
+
+Le code de ce projet est sous licence **MIT** — voir [LICENSE](LICENSE).
+
+Les ressources tierces embarquées gardent la leur :
+
+- **Instrument Sans** (`Sources/UsageBar/Resources/Fonts/InstrumentSans.ttf`) —
+  © 2022 The Instrument Sans Project Authors, sous
+  [SIL Open Font License 1.1](https://openfontlicense.org). La licence est
+  distribuée avec la police
+  ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), comme l'OFL
+  l'exige : si tu redistribues l'app ou le repo, garde ce fichier à côté du
+  `.ttf`.
+- **Hugeicons** (`chat-gpt.svg`, `claude.svg`) — icônes du set gratuit, sous
+  licence MIT, attribution non requise.
+
+Les logos ChatGPT/OpenAI et Claude/Anthropic restent la propriété de leurs
+détenteurs respectifs ; ils sont utilisés ici pour identifier les services
+interrogés, pas pour suggérer une affiliation. Ce projet n'est affilié ni à
+OpenAI ni à Anthropic.
