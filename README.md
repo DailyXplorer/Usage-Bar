@@ -1,7 +1,7 @@
 # UsageBar
 
 Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan) and
-**Claude Code** (Anthropic plan) usage limits at a glance: **percentage
+**Claude Code** (Anthropic plan) usage limits: **percentage
 remaining** and time until reset.
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99%` — the Codex primary
