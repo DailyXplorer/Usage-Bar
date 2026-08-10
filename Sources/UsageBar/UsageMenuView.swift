@@ -13,6 +13,7 @@ struct UsageMenuView: View {
         }
         .frame(width: 304)
         .background(.regularMaterial)
+        .background(MenuWindowEdgeInset())
         .environment(\.font, AppTheme.font(size: 13))
         .onAppear {
             model.refreshNow()
