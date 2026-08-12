@@ -47,49 +47,39 @@ struct UsageMenuView: View {
         if model.isLoading && !hasAnyBucket {
             LoadingView()
         } else if !hasAnyBucket {
-            ErrorView(message: model.errorMessage ?? "No usage limits were returned.") {
+            ErrorView(message: model.visibleEmptyStateMessage) {
                 model.refreshNow(force: true)
             }
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if model.isVisibleInMenuBar(.codex) {
-                        ProviderSection(
-                            title: "Codex",
-                            plan: model.planType,
-                            buckets: model.buckets,
-                            message: model.errorMessage ?? (model.buckets.isEmpty ? "Codex returned no limits." : nil)
-                        )
-                    }
-
-                    if model.isVisibleInMenuBar(.claude) {
-                        ProviderSection(
-                            title: "Claude Code",
-                            plan: model.claudePlan,
-                            buckets: model.claudeBuckets,
-                            message: model.claudeErrorMessage
-                                ?? (model.claudeAvailable || model.isLoading
-                                    ? nil
-                                    : "No Claude Code session. Run `claude`, then `/login`.")
-                        )
-                    }
-
-                    if model.isVisibleInMenuBar(.cursor) {
-                        ProviderSection(
-                            title: "Cursor",
-                            plan: model.cursorPlan,
-                            buckets: model.cursorBuckets,
-                            message: model.cursorErrorMessage
-                                ?? (model.cursorAvailable || model.isLoading
-                                    ? nil
-                                    : "No Cursor session. Open Cursor and sign in.")
-                        )
-                    }
+            VStack(alignment: .leading, spacing: 14) {
+                if model.isVisibleInMenuBar(.codex) {
+                    ProviderSection(
+                        title: "Codex",
+                        plan: model.planType,
+                        buckets: model.buckets,
+                        message: model.sectionMessage(for: .codex)
+                    )
                 }
-                .padding(12)
+
+                if model.isVisibleInMenuBar(.claude) {
+                    ProviderSection(
+                        title: "Claude Code",
+                        plan: model.claudePlan,
+                        buckets: model.claudeBuckets,
+                        message: model.sectionMessage(for: .claude)
+                    )
+                }
+
+                if model.isVisibleInMenuBar(.cursor) {
+                    ProviderSection(
+                        title: "Cursor",
+                        plan: model.cursorPlan,
+                        buckets: model.cursorBuckets,
+                        message: model.sectionMessage(for: .cursor)
+                    )
+                }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: 560)
+            .padding(12)
         }
     }
 
