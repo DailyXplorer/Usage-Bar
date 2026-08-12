@@ -98,12 +98,13 @@ struct UsageMenuView: View {
 
             Spacer()
 
-            SettingsFooterButton()
+            HStack(spacing: 4) {
+                SettingsFooterButton()
 
-            Button("Quit") {
-                NSApp.terminate(nil)
+                FooterIconButton(systemImage: "power", accessibilityLabel: "Quit") {
+                    NSApp.terminate(nil)
+                }
             }
-            .buttonStyle(FooterButtonStyle())
         }
         .padding(.horizontal, 16)
         .frame(height: 40)
@@ -320,22 +321,36 @@ private struct SettingsFooterButton: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Button("Settings…") {
+        FooterIconButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             openSettings()
         }
+    }
+}
+
+private struct FooterIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .symbolRenderingMode(.monochrome)
+        }
         .buttonStyle(FooterButtonStyle())
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
 private struct FooterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(AppTheme.font(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
+            .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .background(
                 Color.primary.opacity(configuration.isPressed ? 0.08 : 0),
