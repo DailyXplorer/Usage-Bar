@@ -1,20 +1,25 @@
 import AppKit
 import SwiftUI
 
+struct MenuBarSegment {
+    let logo: NSImage?
+    let value: String
+}
+
 @MainActor
 enum MenuBarLabelImage {
     static let iconSize: CGFloat = 12
     static let fontSize: CGFloat = 12
 
-    static func make(codex: String, claude: String) -> NSImage {
+    static func make(segments: [MenuBarSegment]) -> NSImage {
         let content = HStack(spacing: 0) {
-            logo(AppTheme.codexLogo)
-            value(codex)
-                .padding(.leading, 4)
-            logo(AppTheme.claudeLogo)
-                .padding(.leading, 7)
-            value(claude)
-                .padding(.leading, 4)
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                HStack(spacing: 4) {
+                    logo(segment.logo)
+                    value(segment.value)
+                }
+                .padding(.leading, index == 0 ? 0 : 7)
+            }
         }
         .foregroundStyle(.black)
 
@@ -25,6 +30,13 @@ enum MenuBarLabelImage {
         }
         image.isTemplate = true
         return image
+    }
+
+    static func make(codex: String, claude: String) -> NSImage {
+        make(segments: [
+            MenuBarSegment(logo: AppTheme.codexLogo, value: codex),
+            MenuBarSegment(logo: AppTheme.claudeLogo, value: claude),
+        ])
     }
 
     @ViewBuilder

@@ -17,6 +17,11 @@ struct UsageBarApp: App {
             MenuBarLabel(model: usageModel)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView()
+                .environmentObject(usageModel)
+        }
     }
 }
 
@@ -24,24 +29,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        false
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeKey }
+        if !hasVisibleWindow {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
 }
 
 struct MenuBarLabel: View {
     @ObservedObject var model: UsageModel
 
     var body: some View {
-        Image(nsImage: MenuBarLabelImage.make(
-            codex: model.menuBarText,
-            claude: model.menuBarClaudeDisplay
-        ))
+        Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
+        .id(model.menuBarSegments.map(\.value).joined(separator: "|"))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(model.menuBarAccessibilityLabel)
         .onAppear { model.start() }
-    }
-
-    private var accessibilityLabel: String {
-        let codex = "Codex limits, \(model.menuBarAccessibilityText)"
-        guard let claude = model.menuBarClaudeAccessibilityText else { return codex }
-        return "\(codex). \(claude)"
     }
 }
