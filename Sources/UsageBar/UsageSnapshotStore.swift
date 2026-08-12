@@ -5,13 +5,68 @@ struct UsageSnapshot: Codable {
     var codexPlan: String?
     var claudeBuckets: [LimitBucket] = []
     var claudePlan: String?
+    var cursorBuckets: [LimitBucket] = []
+    var cursorPlan: String?
     var fetchedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case codexBuckets, codexPlan, claudeBuckets, claudePlan
+        case cursorBuckets, cursorPlan, fetchedAt
+    }
+
+    init(
+        codexBuckets: [LimitBucket] = [],
+        codexPlan: String? = nil,
+        claudeBuckets: [LimitBucket] = [],
+        claudePlan: String? = nil,
+        cursorBuckets: [LimitBucket] = [],
+        cursorPlan: String? = nil,
+        fetchedAt: Date
+    ) {
+        self.codexBuckets = codexBuckets
+        self.codexPlan = codexPlan
+        self.claudeBuckets = claudeBuckets
+        self.claudePlan = claudePlan
+        self.cursorBuckets = cursorBuckets
+        self.cursorPlan = cursorPlan
+        self.fetchedAt = fetchedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        codexBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .codexBuckets) ?? []
+        codexPlan = try container.decodeIfPresent(String.self, forKey: .codexPlan)
+        claudeBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .claudeBuckets) ?? []
+        claudePlan = try container.decodeIfPresent(String.self, forKey: .claudePlan)
+        cursorBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .cursorBuckets) ?? []
+        cursorPlan = try container.decodeIfPresent(String.self, forKey: .cursorPlan)
+        fetchedAt = try container.decode(Date.self, forKey: .fetchedAt)
+    }
 
     func refreshed(now: Date = Date()) -> UsageSnapshot {
         var copy = self
         copy.codexBuckets = codexBuckets.map { $0.recountingReset(from: now) }
         copy.claudeBuckets = claudeBuckets.map { $0.recountingReset(from: now) }
+        copy.cursorBuckets = cursorBuckets.map { $0.recountingReset(from: now) }
         return copy
+    }
+}
+
+enum MenuBarPreferences {
+    static let key = "menuBarProviders"
+    static let defaultProviders: [LimitBucket.Provider] = [.codex, .claude]
+
+    static func load(from defaults: UserDefaults = .standard) -> Set<LimitBucket.Provider> {
+        guard let raw = defaults.array(forKey: key) as? [String] else {
+            return Set(defaultProviders)
+        }
+        let parsed = raw.compactMap(LimitBucket.Provider.init(rawValue:))
+        return parsed.isEmpty ? Set(defaultProviders) : Set(parsed)
+    }
+
+    static func save(_ providers: Set<LimitBucket.Provider>, to defaults: UserDefaults = .standard) {
+        let ordered = LimitBucket.Provider.allCases.filter { providers.contains($0) }
+        defaults.set(ordered.map(\.rawValue), forKey: key)
     }
 }
 

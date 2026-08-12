@@ -22,6 +22,20 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let snapshot = UsageSnapshot(
             claudeBuckets: [bucket(resetAt: Date(timeIntervalSince1970: 1_786_402_800), resetAfterSeconds: 600)],
             claudePlan: "max",
+            cursorBuckets: [
+                LimitBucket(
+                    provider: .cursor,
+                    kind: .cursorModels,
+                    name: "Cursor Models",
+                    usedPercent: 12,
+                    resetAt: Date(timeIntervalSince1970: 1_789_244_447),
+                    resetAfterSeconds: 600,
+                    limitWindowSeconds: 2_678_400,
+                    reached: false,
+                    detail: CursorLimits.modelsDetail
+                )
+            ],
+            cursorPlan: "pro",
             fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
         )
         UsageSnapshotStore.save(snapshot, to: defaults)
@@ -30,7 +44,41 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded.claudePlan, "max")
         XCTAssertEqual(loaded.claudeBuckets.count, 1)
         XCTAssertEqual(loaded.claudeBuckets[0].remainingPercent, 99)
+        XCTAssertEqual(loaded.cursorPlan, "pro")
+        XCTAssertEqual(loaded.cursorBuckets[0].remainingPercent, 88)
+        XCTAssertEqual(loaded.cursorBuckets[0].detail, CursorLimits.modelsDetail)
         XCTAssertEqual(loaded.fetchedAt, snapshot.fetchedAt)
+    }
+
+    func testLegacySnapshotWithoutCursorStillDecodes() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+
+        let legacy = UsageSnapshot(
+            claudeBuckets: [bucket(resetAt: Date(timeIntervalSince1970: 1_786_402_800), resetAfterSeconds: 600)],
+            claudePlan: "max",
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+        let data = try JSONEncoder().encode(legacy)
+        var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        object.removeValue(forKey: "cursorBuckets")
+        object.removeValue(forKey: "cursorPlan")
+        defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: "lastUsageSnapshot")
+
+        let loaded = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
+        XCTAssertTrue(loaded.cursorBuckets.isEmpty)
+        XCTAssertNil(loaded.cursorPlan)
+        XCTAssertEqual(loaded.claudePlan, "max")
+    }
+
+    func testMenuBarPreferencesDefaultToCodexAndClaude() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+
+        XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .claude])
+
+        MenuBarPreferences.save([.cursor, .codex], to: defaults)
+        XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .cursor])
     }
 
     func testCountdownIsRecomputedOnLoad() {

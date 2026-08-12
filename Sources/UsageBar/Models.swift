@@ -53,19 +53,38 @@ struct RateLimitResetCreditsSummary: Decodable {
 }
 
 struct LimitBucket: Identifiable, Codable {
-    enum Provider: String, Codable {
-        case codex, claude
+    enum Provider: String, Codable, CaseIterable, Identifiable {
+        case codex, claude, cursor
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .codex: return "Codex"
+            case .claude: return "Claude"
+            case .cursor: return "Cursor"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .codex: return "ChatGPT plan limits"
+            case .claude: return "Claude Code plan limits"
+            case .cursor: return "Grok, Composer and other models"
+            }
+        }
     }
 
     enum Kind: String, Codable {
         case primary, secondary
         case session, weeklyAll, weeklyScoped
+        case cursorModels, otherModels
         case other
     }
 
     private enum CodingKeys: String, CodingKey {
         case provider, kind, name, usedPercent, resetAt, resetAfterSeconds
-        case limitWindowSeconds, reached
+        case limitWindowSeconds, reached, detail
     }
 
     let id = UUID()
@@ -77,6 +96,55 @@ struct LimitBucket: Identifiable, Codable {
     var resetAfterSeconds: Int?
     let limitWindowSeconds: Int?
     let reached: Bool
+    let detail: String?
+
+    init(
+        provider: Provider = .codex,
+        kind: Kind,
+        name: String,
+        usedPercent: Int,
+        resetAt: Date?,
+        resetAfterSeconds: Int?,
+        limitWindowSeconds: Int?,
+        reached: Bool,
+        detail: String? = nil
+    ) {
+        self.provider = provider
+        self.kind = kind
+        self.name = name
+        self.usedPercent = usedPercent
+        self.resetAt = resetAt
+        self.resetAfterSeconds = resetAfterSeconds
+        self.limitWindowSeconds = limitWindowSeconds
+        self.reached = reached
+        self.detail = detail
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(Provider.self, forKey: .provider) ?? .codex
+        kind = try container.decode(Kind.self, forKey: .kind)
+        name = try container.decode(String.self, forKey: .name)
+        usedPercent = try container.decode(Int.self, forKey: .usedPercent)
+        resetAt = try container.decodeIfPresent(Date.self, forKey: .resetAt)
+        resetAfterSeconds = try container.decodeIfPresent(Int.self, forKey: .resetAfterSeconds)
+        limitWindowSeconds = try container.decodeIfPresent(Int.self, forKey: .limitWindowSeconds)
+        reached = try container.decode(Bool.self, forKey: .reached)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(usedPercent, forKey: .usedPercent)
+        try container.encodeIfPresent(resetAt, forKey: .resetAt)
+        try container.encodeIfPresent(resetAfterSeconds, forKey: .resetAfterSeconds)
+        try container.encodeIfPresent(limitWindowSeconds, forKey: .limitWindowSeconds)
+        try container.encode(reached, forKey: .reached)
+        try container.encodeIfPresent(detail, forKey: .detail)
+    }
 
     var remainingPercent: Int {
         max(0, min(100, 100 - usedPercent))
