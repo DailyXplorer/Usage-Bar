@@ -65,14 +65,6 @@ struct LimitBucket: Identifiable, Codable {
             case .cursor: return "Cursor"
             }
         }
-
-        var subtitle: String {
-            switch self {
-            case .codex: return "ChatGPT plan limits"
-            case .claude: return "Claude Code plan limits"
-            case .cursor: return "Grok, Composer and other models"
-            }
-        }
     }
 
     enum Kind: String, Codable {

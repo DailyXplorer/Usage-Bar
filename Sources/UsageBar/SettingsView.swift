@@ -16,13 +16,8 @@ struct SettingsView: View {
                 ForEach(LimitBucket.Provider.allCases) { provider in
                     Toggle(isOn: visibility(for: provider)) {
                         Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(provider.title)
-                                    .font(AppTheme.font(size: 13, weight: .medium))
-                                Text(provider.subtitle)
-                                    .font(AppTheme.font(size: 11))
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(provider.title)
+                                .font(AppTheme.font(size: 13, weight: .medium))
                         } icon: {
                             SettingsProviderIcon(provider: provider)
                         }
@@ -38,13 +33,8 @@ struct SettingsView: View {
             Section {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Launch at login")
-                                .font(AppTheme.font(size: 13, weight: .medium))
-                            Text("Open automatically when you log in")
-                                .font(AppTheme.font(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("Launch at login")
+                            .font(AppTheme.font(size: 13, weight: .medium))
                     } icon: {
                         SettingsSymbolIcon(systemName: "power")
                     }
@@ -72,10 +62,12 @@ struct SettingsView: View {
                             Text("Version \(updater.currentVersion)")
                                 .font(AppTheme.font(size: 13, weight: .medium))
                                 .monospacedDigit()
-                            Text(updater.statusLine)
-                                .font(AppTheme.font(size: 11))
-                                .foregroundStyle(statusColor)
-                                .fixedSize(horizontal: false, vertical: true)
+                            if let statusLine = updater.statusLine {
+                                Text(statusLine)
+                                    .font(AppTheme.font(size: 11))
+                                    .foregroundStyle(statusColor)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     } icon: {
                         SettingsSymbolIcon(systemName: "arrow.clockwise")
@@ -99,24 +91,14 @@ struct SettingsView: View {
                 }
 
                 Toggle(isOn: $updater.automaticallyChecks) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Check automatically")
-                            .font(AppTheme.font(size: 13, weight: .medium))
-                        Text("Look for GitHub releases once a day")
-                            .font(AppTheme.font(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Check automatically")
+                        .font(AppTheme.font(size: 13, weight: .medium))
                 }
                 .toggleStyle(.switch)
 
                 Toggle(isOn: $updater.automaticallyInstalls) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Install automatically")
-                            .font(AppTheme.font(size: 13, weight: .medium))
-                        Text("Replace the app in Applications when a release is published")
-                            .font(AppTheme.font(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Install automatically")
+                        .font(AppTheme.font(size: 13, weight: .medium))
                 }
                 .toggleStyle(.switch)
             } header: {
