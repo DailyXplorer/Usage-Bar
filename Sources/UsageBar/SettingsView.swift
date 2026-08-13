@@ -33,8 +33,6 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Visible plans")
-            } footer: {
-                Text("These plans appear in the menu bar and in the popover. Cursor in the menu bar shows the Grok and Composer pool.")
             }
 
             Section {
@@ -62,7 +60,9 @@ struct SettingsView: View {
             } header: {
                 Text("General")
             } footer: {
-                Text(launchAtLogin.footer)
+                if let footer = launchAtLogin.footer {
+                    Text(footer)
+                }
             }
 
             Section {
@@ -123,8 +123,6 @@ struct SettingsView: View {
                 .toggleStyle(.switch)
             } header: {
                 Text("Updates")
-            } footer: {
-                Text("Updates are GitHub releases. Release notes include merged pull requests.")
             }
         }
         .formStyle(.grouped)
