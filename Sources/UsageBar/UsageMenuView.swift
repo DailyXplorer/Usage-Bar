@@ -235,7 +235,6 @@ private struct LimitCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(AppTheme.cardFill(colorScheme: colorScheme))
         }
-        .shadow(color: AppTheme.ink(colorScheme: colorScheme).opacity(0.08), radius: 0, x: 0, y: 0)
         .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(bucket.displayName), \(bucket.remainingPercent) percent left")
@@ -359,9 +358,17 @@ private struct FooterIconButton: View {
 }
 
 private struct FooterButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        FooterButtonBody(configuration: configuration)
+    }
+}
+
+private struct FooterButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+
     @Environment(\.colorScheme) private var colorScheme
 
-    func makeBody(configuration: Configuration) -> some View {
+    var body: some View {
         configuration.label
             .appSecondaryLabelStyle()
             .frame(width: 28, height: 28)
