@@ -3,22 +3,28 @@ import SwiftUI
 
 struct MenuWindowEdgeInset: NSViewRepresentable {
     var margin: CGFloat = 8
+    var onBecomeKey: () -> Void = {}
 
     func makeNSView(context: Context) -> NSView {
-        EdgeInsetView(margin: margin)
+        let view = EdgeInsetView(margin: margin)
+        view.onBecomeKey = onBecomeKey
+        return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let view = nsView as? EdgeInsetView else { return }
         view.margin = margin
+        view.onBecomeKey = onBecomeKey
         view.applyMargin()
     }
 }
 
 private final class EdgeInsetView: NSView {
     var margin: CGFloat
+    var onBecomeKey: (() -> Void)?
     private var isAdjusting = false
     private var moveObserver: NSObjectProtocol?
+    private var keyObserver: NSObjectProtocol?
 
     init(margin: CGFloat) {
         self.margin = margin
@@ -34,6 +40,9 @@ private final class EdgeInsetView: NSView {
         if let moveObserver {
             NotificationCenter.default.removeObserver(moveObserver)
         }
+        if let keyObserver {
+            NotificationCenter.default.removeObserver(keyObserver)
+        }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -47,6 +56,10 @@ private final class EdgeInsetView: NSView {
             NotificationCenter.default.removeObserver(moveObserver)
             self.moveObserver = nil
         }
+        if let keyObserver {
+            NotificationCenter.default.removeObserver(keyObserver)
+            self.keyObserver = nil
+        }
 
         guard let window else { return }
 
@@ -57,8 +70,18 @@ private final class EdgeInsetView: NSView {
         ) { [weak self] _ in
             self?.applyMargin()
         }
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.onBecomeKey?()
+        }
 
         applyMargin()
+        if window.isKeyWindow {
+            onBecomeKey?()
+        }
     }
 
     func applyMargin() {

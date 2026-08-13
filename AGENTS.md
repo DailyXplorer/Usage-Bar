@@ -121,7 +121,8 @@ broken. If you must, generate both files together and keep the exact
 
 - New installs: inspected installer script or the zip from that release, into
   Applications.
-- Existing installs: daily GitHub check (auto-install requires opt-in), or the
+- Existing installs: GitHub check each time the menu opens, plus a throttled
+  daily check on launch (auto-install requires opt-in), or the
   **Check for Updates** / **Install x.y.z** button, with those PR notes in
   Settings.
 
