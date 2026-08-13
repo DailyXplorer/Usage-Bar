@@ -69,10 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideDockIconIfNoSettingsWindow() {
         let hasSettingsWindow = NSApp.windows.contains { window in
-            window.isVisible
-                && !(window is NSPanel)
-                && window.canBecomeMain
-                && window.styleMask.contains(.titled)
+            window.isVisible && SettingsWindowPresenter.isSettingsWindow(window)
         }
         if !hasSettingsWindow {
             NSApp.setActivationPolicy(.accessory)

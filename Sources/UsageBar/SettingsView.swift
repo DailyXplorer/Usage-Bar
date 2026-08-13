@@ -130,6 +130,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 448)
         .environment(\.font, AppTheme.font(size: 13))
+        .background(SettingsWindowSpacePin())
         .onAppear {
             launchAtLogin.refresh()
         }
