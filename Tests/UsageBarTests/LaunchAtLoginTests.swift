@@ -46,19 +46,6 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     @MainActor
-    func testUnknownBundleStillAllowsToggling() {
-        let service = MockLaunchAtLoginService(status: .notFound)
-        let model = LaunchAtLoginModel(service: service)
-
-        XCTAssertFalse(model.isEnabled)
-        XCTAssertEqual(
-            model.footer,
-            "Usage Bar starts in the menu bar after you log in to this Mac."
-        )
-        XCTAssertEqual(model.accessibilityHint, "Start Usage Bar when you log in to this Mac")
-    }
-
-    @MainActor
     func testFailureKeepsCurrentStatusAndShowsTheError() {
         let service = MockLaunchAtLoginService(status: .notRegistered)
         service.errorToThrow = SimpleError("Could not register login item")
@@ -344,6 +331,40 @@ final class LaunchAtLoginTests: XCTestCase {
 
         XCTAssertFalse(defaults.bool(forKey: AppInstallLocation.pendingKey))
         XCTAssertTrue(store.isInstalled)
+    }
+
+    func testPendingEnableSurvivesAnotherRequiredRelaunch() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = root.appendingPathComponent("Downloaded/UsageBar.app")
+        let destination = root.appendingPathComponent("Applications/UsageBar.app")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: source.appendingPathComponent("Contents"),
+            withIntermediateDirectories: true
+        )
+        try Data("ok".utf8).write(to: source.appendingPathComponent("Contents/Info.plist"))
+        let defaultsName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defaults.removePersistentDomain(forName: defaultsName)
+        defaults.set(true, forKey: AppInstallLocation.pendingKey)
+
+        var relaunched: URL?
+        let location = AppInstallLocation(
+            destination: destination,
+            runningBundle: { source },
+            relaunch: { relaunched = $0 }
+        )
+
+        SMAppServiceLaunchAtLogin.completePendingIfNeeded(defaults: defaults) {
+            SMAppServiceLaunchAtLogin(
+                agent: LaunchAgentStore(home: root),
+                installLocation: location,
+                defaults: defaults
+            )
+        }
+
+        XCTAssertTrue(defaults.bool(forKey: AppInstallLocation.pendingKey))
+        XCTAssertEqual(relaunched?.path, destination.path)
     }
 
     func testPendingEnableIsRetainedWhenRegistrationFails() throws {

@@ -37,7 +37,7 @@ bar only — no Dock icon.
 If macOS refuses the first launch (ad-hoc signature), in Finder:
 **right-click → Open**.
 
-### Option 2 — verified installer script
+### Option 2 — checksum-verified installer script
 
 ```sh
 curl -fsSLo UsageBar-install.sh https://raw.githubusercontent.com/DailyXplorer/Usage-Bar/main/scripts/install.sh
@@ -47,9 +47,11 @@ rm UsageBar-install.sh
 ```
 
 Inspect the downloaded script before running it. It verifies the release
-SHA-256 file, bundle identifier, executable name, and ad-hoc code signature,
-then stages the replacement in Applications before launching it. It stops a
-running Usage Bar first, so installation cannot leave two menu bar instances.
+tag once, downloads both assets from that exact tagged release, then checks the
+SHA-256 file, bundle identifier, executable name, and ad-hoc code signature. It
+stages the replacement in Applications with rollback before launching it and
+stops a running Usage Bar first, so installation cannot leave two menu bar
+instances.
 
 ### After install
 
@@ -172,10 +174,11 @@ capture time, but countdowns are recomputed from the reset time when read back.
 
 - The app runs as an accessory agent: no Dock icon, menu bar only.
 - Before installation, the archive must match the SHA-256 published beside it,
-  and code-signing verification checks the extracted app’s integrity. Both
-  files still come from the same GitHub release, and the signature is ad hoc
-  rather than a Developer ID, so GitHub remains the trusted distribution
-  channel.
+  both asset URLs must belong to the same tagged Usage Bar release, and
+  code-signing verification checks the extracted app’s integrity. The
+  signature is ad hoc, not a Developer ID identity: it does not authenticate a
+  publisher. GitHub over HTTPS and the installer script you inspect remain the
+  trusted distribution channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
   api.anthropic.com and api2.cursor.sh, identical to the ones the CLIs and
   Cursor itself make, and the optional GitHub Releases check for updates.

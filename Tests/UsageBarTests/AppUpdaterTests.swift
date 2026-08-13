@@ -15,6 +15,7 @@ final class AppUpdaterTests: XCTestCase {
         XCTAssertLessThan(AppVersion("1.3.0-beta.2"), AppVersion("1.3.0"))
         XCTAssertLessThan(AppVersion("1.3.0-1"), AppVersion("1.3.0-beta"))
         XCTAssertEqual(AppVersion("1.3.0+build.1"), AppVersion("1.3.0+build.2"))
+        XCTAssertEqual(AppVersion("v1.3.0+build.42").description, "1.3.0")
     }
 
     func testGitHubReleaseDecodesNotesAndZipAsset() throws {
@@ -41,6 +42,7 @@ final class AppUpdaterTests: XCTestCase {
         XCTAssertEqual(release.versionString, "1.2.0")
         XCTAssertEqual(release.zipAsset?.name, "UsageBar.app.zip")
         XCTAssertEqual(release.checksumAsset?.name, "UsageBar.app.zip.sha256")
+        XCTAssertTrue(release.assetsAreTrusted)
         XCTAssertTrue(release.displayNotes?.contains("pull/12") == true)
     }
 
@@ -126,6 +128,60 @@ final class AppUpdaterTests: XCTestCase {
         }
 
         XCTAssertNil(updater.availableRelease)
+    }
+
+    @MainActor
+    func testCheckRejectsAssetsOutsideTheExpectedRelease() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        let release = GitHubRelease(
+            tagName: "v1.4.0",
+            name: "1.4.0",
+            body: nil,
+            htmlURL: "https://github.com/DailyXplorer/Usage-Bar/releases/tag/v1.4.0",
+            assets: [
+                GitHubRelease.Asset(
+                    name: AppDistribution.assetName,
+                    browserDownloadURL: URL(string: "https://example.com/UsageBar.app.zip")!
+                ),
+                GitHubRelease.Asset(
+                    name: AppDistribution.checksumAssetName,
+                    browserDownloadURL: URL(string: "https://example.com/UsageBar.app.zip.sha256")!
+                ),
+            ]
+        )
+        let updater = AppUpdater(
+            client: MockGitHub(release: release),
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkForUpdates(force: true)
+        await waitForState(updater) {
+            $0 == .failed(UpdateError.untrustedAsset.localizedDescription)
+        }
+
+        XCTAssertNil(updater.availableRelease)
+    }
+
+    @MainActor
+    func testFailedCheckStillThrottlesTheNextAutomaticAttempt() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        let updater = AppUpdater(
+            client: FailingGitHub(),
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkForUpdates(force: true)
+        await waitForState(updater) {
+            $0 == .failed(UpdateError.network("offline").localizedDescription)
+        }
+
+        XCTAssertNotNil(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date)
     }
 
     @MainActor
@@ -324,11 +380,17 @@ final class AppUpdaterTests: XCTestCase {
             assets: [
                 GitHubRelease.Asset(
                     name: "UsageBar.app.zip",
-                    browserDownloadURL: URL(string: "https://example.com/UsageBar.app.zip")!
+                    browserDownloadURL: AppDistribution.trustedAssetURL(
+                        named: AppDistribution.assetName,
+                        releaseTag: tag
+                    )!
                 ),
                 GitHubRelease.Asset(
                     name: "UsageBar.app.zip.sha256",
-                    browserDownloadURL: URL(string: "https://example.com/UsageBar.app.zip.sha256")!
+                    browserDownloadURL: AppDistribution.trustedAssetURL(
+                        named: AppDistribution.checksumAssetName,
+                        releaseTag: tag
+                    )!
                 )
             ]
         )
@@ -381,6 +443,12 @@ private final class MockGitHub: GitHubReleasing {
     func latestRelease() async throws -> GitHubRelease {
         callCount += 1
         return release
+    }
+}
+
+private struct FailingGitHub: GitHubReleasing {
+    func latestRelease() async throws -> GitHubRelease {
+        throw UpdateError.network("offline")
     }
 }
 

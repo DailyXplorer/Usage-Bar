@@ -1,4 +1,3 @@
-import AppKit
 import Combine
 import Foundation
 import ServiceManagement
@@ -7,7 +6,11 @@ enum LaunchAtLoginStatus: Equatable {
     case enabled
     case notRegistered
     case requiresApproval
-    case notFound
+}
+
+private enum LaunchAtLoginEnableResult {
+    case enabled
+    case relaunchScheduled
 }
 
 protocol LaunchAtLoginServicing {
@@ -66,13 +69,13 @@ struct AppInstallLocation {
     let destination: URL
     private let fileManager: FileManager
     private let runningBundle: () -> URL
-    let relaunch: (URL) -> Void
+    let relaunch: (URL) throws -> Void
 
     init(
         destination: URL = AppInstallLocation.defaultDestination,
         fileManager: FileManager = .default,
         runningBundle: @escaping () -> URL = { LaunchAtLoginPaths.bundleURL() },
-        relaunch: @escaping (URL) -> Void = AppInstallLocation.openAndQuit
+        relaunch: @escaping (URL) throws -> Void = AppInstallLocation.openAndQuit
     ) {
         self.destination = destination.standardizedFileURL
         self.fileManager = fileManager
@@ -102,15 +105,8 @@ struct AppInstallLocation {
         return destination
     }
 
-    static func openAndQuit(at url: URL) {
-        let configuration = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
-            DispatchQueue.main.async {
-                if error == nil {
-                    NSApp.terminate(nil)
-                }
-            }
-        }
+    static func openAndQuit(at url: URL) throws {
+        try AppRelaunchCommand.relaunch(appURL: url)
     }
 }
 
@@ -199,7 +195,7 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
 
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
-            try enable()
+            _ = try enable()
         } else {
             try disable()
         }
@@ -211,32 +207,35 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
     ) {
         guard defaults.bool(forKey: AppInstallLocation.pendingKey) else { return }
         do {
-            try makeService().setEnabled(true)
-            defaults.set(false, forKey: AppInstallLocation.pendingKey)
+            let result = try makeService().enable()
+            if result == .enabled {
+                defaults.set(false, forKey: AppInstallLocation.pendingKey)
+            }
         } catch {
             return
         }
     }
 
-    private func enable() throws {
+    private func enable() throws -> LaunchAtLoginEnableResult {
         let installed = try installLocation.installIfNeeded()
         if !installLocation.isRunningFromDestination {
             defaults.set(true, forKey: AppInstallLocation.pendingKey)
-            installLocation.relaunch(installed)
-            return
+            try installLocation.relaunch(installed)
+            return .relaunchScheduled
         }
 
         let current = SMAppService.mainApp.status
         if current == .enabled || current == .requiresApproval {
             try agent.uninstall()
-            return
+            return .enabled
         }
         if LaunchAtLoginResolver.usesLaunchAgent(appService: current) {
             try agent.install(appURL: installed)
-            return
+            return .enabled
         }
         try SMAppService.mainApp.register()
         try agent.uninstall()
+        return .enabled
     }
 
     private func disable() throws {
