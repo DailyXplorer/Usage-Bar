@@ -4,32 +4,55 @@ import XCTest
 @testable import UsageBar
 
 final class AppBorderedButtonTests: XCTestCase {
-    func testControlFaceIsInstrumentSansAtElevenPointMedium() throws {
+    func testLabelFontIsInstrumentSansMediumAtElevenPoints() throws {
         AppTheme.loadFont()
-        let font = try XCTUnwrap(AppTheme.nsFont(size: 11, weight: .medium))
+        let font = try XCTUnwrap(
+            AppTheme.nsFont(
+                size: AppBorderedButton.fontSize,
+                weight: AppBorderedButton.fontWeight
+            )
+        )
+        let regular = try XCTUnwrap(
+            AppTheme.nsFont(size: AppBorderedButton.fontSize, weight: .regular)
+        )
 
+        XCTAssertEqual(AppBorderedButton.fontSize, 11)
+        XCTAssertEqual(AppBorderedButton.fontWeight, Font.Weight.medium)
         XCTAssertEqual(font.familyName, "Instrument Sans")
         XCTAssertEqual(font.pointSize, 11)
+        XCTAssertNotEqual(font.fontName, regular.fontName)
     }
 
     @MainActor
-    func testLabelFontChangesTheRenderedButton() throws {
+    func testRenderedLabelMatchesInstrumentSansMediumReference() throws {
         AppTheme.loadFont()
-
-        let styled = try pngData(
-            for: AppBorderedButton(title: "Check for Updates", action: {})
+        let title = "Check for Updates"
+        let actual = try pngData(for: AppBorderedButton(title: title, action: {}))
+        let expected = try pngData(
+            for: Button(action: {}) {
+                Text(title)
+                    .font(AppBorderedButton.labelFont)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         )
         let systemTitle = try pngData(
-            for: Button("Check for Updates", action: {})
+            for: Button(title, action: {})
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         )
-
-        XCTAssertNotEqual(
-            styled,
-            systemTitle,
-            "Instrument Sans on the Text label must change the bordered button from the system face"
+        let regularWeight = try pngData(
+            for: Button(action: {}) {
+                Text(title)
+                    .font(AppTheme.font(size: AppBorderedButton.fontSize, weight: .regular))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         )
+
+        XCTAssertEqual(actual, expected)
+        XCTAssertNotEqual(actual, systemTitle)
+        XCTAssertNotEqual(actual, regularWeight)
     }
 }
 
