@@ -69,10 +69,8 @@ enum SettingsWindowPresenter {
         isRevealing = true
         defer { isRevealing = false }
 
-        let pinned = collectionBehaviorForActiveSpace(window.collectionBehavior)
-        window.collectionBehavior = pinned.union(.canJoinAllSpaces)
+        window.collectionBehavior = collectionBehaviorForActiveSpace(window.collectionBehavior)
         window.orderFrontRegardless()
-        window.collectionBehavior = pinned
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
