@@ -2,6 +2,8 @@ import SwiftUI
 
 struct UsageMenuView: View {
     @EnvironmentObject private var model: UsageModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -12,7 +14,12 @@ struct UsageMenuView: View {
             footer
         }
         .frame(width: 304)
-        .background(.regularMaterial)
+        .background(
+            AppTheme.menuBackground(
+                colorScheme: colorScheme,
+                contrast: colorSchemeContrast
+            )
+        )
         .background(MenuWindowEdgeInset())
         .environment(\.font, AppTheme.font(size: 13))
         .onAppear {
@@ -30,7 +37,13 @@ struct UsageMenuView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
-        .background(Color.primary.opacity(0.025))
+        .background(
+            AppTheme.inkOverlay(
+                colorScheme: colorScheme,
+                contrast: colorSchemeContrast,
+                standardOpacity: 0.025
+            )
+        )
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -93,7 +106,7 @@ struct UsageMenuView: View {
                 }
             }
             .font(AppTheme.font(size: 10.5))
-            .foregroundStyle(.secondary)
+            .appSecondaryLabelStyle()
             .monospacedDigit()
 
             Spacer()
@@ -125,7 +138,7 @@ private struct ProviderSection: View {
             HStack(spacing: 8) {
                 Text(title)
                     .font(AppTheme.font(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .appSecondaryLabelStyle()
 
                 Spacer()
 
@@ -169,13 +182,15 @@ private struct PlanBadge: View {
             .padding(.horizontal, 8)
             .frame(height: 20)
             .background(Color.accentColor.opacity(0.12), in: Capsule())
-            .foregroundStyle(.secondary)
+            .appSecondaryLabelStyle()
             .lineLimit(1)
     }
 }
 
 private struct LimitCard: View {
     let bucket: LimitBucket
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private var color: Color {
         if bucket.reached {
@@ -190,13 +205,13 @@ private struct LimitCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(bucket.displayName)
                         .font(AppTheme.font(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .appSecondaryLabelStyle()
                         .lineLimit(1)
 
                     if let detail = bucket.detail {
                         Text(detail)
                             .font(AppTheme.font(size: 10.5))
-                            .foregroundStyle(.secondary)
+                            .appSecondaryLabelStyle()
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -219,12 +234,19 @@ private struct LimitCard: View {
             } else if let resetText = resetText {
                 Text(resetText)
                     .font(AppTheme.font(size: 11))
-                    .foregroundStyle(.secondary)
+                    .appSecondaryLabelStyle()
             }
         }
         .padding(12)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: Color.primary.opacity(0.08), radius: 0, x: 0, y: 0)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    AppTheme.cardFill(
+                        colorScheme: colorScheme,
+                        contrast: colorSchemeContrast
+                    )
+                )
+        }
         .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(bucket.displayName), \(bucket.remainingPercent) percent left")
@@ -245,12 +267,20 @@ private struct LimitCard: View {
 private struct UsageProgressBar: View {
     let value: Int
     let color: Color
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.primary.opacity(0.08))
+                    .fill(
+                        AppTheme.inkOverlay(
+                            colorScheme: colorScheme,
+                            contrast: colorSchemeContrast,
+                            standardOpacity: 0.08
+                        )
+                    )
 
                 Capsule()
                     .fill(color)
@@ -274,7 +304,7 @@ private struct LoadingView: View {
                     .font(AppTheme.font(size: 13, weight: .medium))
                 Text("Connecting to Codex, Claude and Cursor")
                     .font(AppTheme.font(size: 11))
-                    .foregroundStyle(.secondary)
+                    .appSecondaryLabelStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -294,7 +324,7 @@ private struct ErrorView: View {
 
             Text(message)
                 .font(AppTheme.font(size: 11.5))
-                .foregroundStyle(.secondary)
+                .appSecondaryLabelStyle()
                 .fixedSize(horizontal: false, vertical: true)
 
             Button("Retry", action: retry)
@@ -348,14 +378,31 @@ private struct FooterIconButton: View {
 
 private struct FooterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
+        FooterButtonBody(configuration: configuration)
+    }
+}
+
+private struct FooterButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    var body: some View {
         configuration.label
-            .foregroundStyle(.secondary)
+            .appSecondaryLabelStyle()
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
-            .background(
-                Color.primary.opacity(configuration.isPressed ? 0.08 : 0),
-                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-            )
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(
+                        AppTheme.inkOverlay(
+                            colorScheme: colorScheme,
+                            contrast: colorSchemeContrast,
+                            standardOpacity: configuration.isPressed ? 0.08 : 0
+                        )
+                    )
+            }
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

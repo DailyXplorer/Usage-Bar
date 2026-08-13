@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum AppTheme {
@@ -79,6 +80,106 @@ enum AppTheme {
         default:
             return 400
         }
+    }
+
+    static func ink(colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
+
+    static func inkOverlay(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast,
+        standardOpacity: Double
+    ) -> Color {
+        let opacity = contrast == .increased
+            ? min(standardOpacity * 2, 1)
+            : standardOpacity
+        return ink(colorScheme: colorScheme).opacity(opacity)
+    }
+
+    static func cardFill(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        inkOverlay(
+            colorScheme: colorScheme,
+            contrast: contrast,
+            standardOpacity: 0.045
+        )
+    }
+
+    static func menuBackground(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        resolvedSystemColor(
+            .windowBackgroundColor,
+            colorScheme: colorScheme,
+            contrast: contrast
+        )
+    }
+
+    static func secondaryLabel(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        resolvedSystemColor(
+            .secondaryLabelColor,
+            colorScheme: colorScheme,
+            contrast: contrast
+        )
+    }
+
+    static func appearanceName(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> NSAppearance.Name {
+        switch contrast {
+        case .increased:
+            return colorScheme == .dark
+                ? .accessibilityHighContrastDarkAqua
+                : .accessibilityHighContrastAqua
+        case .standard:
+            return colorScheme == .dark ? .darkAqua : .aqua
+        @unknown default:
+            return colorScheme == .dark ? .darkAqua : .aqua
+        }
+    }
+
+    private static func resolvedSystemColor(
+        _ color: NSColor,
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        let appearanceName = appearanceName(colorScheme: colorScheme, contrast: contrast)
+        guard let appearance = NSAppearance(named: appearanceName) else {
+            return Color(nsColor: color)
+        }
+        var resolved = color
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? color
+        }
+        return Color(nsColor: resolved)
+    }
+}
+
+private struct AppSecondaryLabelStyle: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(
+            AppTheme.secondaryLabel(
+                colorScheme: colorScheme,
+                contrast: colorSchemeContrast
+            )
+        )
+    }
+}
+
+extension View {
+    func appSecondaryLabelStyle() -> some View {
+        modifier(AppSecondaryLabelStyle())
     }
 }
 
