@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum AppTheme {
@@ -79,6 +80,34 @@ enum AppTheme {
         default:
             return 400
         }
+    }
+
+    static func ink(colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
+
+    static func cardFill(colorScheme: ColorScheme) -> Color {
+        ink(colorScheme: colorScheme).opacity(0.045)
+    }
+
+    static func menuBackground(colorScheme: ColorScheme) -> Color {
+        resolvedSystemColor(.windowBackgroundColor, colorScheme: colorScheme)
+    }
+
+    static func secondaryLabel(colorScheme: ColorScheme) -> Color {
+        resolvedSystemColor(.secondaryLabelColor, colorScheme: colorScheme)
+    }
+
+    private static func resolvedSystemColor(_ color: NSColor, colorScheme: ColorScheme) -> Color {
+        let appearanceName: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+        guard let appearance = NSAppearance(named: appearanceName) else {
+            return Color(nsColor: color)
+        }
+        var resolved = color
+        appearance.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? color
+        }
+        return Color(nsColor: resolved)
     }
 }
 
