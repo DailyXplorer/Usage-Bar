@@ -84,18 +84,23 @@ final class UsageMenuSnapshotTests: XCTestCase {
 
         let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build", isDirectory: true)
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let updater = stubUpdater(defaults: defaults)
 
         try render(
             UsageMenuView()
                 .environmentObject(model)
-                .environmentObject(stubUpdater())
+                .environmentObject(updater)
                 .environment(\.colorScheme, .light),
             to: buildDirectory.appendingPathComponent("UsageBar-light.png")
         )
         try render(
             UsageMenuView()
                 .environmentObject(model)
-                .environmentObject(stubUpdater())
+                .environmentObject(updater)
                 .environment(\.colorScheme, .dark),
             to: buildDirectory.appendingPathComponent("UsageBar-dark.png")
         )
@@ -114,10 +119,8 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 }
 
-private func stubUpdater() -> AppUpdater {
-    let name = UUID().uuidString
-    let defaults = UserDefaults(suiteName: name)!
-    defaults.removePersistentDomain(forName: name)
+@MainActor
+private func stubUpdater(defaults: UserDefaults) -> AppUpdater {
     defaults.set(false, forKey: UpdatePreferences.checksKey)
     return AppUpdater(
         client: SilentGitHub(),

@@ -13,10 +13,6 @@ enum AppDistribution {
         URL(string: "https://api.github.com/repos/\(githubOwner)/\(githubRepo)/releases/latest")!
     }
 
-    static var latestZipURL: URL {
-        URL(string: "https://github.com/\(githubOwner)/\(githubRepo)/releases/latest/download/\(assetName)")!
-    }
-
     static func trustedAssetURL(named name: String, releaseTag: String) -> URL? {
         let tagPattern = #"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"#
         guard releaseTag.range(of: tagPattern, options: .regularExpression) != nil,
@@ -116,8 +112,8 @@ struct AppVersion: Comparable, Equatable, CustomStringConvertible {
     }
 }
 
-struct GitHubRelease: Decodable, Equatable {
-    struct Asset: Decodable, Equatable {
+struct GitHubRelease: Decodable, Equatable, Sendable {
+    struct Asset: Decodable, Equatable, Sendable {
         let name: String
         let browserDownloadURL: URL
 
@@ -237,12 +233,23 @@ enum AppBundleReplacement {
 
         try fileManager.copyItem(at: source, to: staging)
         if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(
-                destination,
-                withItemAt: staging,
-                backupItemName: nil,
-                options: .usingNewMetadataOnly
-            )
+            let backupName = ".\(destination.lastPathComponent).\(UUID().uuidString).previous"
+            let backup = parent.appendingPathComponent(backupName)
+            do {
+                _ = try fileManager.replaceItemAt(
+                    destination,
+                    withItemAt: staging,
+                    backupItemName: backupName,
+                    options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
+                )
+                try? fileManager.removeItem(at: backup)
+            } catch {
+                if !fileManager.fileExists(atPath: destination.path),
+                   fileManager.fileExists(atPath: backup.path) {
+                    try? fileManager.moveItem(at: backup, to: destination)
+                }
+                throw error
+            }
         } else {
             try fileManager.moveItem(at: staging, to: destination)
         }
@@ -253,7 +260,9 @@ enum UpdatePreferences {
     static let checksKey = "automaticallyCheckForUpdates"
     static let installsKey = "automaticallyInstallUpdates"
     static let lastCheckKey = "lastUpdateCheckAt"
+    static let lastAttemptKey = "lastUpdateCheckAttemptAt"
     static let checkInterval: TimeInterval = 24 * 60 * 60
+    static let retryInterval: TimeInterval = 15 * 60
 }
 
 enum UpdateState: Equatable {
@@ -264,4 +273,13 @@ enum UpdateState: Equatable {
     case downloading
     case installing
     case failed(String)
+
+    var showsUpdateAction: Bool {
+        switch self {
+        case .available, .downloading, .installing, .failed:
+            return true
+        case .idle, .checking, .upToDate:
+            return false
+        }
+    }
 }

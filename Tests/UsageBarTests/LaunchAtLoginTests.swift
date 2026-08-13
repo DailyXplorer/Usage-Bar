@@ -98,7 +98,7 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testLaunchAgentInstallsAndRemovesALoginPlist() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let home = temporaryRoot()
         let store = LaunchAgentStore(home: home)
         let appURL = URL(fileURLWithPath: "/tmp/Usage Bar.app")
 
@@ -118,7 +118,7 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testLaunchAgentUsesTheExecutableDirectlyWhenThereIsNoAppBundle() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let home = temporaryRoot()
         let store = LaunchAgentStore(home: home)
         let executable = URL(fileURLWithPath: "/tmp/UsageBar")
 
@@ -138,7 +138,7 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testInstallCopiesTheAppIntoApplications() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let source = root.appendingPathComponent("Source.app")
         let destination = root.appendingPathComponent("Applications/UsageBar.app")
         try FileManager.default.createDirectory(
@@ -162,11 +162,10 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testInstallReplacesAnExistingAppOnlyAfterStagingTheNewCopy() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let sourceMarker = root.appendingPathComponent("Source.app/Contents/version")
         let destination = root.appendingPathComponent("Applications/UsageBar.app")
         let destinationMarker = destination.appendingPathComponent("Contents/version")
-        defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(
             at: sourceMarker.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -195,7 +194,7 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testInstallIsANoOpWhenAlreadyInApplications() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let destination = root.appendingPathComponent("UsageBar.app")
         try FileManager.default.createDirectory(
             at: destination.appendingPathComponent("Contents"),
@@ -213,11 +212,10 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testFailedReplacementPreservesTheInstalledApp() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let source = root.appendingPathComponent("Missing.app")
         let destination = root.appendingPathComponent("Applications/UsageBar.app")
         let marker = destination.appendingPathComponent("Contents/installed-version")
-        defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(
             at: marker.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -235,7 +233,7 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testEnableCopiesToApplicationsThenRelaunches() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let source = root.appendingPathComponent("Source.app")
         let destination = root.appendingPathComponent("Applications/UsageBar.app")
         try FileManager.default.createDirectory(
@@ -245,8 +243,7 @@ final class LaunchAtLoginTests: XCTestCase {
         try Data("ok".utf8).write(to: source.appendingPathComponent("Contents/Info.plist"))
 
         let defaultsName = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-        defaults.removePersistentDomain(forName: defaultsName)
+        let defaults = try makeDefaults(named: defaultsName)
 
         var relaunched: URL?
         let store = LaunchAgentStore(home: root)
@@ -258,7 +255,8 @@ final class LaunchAtLoginTests: XCTestCase {
         let service = SMAppServiceLaunchAtLogin(
             agent: store,
             installLocation: location,
-            defaults: defaults
+            defaults: defaults,
+            appService: MockMainAppService(status: .notFound)
         )
 
         try service.setEnabled(true)
@@ -270,15 +268,15 @@ final class LaunchAtLoginTests: XCTestCase {
     }
 
     func testSystemServiceFallsBackToALaunchAgentWhenAppServiceIsMissing() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let appURL = root.appendingPathComponent("UsageBar.app")
         try FileManager.default.createDirectory(
             at: appURL.appendingPathComponent("Contents"),
             withIntermediateDirectories: true
         )
         let defaultsName = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-        defaults.removePersistentDomain(forName: defaultsName)
+        let defaults = try makeDefaults(named: defaultsName)
+        let appService = MockMainAppService(status: .notFound)
         let store = LaunchAgentStore(home: root)
         let location = AppInstallLocation(
             destination: appURL,
@@ -288,30 +286,61 @@ final class LaunchAtLoginTests: XCTestCase {
         let service = SMAppServiceLaunchAtLogin(
             agent: store,
             installLocation: location,
-            defaults: defaults
+            defaults: defaults,
+            appService: appService
         )
-
-        XCTAssertEqual(SMAppService.mainApp.status, .notFound)
 
         try service.setEnabled(true)
         XCTAssertTrue(store.isInstalled)
         XCTAssertEqual(service.status, .enabled)
+        XCTAssertEqual(appService.registerCallCount, 0)
 
         try service.setEnabled(false)
         XCTAssertFalse(store.isInstalled)
         XCTAssertEqual(service.status, .notRegistered)
+        XCTAssertEqual(appService.unregisterCallCount, 0)
+    }
+
+    func testSystemServiceUsesTheInjectedRegistrationController() throws {
+        let root = temporaryRoot()
+        let appURL = root.appendingPathComponent("UsageBar.app")
+        try FileManager.default.createDirectory(
+            at: appURL.appendingPathComponent("Contents"),
+            withIntermediateDirectories: true
+        )
+        let defaults = try makeDefaults(named: UUID().uuidString)
+        let appService = MockMainAppService(status: .notRegistered)
+        let service = SMAppServiceLaunchAtLogin(
+            agent: LaunchAgentStore(home: root),
+            installLocation: AppInstallLocation(
+                destination: appURL,
+                runningBundle: { appURL },
+                relaunch: { _ in XCTFail("already running from Applications") }
+            ),
+            defaults: defaults,
+            appService: appService
+        )
+
+        try service.setEnabled(true)
+
+        XCTAssertEqual(appService.registerCallCount, 1)
+        XCTAssertEqual(service.status, .enabled)
+
+        try service.setEnabled(false)
+
+        XCTAssertEqual(appService.unregisterCallCount, 1)
+        XCTAssertEqual(service.status, .notRegistered)
     }
 
     func testPendingEnableRegistersAfterRelaunchFromApplications() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let appURL = root.appendingPathComponent("UsageBar.app")
         try FileManager.default.createDirectory(
             at: appURL.appendingPathComponent("Contents"),
             withIntermediateDirectories: true
         )
         let defaultsName = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-        defaults.removePersistentDomain(forName: defaultsName)
+        let defaults = try makeDefaults(named: defaultsName)
         defaults.set(true, forKey: AppInstallLocation.pendingKey)
 
         let store = LaunchAgentStore(home: root)
@@ -321,31 +350,34 @@ final class LaunchAtLoginTests: XCTestCase {
             relaunch: { _ in XCTFail("already running from Applications") }
         )
 
-        SMAppServiceLaunchAtLogin.completePendingIfNeeded(defaults: defaults) {
+        let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted(defaults: defaults) {
             SMAppServiceLaunchAtLogin(
                 agent: store,
                 installLocation: location,
-                defaults: defaults
+                defaults: defaults,
+                appService: MockMainAppService(status: .notFound)
             )
         }
+        if completed {
+            defaults.set(false, forKey: AppInstallLocation.pendingKey)
+        }
 
+        XCTAssertTrue(completed)
         XCTAssertFalse(defaults.bool(forKey: AppInstallLocation.pendingKey))
         XCTAssertTrue(store.isInstalled)
     }
 
     func testPendingEnableSurvivesAnotherRequiredRelaunch() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temporaryRoot()
         let source = root.appendingPathComponent("Downloaded/UsageBar.app")
         let destination = root.appendingPathComponent("Applications/UsageBar.app")
-        defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(
             at: source.appendingPathComponent("Contents"),
             withIntermediateDirectories: true
         )
         try Data("ok".utf8).write(to: source.appendingPathComponent("Contents/Info.plist"))
         let defaultsName = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-        defaults.removePersistentDomain(forName: defaultsName)
+        let defaults = try makeDefaults(named: defaultsName)
         defaults.set(true, forKey: AppInstallLocation.pendingKey)
 
         var relaunched: URL?
@@ -355,28 +387,30 @@ final class LaunchAtLoginTests: XCTestCase {
             relaunch: { relaunched = $0 }
         )
 
-        SMAppServiceLaunchAtLogin.completePendingIfNeeded(defaults: defaults) {
+        let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted(defaults: defaults) {
             SMAppServiceLaunchAtLogin(
                 agent: LaunchAgentStore(home: root),
                 installLocation: location,
-                defaults: defaults
+                defaults: defaults,
+                appService: MockMainAppService(status: .notFound)
             )
         }
 
+        XCTAssertFalse(completed)
         XCTAssertTrue(defaults.bool(forKey: AppInstallLocation.pendingKey))
         XCTAssertEqual(relaunched?.path, destination.path)
     }
 
     func testPendingEnableIsRetainedWhenRegistrationFails() throws {
         let defaultsName = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
-        defaults.removePersistentDomain(forName: defaultsName)
+        let defaults = try makeDefaults(named: defaultsName)
         defaults.set(true, forKey: AppInstallLocation.pendingKey)
 
-        SMAppServiceLaunchAtLogin.completePendingIfNeeded(defaults: defaults) {
+        let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted(defaults: defaults) {
             throw SimpleError("registration failed")
         }
 
+        XCTAssertFalse(completed)
         XCTAssertTrue(defaults.bool(forKey: AppInstallLocation.pendingKey))
     }
 
@@ -384,6 +418,23 @@ final class LaunchAtLoginTests: XCTestCase {
         let data = try Data(contentsOf: url)
         let object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func temporaryRoot() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: url)
+        }
+        return url
+    }
+
+    private func makeDefaults(named name: String) throws -> UserDefaults {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        addTeardownBlock {
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        }
+        return defaults
     }
 }
 
@@ -410,5 +461,25 @@ private final class MockLaunchAtLoginService: LaunchAtLoginServicing {
             throw errorToThrow
         }
         status = enabled ? .enabled : .notRegistered
+    }
+}
+
+private final class MockMainAppService: MainAppServiceControlling {
+    var status: SMAppService.Status
+    private(set) var registerCallCount = 0
+    private(set) var unregisterCallCount = 0
+
+    init(status: SMAppService.Status) {
+        self.status = status
+    }
+
+    func register() throws {
+        registerCallCount += 1
+        status = .enabled
+    }
+
+    func unregister() throws {
+        unregisterCallCount += 1
+        status = .notRegistered
     }
 }

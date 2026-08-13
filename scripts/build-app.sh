@@ -15,7 +15,9 @@ for arg in "$@"; do
 done
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app_path="$project_dir/.build/UsageBar.app"
+output_app_path="$project_dir/.build/UsageBar.app"
+build_stage_root=$(mktemp -d)
+app_path="$build_stage_root/UsageBar.app"
 contents_path="$app_path/Contents"
 macos_path="$contents_path/MacOS"
 resources_path="$contents_path/Resources"
@@ -23,6 +25,7 @@ install_stage_root=""
 keep_install_stage=0
 
 cleanup() {
+  rm -rf "$build_stage_root"
   if [ -n "$install_stage_root" ] && [ "$keep_install_stage" -eq 0 ]; then
     rm -rf "$install_stage_root"
   fi
@@ -63,6 +66,10 @@ if [ -z "$version" ]; then
   fi
 fi
 if [ -n "$version" ]; then
+  if ! printf '%s\n' "$version" | /usr/bin/grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    printf 'Usage Bar versions must use MAJOR.MINOR.PATCH.\n' >&2
+    exit 1
+  fi
   plutil -replace CFBundleShortVersionString -string "$version" "$contents_path/Info.plist"
   plutil -replace CFBundleVersion -string "$version" "$contents_path/Info.plist"
 fi
@@ -73,6 +80,7 @@ codesign --verify --deep --strict "$app_path"
 
 if [ "$no_install" -eq 0 ]; then
   install_path="/Applications/UsageBar.app"
+  installed_executable="$install_path/Contents/MacOS/UsageBar"
   staged_app="$install_stage_root/UsageBar.app"
   backup_app="$install_stage_root/Previous.app"
   ditto --norsrc --noextattr "$app_path" "$staged_app"
@@ -82,11 +90,11 @@ if [ "$no_install" -eq 0 ]; then
     exit 1
   fi
 
-  if pgrep -x UsageBar >/dev/null 2>&1; then
+  if pgrep -f "$installed_executable" >/dev/null 2>&1; then
     osascript -e 'tell application id "com.usagebar.app" to quit' >/dev/null 2>&1 || true
   fi
   attempt=0
-  while pgrep -x UsageBar >/dev/null 2>&1; do
+  while pgrep -f "$installed_executable" >/dev/null 2>&1; do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge 50 ]; then
       printf 'Usage Bar is still running. Quit it, then run the build again.\n' >&2
@@ -116,24 +124,35 @@ if [ "$no_install" -eq 0 ]; then
     exit 1
   fi
   rm -rf "$backup_app"
-  printf '%s\n' "$install_path"
-else
-  printf '%s\n' "$app_path"
 fi
 
 if [ "$make_zip" -eq 1 ]; then
   zip_path="$project_dir/.build/UsageBar.app.zip"
   checksum_path="$project_dir/.build/UsageBar.app.zip.sha256"
+  staged_zip="$build_stage_root/UsageBar.app.zip"
+  verification_root="$build_stage_root/verify"
   rm -f "$zip_path" "$checksum_path"
   clear_signing_xattrs "$app_path"
   codesign --verify --deep --strict "$app_path"
-  ditto -c -k --keepParent --norsrc --noextattr "$app_path" "$zip_path"
+  ditto -c -k --keepParent --norsrc --noextattr "$app_path" "$staged_zip"
+  ditto --norsrc --noextattr "$staged_zip" "$zip_path"
   (
     cd "$(dirname -- "$zip_path")"
     /usr/bin/shasum -a 256 "$(basename -- "$zip_path")" > "$(basename -- "$checksum_path")"
   )
-  clear_signing_xattrs "$app_path"
-  codesign --verify --deep --strict "$app_path"
+  ditto -x -k "$zip_path" "$verification_root"
+  codesign --verify --deep --strict "$verification_root/UsageBar.app"
+fi
+
+rm -rf "$output_app_path"
+ditto --norsrc --noextattr "$app_path" "$output_app_path"
+
+if [ "$no_install" -eq 0 ]; then
+  printf '%s\n' "$install_path"
+else
+  printf '%s\n' "$output_app_path"
+fi
+if [ "$make_zip" -eq 1 ]; then
   printf '%s\n' "$zip_path"
   printf '%s\n' "$checksum_path"
 fi
