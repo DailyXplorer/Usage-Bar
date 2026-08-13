@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import Foundation
 
 protocol GitHubReleasing {
@@ -8,7 +9,59 @@ protocol GitHubReleasing {
 
 protocol AppUpdateInstalling {
     func install(fromAppBundle url: URL) throws
-    func relaunch()
+    func relaunch() throws
+}
+
+enum AppRelaunchCommand {
+    static let script = """
+    while /bin/kill -0 "$1" >/dev/null 2>&1; do
+      /bin/sleep 0.2
+    done
+    /usr/bin/open "$2"
+    """
+
+    static func arguments(processIdentifier: Int32, appURL: URL) -> [String] {
+        [
+            "-c",
+            script,
+            "UsageBar updater",
+            String(processIdentifier),
+            appURL.path,
+        ]
+    }
+}
+
+enum UpdateChecksum {
+    static func expectedHash(from data: Data) throws -> String {
+        guard let text = String(data: data, encoding: .utf8),
+              let hash = text.split(whereSeparator: \.isWhitespace).first else {
+            throw UpdateError.invalidChecksum
+        }
+        let normalized = hash.lowercased()
+        let hexadecimal = CharacterSet(charactersIn: "0123456789abcdef")
+        guard normalized.count == 64,
+              normalized.unicodeScalars.allSatisfy(hexadecimal.contains) else {
+            throw UpdateError.invalidChecksum
+        }
+        return normalized
+    }
+
+    static func hash(of fileURL: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty {
+            hasher.update(data: data)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func verify(fileURL: URL, checksumData: Data) throws {
+        guard try hash(of: fileURL) == expectedHash(from: checksumData) else {
+            throw UpdateError.checksumMismatch
+        }
+    }
 }
 
 struct GitHubReleaseService: GitHubReleasing {
@@ -53,32 +106,20 @@ struct AppUpdateInstaller: AppUpdateInstalling {
 
     func install(fromAppBundle url: URL) throws {
         try verifyBundle(at: url)
-        try fileManager.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: url)
-        } else {
-            try fileManager.copyItem(at: url, to: destination)
-        }
+        try AppBundleReplacement.install(from: url, to: destination, fileManager: fileManager)
         try clearQuarantine(at: destination)
     }
 
-    func relaunch() {
-        let appPath = destination.path
-        let script = """
-        while /usr/bin/pgrep -f '\(appPath)/Contents/MacOS/UsageBar' >/dev/null 2>&1; do
-          /bin/sleep 0.2
-        done
-        /usr/bin/open '\(appPath)'
-        """
+    func relaunch() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script]
+        process.arguments = AppRelaunchCommand.arguments(
+            processIdentifier: ProcessInfo.processInfo.processIdentifier,
+            appURL: destination
+        )
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try? process.run()
+        try process.run()
         DispatchQueue.main.async {
             NSApp.terminate(nil)
         }
@@ -90,9 +131,12 @@ struct AppUpdateInstaller: AppUpdateInstalling {
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
               let info = plist as? [String: Any],
               let identifier = info["CFBundleIdentifier"] as? String,
-              identifier == AppDistribution.bundleIdentifier else {
+              identifier == AppDistribution.bundleIdentifier,
+              let executable = info["CFBundleExecutable"] as? String,
+              executable == AppDistribution.executableName else {
             throw UpdateError.invalidAppBundle
         }
+        try verifyCodeSignature(at: url)
     }
 
     func extractApp(fromZip zipURL: URL, to directory: URL) throws -> URL {
@@ -111,27 +155,35 @@ struct AppUpdateInstaller: AppUpdateInstalling {
     }
 
     func findApp(in directory: URL) throws -> URL {
-        let contents = try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-        if let app = contents.first(where: { $0.pathExtension == "app" }) {
-            return app
+        let app = directory.appendingPathComponent(AppDistribution.installURL.lastPathComponent)
+        let values = try? app.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values?.isDirectory == true, values?.isSymbolicLink != true else {
+            throw UpdateError.extractFailed
         }
-        for item in contents {
-            let values = try? item.resourceValues(forKeys: [.isDirectoryKey])
-            if values?.isDirectory == true, let nested = try? findApp(in: item) {
-                return nested
-            }
+        return app
+    }
+
+    private func verifyCodeSignature(at url: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["--verify", "--deep", "--strict", url.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw UpdateError.invalidCodeSignature
         }
-        throw UpdateError.extractFailed
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.invalidCodeSignature
+        }
     }
 
     private func clearQuarantine(at url: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        process.arguments = ["-cr", url.path]
+        process.arguments = ["-dr", "com.apple.quarantine", url.path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -160,6 +212,8 @@ final class AppUpdater: ObservableObject {
     private let unpacker: AppUpdateInstaller
     private let defaults: UserDefaults
     private let session: URLSession
+    private let fileManager: FileManager
+    private let makeWorkDirectory: () -> URL
     private var checkTask: Task<Void, Never>?
 
     init(
@@ -168,6 +222,11 @@ final class AppUpdater: ObservableObject {
         unpacker: AppUpdateInstaller = AppUpdateInstaller(),
         defaults: UserDefaults = .standard,
         session: URLSession = .shared,
+        fileManager: FileManager = .default,
+        makeWorkDirectory: @escaping () -> URL = {
+            FileManager.default.temporaryDirectory
+                .appendingPathComponent("UsageBarUpdate-\(UUID().uuidString)", isDirectory: true)
+        },
         currentVersion: String? = nil
     ) {
         self.client = client
@@ -175,11 +234,13 @@ final class AppUpdater: ObservableObject {
         self.unpacker = unpacker
         self.defaults = defaults
         self.session = session
+        self.fileManager = fileManager
+        self.makeWorkDirectory = makeWorkDirectory
         self.currentVersion = currentVersion
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
             ?? "0"
         automaticallyChecks = defaults.object(forKey: UpdatePreferences.checksKey) as? Bool ?? true
-        automaticallyInstalls = defaults.object(forKey: UpdatePreferences.installsKey) as? Bool ?? true
+        automaticallyInstalls = defaults.object(forKey: UpdatePreferences.installsKey) as? Bool ?? false
     }
 
     var isBusy: Bool {
@@ -236,10 +297,6 @@ final class AppUpdater: ObservableObject {
 
     func startAutomaticChecks() {
         guard automaticallyChecks else { return }
-        if let last = defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date,
-           Date().timeIntervalSince(last) < UpdatePreferences.checkInterval {
-            return
-        }
         checkForUpdates(installIfAvailable: automaticallyInstalls)
     }
 
@@ -253,9 +310,14 @@ final class AppUpdater: ObservableObject {
 
     func checkForUpdates(force: Bool = false, installIfAvailable: Bool = false) {
         if isBusy { return }
+        if !force,
+           let last = defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date,
+           Date().timeIntervalSince(last) < UpdatePreferences.checkInterval {
+            return
+        }
         checkTask?.cancel()
         checkTask = Task { [weak self] in
-            await self?.performCheck(force: force, installIfAvailable: installIfAvailable)
+            await self?.performCheck(installIfAvailable: installIfAvailable)
         }
     }
 
@@ -267,7 +329,7 @@ final class AppUpdater: ObservableObject {
         }
     }
 
-    private func performCheck(force: Bool, installIfAvailable: Bool) async {
+    private func performCheck(installIfAvailable: Bool) async {
         await setState(.checking)
         do {
             let release = try await client.latestRelease()
@@ -279,6 +341,10 @@ final class AppUpdater: ObservableObject {
             }
             guard release.zipAsset != nil else {
                 await setState(.failed(UpdateError.missingAsset.localizedDescription))
+                return
+            }
+            guard release.checksumAsset != nil else {
+                await setState(.failed(UpdateError.missingChecksum.localizedDescription))
                 return
             }
             await setState(.available(release))
@@ -296,27 +362,38 @@ final class AppUpdater: ObservableObject {
             await setState(.failed(UpdateError.missingAsset.localizedDescription))
             return
         }
+        guard let checksumAsset = release.checksumAsset else {
+            await setState(.failed(UpdateError.missingChecksum.localizedDescription))
+            return
+        }
         await setState(.downloading)
         do {
+            let (checksumData, checksumResponse) = try await session.data(
+                from: checksumAsset.browserDownloadURL
+            )
+            guard let checksumHTTP = checksumResponse as? HTTPURLResponse,
+                  checksumHTTP.statusCode == 200 else {
+                throw UpdateError.network("checksum download failed")
+            }
             let (tempURL, response) = try await session.download(from: asset.browserDownloadURL)
             if Task.isCancelled { return }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw UpdateError.network("download failed")
             }
             await setState(.installing)
-            let workDirectory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("UsageBarUpdate-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            let workDirectory = makeWorkDirectory()
+            try fileManager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            defer { try? fileManager.removeItem(at: workDirectory) }
             let zipURL = workDirectory.appendingPathComponent(AppDistribution.assetName)
-            if FileManager.default.fileExists(atPath: zipURL.path) {
-                try FileManager.default.removeItem(at: zipURL)
+            if fileManager.fileExists(atPath: zipURL.path) {
+                try fileManager.removeItem(at: zipURL)
             }
-            try FileManager.default.moveItem(at: tempURL, to: zipURL)
+            try fileManager.moveItem(at: tempURL, to: zipURL)
+            try UpdateChecksum.verify(fileURL: zipURL, checksumData: checksumData)
             let extracted = workDirectory.appendingPathComponent("extracted", isDirectory: true)
             let appURL = try unpacker.extractApp(fromZip: zipURL, to: extracted)
             try installer.install(fromAppBundle: appURL)
-            try? FileManager.default.removeItem(at: workDirectory)
-            installer.relaunch()
+            try installer.relaunch()
         } catch {
             if Task.isCancelled { return }
             await setState(.failed(error.localizedDescription))

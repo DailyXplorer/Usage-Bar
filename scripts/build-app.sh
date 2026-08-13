@@ -14,11 +14,6 @@ for arg in "$@"; do
   esac
 done
 
-if [ -n "${GITHUB_ACTIONS:-}" ]; then
-  no_install=1
-  make_zip=1
-fi
-
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 app_path="$project_dir/.build/UsageBar.app"
 contents_path="$app_path/Contents"
@@ -64,7 +59,13 @@ fi
 
 if [ "$make_zip" -eq 1 ]; then
   zip_path="$project_dir/.build/UsageBar.app.zip"
-  rm -f "$zip_path"
+  checksum_path="$project_dir/.build/UsageBar.app.zip.sha256"
+  rm -f "$zip_path" "$checksum_path"
   ditto -c -k --keepParent "$app_path" "$zip_path"
+  (
+    cd "$(dirname -- "$zip_path")"
+    /usr/bin/shasum -a 256 "$(basename -- "$zip_path")" > "$(basename -- "$checksum_path")"
+  )
   printf '%s\n' "$zip_path"
+  printf '%s\n' "$checksum_path"
 fi

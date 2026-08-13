@@ -11,8 +11,8 @@ can update.
 
 SwiftUI macOS 14+ **menu bar extra** (no Dock icon). It shows Codex, Claude
 Code, and Cursor usage limits. The installed app is always
-`/Applications/UsageBar.app`. In-app updates download
-`UsageBar.app.zip` from GitHub Releases.
+`/Applications/UsageBar.app`. In-app updates download `UsageBar.app.zip` and
+`UsageBar.app.zip.sha256` from GitHub Releases.
 
 English UI. No `//` comments in generated Swift. Do not commit `.build/`.
 
@@ -24,8 +24,8 @@ scripts/build-app.sh
 ```
 
 `scripts/build-app.sh` compiles Release, ad-hoc signs, and installs
-`/Applications/UsageBar.app`. On GitHub Actions it skips that install and
-writes `.build/UsageBar.app.zip`.
+`/Applications/UsageBar.app`. With `--no-install --zip`, it writes
+`.build/UsageBar.app.zip` and `.build/UsageBar.app.zip.sha256`.
 
 ```sh
 scripts/build-app.sh --no-install
@@ -73,9 +73,10 @@ Users update from GitHub Releases. A tag on `main` is what ships.
 - Tags: `vMAJOR.MINOR.PATCH` (semver). Example: `v1.1.0`.
 - The updater compares the tag (leading `v` stripped) to the running app’s
   `CFBundleShortVersionString`.
-- GitHub’s “latest” release must include an asset named **`UsageBar.app.zip`**
-  (`AppDistribution.assetName`). Any other name and `scripts/install.sh` plus
-  the in-app updater will miss it.
+- GitHub’s “latest” release must include assets named **`UsageBar.app.zip`**
+  (`AppDistribution.assetName`) and **`UsageBar.app.zip.sha256`**
+  (`AppDistribution.checksumAssetName`). Any other names and
+  `scripts/install.sh` plus the in-app updater will reject the release.
 
 ### Cut a release (after the PR is merged)
 
@@ -96,20 +97,21 @@ version that already has a zip attached.
 
 1. Builds with `USAGEBAR_VERSION` from the tag.
 2. Creates the GitHub Release.
-3. Attaches `.build/UsageBar.app.zip`.
+3. Attaches `.build/UsageBar.app.zip` and its `.sha256` file.
 4. Generates notes from PRs merged since the previous tag (`generate_release_notes`).
 
-Wait until the **Release** workflow is green and the zip is on the release
+Wait until the **Release** workflow is green and both assets are on the release
 page. Only then is `scripts/install.sh` / Settings → Updates able to see it.
 
-Do not create the release zip by hand and upload it unless the workflow is
-broken. If you must, the file name still has to be `UsageBar.app.zip`.
+Do not create release assets by hand and upload them unless the workflow is
+broken. If you must, generate both files together and keep the exact
+`UsageBar.app.zip` / `UsageBar.app.zip.sha256` names.
 
 ### What users get
 
-- New installs: README one-liner or the zip from that release, into
+- New installs: inspected installer script or the zip from that release, into
   Applications.
-- Existing installs: daily GitHub check (optional auto-install), or the
+- Existing installs: daily GitHub check (auto-install requires opt-in), or the
   **Check for Updates** / **Install x.y.z** button, with those PR notes in
   Settings.
 
@@ -119,12 +121,16 @@ broken. If you must, the file name still has to be `UsageBar.app.zip`.
 | --- | --- |
 | `Sources/UsageBar/` | App sources |
 | `Support/Info.plist` | Bundle id `com.usagebar.app`; default version `1.0` |
-| `scripts/build-app.sh` | Build, sign, install, optional zip |
-| `scripts/install.sh` | Download latest GitHub zip → Applications |
-| `.github/workflows/release.yml` | Tag `v*` → release + zip + PR notes |
+| `scripts/build-app.sh` | Build, sign, install, optional zip + checksum |
+| `scripts/install.sh` | Verify latest GitHub release → Applications |
+| `.github/workflows/release.yml` | Tag `v*` → release + assets + PR notes |
 | `Sources/UsageBar/AppDistribution.swift` | GitHub owner/repo/asset name |
 | `Sources/UsageBar/AppUpdater.swift` | In-app GitHub updater |
 | `Sources/UsageBar/LaunchAtLogin.swift` | Login item; copies to Applications if needed |
+
+The `.notFound` login-item fallback writes a LaunchAgent for the next login but
+does not bootstrap it in the current session. Usage Bar is already running when
+the toggle is enabled, so bootstrapping would risk a duplicate menu bar process.
 
 Menu bar label: always a single `Image` from `MenuBarLabelImage`. Do not go
 back to sibling views in `MenuBarExtra`’s label.

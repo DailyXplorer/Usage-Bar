@@ -174,6 +174,39 @@ final class LaunchAtLoginTests: XCTestCase {
         XCTAssertNil(relaunched)
     }
 
+    func testInstallReplacesAnExistingAppOnlyAfterStagingTheNewCopy() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let sourceMarker = root.appendingPathComponent("Source.app/Contents/version")
+        let destination = root.appendingPathComponent("Applications/UsageBar.app")
+        let destinationMarker = destination.appendingPathComponent("Contents/version")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: sourceMarker.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: destinationMarker.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("new".utf8).write(to: sourceMarker)
+        try Data("old".utf8).write(to: destinationMarker)
+
+        let location = AppInstallLocation(
+            destination: destination,
+            runningBundle: { sourceMarker.deletingLastPathComponent().deletingLastPathComponent() },
+            relaunch: { _ in XCTFail("installIfNeeded does not relaunch directly") }
+        )
+
+        _ = try location.installIfNeeded()
+
+        XCTAssertEqual(try String(contentsOf: destinationMarker), "new")
+        let stagedItems = try FileManager.default.contentsOfDirectory(
+            at: destination.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(stagedItems.map(\.lastPathComponent), ["UsageBar.app"])
+    }
+
     func testInstallIsANoOpWhenAlreadyInApplications() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let destination = root.appendingPathComponent("UsageBar.app")
@@ -190,6 +223,28 @@ final class LaunchAtLoginTests: XCTestCase {
         XCTAssertTrue(location.isRunningFromDestination)
         let installed = try location.installIfNeeded()
         XCTAssertEqual(installed.path, destination.path)
+    }
+
+    func testFailedReplacementPreservesTheInstalledApp() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = root.appendingPathComponent("Missing.app")
+        let destination = root.appendingPathComponent("Applications/UsageBar.app")
+        let marker = destination.appendingPathComponent("Contents/installed-version")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: marker.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("previous".utf8).write(to: marker)
+
+        let location = AppInstallLocation(
+            destination: destination,
+            runningBundle: { source },
+            relaunch: { _ in XCTFail("a failed install must not relaunch") }
+        )
+
+        XCTAssertThrowsError(try location.installIfNeeded())
+        XCTAssertEqual(try String(contentsOf: marker), "previous")
     }
 
     func testEnableCopiesToApplicationsThenRelaunches() throws {
@@ -289,6 +344,19 @@ final class LaunchAtLoginTests: XCTestCase {
 
         XCTAssertFalse(defaults.bool(forKey: AppInstallLocation.pendingKey))
         XCTAssertTrue(store.isInstalled)
+    }
+
+    func testPendingEnableIsRetainedWhenRegistrationFails() throws {
+        let defaultsName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defaults.removePersistentDomain(forName: defaultsName)
+        defaults.set(true, forKey: AppInstallLocation.pendingKey)
+
+        SMAppServiceLaunchAtLogin.completePendingIfNeeded(defaults: defaults) {
+            throw SimpleError("registration failed")
+        }
+
+        XCTAssertTrue(defaults.bool(forKey: AppInstallLocation.pendingKey))
     }
 
     private func plist(at url: URL) throws -> [String: Any] {

@@ -94,14 +94,11 @@ struct AppInstallLocation {
         if source.path == destination.path {
             return destination
         }
-        try fileManager.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try AppBundleReplacement.install(
+            from: source,
+            to: destination,
+            fileManager: fileManager
         )
-        if fileManager.fileExists(atPath: destination.path) {
-            try fileManager.removeItem(at: destination)
-        }
-        try fileManager.copyItem(at: source, to: destination)
         return destination
     }
 
@@ -213,8 +210,12 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
         makeService: () throws -> SMAppServiceLaunchAtLogin = { SMAppServiceLaunchAtLogin() }
     ) {
         guard defaults.bool(forKey: AppInstallLocation.pendingKey) else { return }
-        defaults.set(false, forKey: AppInstallLocation.pendingKey)
-        _ = try? makeService().setEnabled(true)
+        do {
+            try makeService().setEnabled(true)
+            defaults.set(false, forKey: AppInstallLocation.pendingKey)
+        } catch {
+            return
+        }
     }
 
     private func enable() throws {

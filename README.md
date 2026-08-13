@@ -37,14 +37,19 @@ bar only — no Dock icon.
 If macOS refuses the first launch (ad-hoc signature), in Finder:
 **right-click → Open**.
 
-### Option 2 — one command
+### Option 2 — verified installer script
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/DailyXplorer/Usage-Bar/main/scripts/install.sh | sh
+curl -fsSLo UsageBar-install.sh https://raw.githubusercontent.com/DailyXplorer/Usage-Bar/main/scripts/install.sh
+less UsageBar-install.sh
+sh UsageBar-install.sh
+rm UsageBar-install.sh
 ```
 
-That downloads `UsageBar.app.zip` from the latest GitHub release, installs it
-to Applications, and launches it.
+Inspect the downloaded script before running it. It verifies the release
+SHA-256 file, bundle identifier, executable name, and ad-hoc code signature,
+then stages the replacement in Applications before launching it. It stops a
+running Usage Bar first, so installation cannot leave two menu bar instances.
 
 ### After install
 
@@ -52,6 +57,7 @@ to Applications, and launches it.
 - **Settings…** → **Launch at login** to start Usage Bar when you log in.
 - **Settings…** → **Updates** to check GitHub or turn on automatic installs.
   When a newer release exists, an **Update** button also appears in the popover.
+  Automatic checks are on by default; automatic installation requires opt-in.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
 login for Anthropic limits, and a signed-in Cursor app for Cursor limits.
@@ -72,7 +78,7 @@ That compiles a release build and installs `/Applications/UsageBar.app`.
 
 ```sh
 scripts/build-app.sh --no-install          # only .build/UsageBar.app
-scripts/build-app.sh --no-install --zip    # also .build/UsageBar.app.zip
+scripts/build-app.sh --no-install --zip    # also zip + .sha256 release assets
 swift test                                 # unit tests
 swift build && ./.build/debug/UsageBar     # debug binary, not the .app
 ```
@@ -165,6 +171,11 @@ capture time, but countdowns are recomputed from the reset time when read back.
 ## Notes
 
 - The app runs as an accessory agent: no Dock icon, menu bar only.
+- Before installation, the archive must match the SHA-256 published beside it,
+  and code-signing verification checks the extracted app’s integrity. Both
+  files still come from the same GitHub release, and the signature is ad hoc
+  rather than a Developer ID, so GitHub remains the trusted distribution
+  channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
   api.anthropic.com and api2.cursor.sh, identical to the ones the CLIs and
   Cursor itself make, and the optional GitHub Releases check for updates.
