@@ -53,7 +53,7 @@ struct SettingsView: View {
                 .accessibilityHint(launchAtLogin.accessibilityHint)
 
                 if launchAtLogin.status == .requiresApproval {
-                    Button("Open Login Items…") {
+                    AppBorderedButton(title: "Open Login Items…") {
                         launchAtLogin.openLoginItemsSettings()
                     }
                 }
@@ -83,12 +83,9 @@ struct SettingsView: View {
 
                     Spacer(minLength: 8)
 
-                    Button(updater.buttonTitle) {
+                    AppBorderedButton(title: updater.buttonTitle) {
                         updater.performButtonAction()
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .appControlFont(size: 11)
                     .disabled(updater.isBusy)
                 }
 
