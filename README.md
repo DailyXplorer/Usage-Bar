@@ -1,16 +1,17 @@
 # UsageBar
 
-Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan) and
-**Claude Code** (Anthropic plan) usage limits: **percentage
+Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
+**Claude Code** (Anthropic plan) and **Cursor** usage limits: **percentage
 remaining** and time until reset.
 
 <p align="center">
   <img src="docs/screenshot.png" alt="UsageBar in the macOS menu bar, with the popover open" width="380">
 </p>
 
-In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99%` — the Codex primary
-window, then Claude Code's **All models** bar (the weekly all-models limit). The
-popover breaks down every window on both sides.
+In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
+Codex primary window, Claude Code's **All models** bar (the weekly all-models
+limit), then Cursor's **Cursor Models** pool (Grok and Composer). Settings let
+you pick which plans appear. The popover breaks down every window on each side.
 
 The whole label is **composed off-screen into a single template image**
 (`MenuBarLabelImage`), and that is deliberate: `MenuBarExtra` renders only one
@@ -44,13 +45,26 @@ three constraints. Do not go back to sibling views: two tests lock this in.
   e.g. Opus), each with its reset time.
 - If there is no Claude Code session, the section is simply hidden.
 
-Both accounts are queried in parallel: a slow backend does not block the other,
-and an error on one side does not wipe out the other side's bars.
+### Cursor
+
+- Reads the session from Cursor's local store
+  (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`):
+  `cursorAuth/accessToken` and `cursorAuth/stripeMembershipType`. No token is
+  ever copied or rewritten.
+- Queries `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
+  the same dashboard usage endpoint.
+- Mirrors Cursor's two plan pools: **Cursor Models** (Grok and Composer) and
+  **Other Models** (third-party models billed at API rates), each with the
+  billing-cycle reset. The menu bar shows the Cursor Models pool.
+- If there is no Cursor session, the section is simply hidden.
+
+All accounts are queried in parallel: a slow backend does not block the others,
+and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Claude's usage endpoint returns **429** if you hit it too often. Three
-safeguards:
+Claude's and Cursor's usage endpoints return **429** if you hit them too often.
+Three safeguards:
 
 - the last state is **persisted** (`UserDefaults`) and redisplayed before any
   request, so restarting the app costs no network call and never shows "–" when
@@ -76,8 +90,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
   registered (`InstrumentSans-Regular`). Weights go through the `wght` axis
   (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
   **silently** falls back to the system font.
-- **Hugeicons** `chat-gpt` and `claude` logos (Logos category, stroke · rounded),
-  bundled as SVG and rendered as templates so they follow the menu bar theme.
+- **Hugeicons** `chat-gpt`, `claude` and `cursor` logos (Logos category,
+  stroke · rounded), bundled as SVG and rendered as templates so they follow
+  the menu bar theme.
 
 ## Build & run
 
@@ -99,13 +114,15 @@ swift build
 - macOS 14+ (Sonoma or newer)
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
+- For the Cursor side: signed in to the Cursor app
 - Xcode Command Line Tools: `xcode-select --install`
 
 ## Notes
 
 - The app runs as an accessory agent: no Dock icon, menu bar only.
-- No data leaves your machine beyond the usage requests to chatgpt.com and
-  api.anthropic.com, identical to the ones both CLIs make.
+- No data leaves your machine beyond the usage requests to chatgpt.com,
+  api.anthropic.com and api2.cursor.sh, identical to the ones the CLIs and
+  Cursor itself make.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
   through the same path: no authorization prompt, including after a rebuild
@@ -113,6 +130,8 @@ swift build
 - The Claude token is refreshed by Claude Code itself. If it has expired and
   Claude Code has not run in a while, the section shows "Claude token expired"
   until the next time Claude Code opens.
+- The Cursor token is read from Cursor's local session store. If it has expired,
+  the section shows "Cursor token expired" until the next time Cursor opens.
 
 ## License
 
@@ -128,10 +147,10 @@ Bundled third-party assets keep their own:
   ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), as the OFL
   requires: if you redistribute the app or the repo, keep that file next to the
   `.ttf`.
-- **Hugeicons** (`chat-gpt.svg`, `claude.svg`) — icons from the free set, MIT
-  licensed, no attribution required.
+- **Hugeicons** (`chat-gpt.svg`, `claude.svg`, `cursor.svg`) — icons from the
+  free set, MIT licensed, no attribution required.
 
-The ChatGPT/OpenAI and Claude/Anthropic logos remain the property of their
-respective owners; they are used here to identify the services being queried,
-not to imply any affiliation. This project is affiliated with neither OpenAI
-nor Anthropic.
+The ChatGPT/OpenAI, Claude/Anthropic and Cursor logos remain the property of
+their respective owners; they are used here to identify the services being
+queried, not to imply any affiliation. This project is affiliated with neither
+OpenAI, Anthropic nor Cursor.
