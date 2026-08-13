@@ -3,28 +3,28 @@ import SwiftUI
 
 struct MenuWindowEdgeInset: NSViewRepresentable {
     var margin: CGFloat = 8
-    var onBecomeKey: () -> Void = {}
+    var onShown: () -> Void = {}
 
     func makeNSView(context: Context) -> NSView {
         let view = EdgeInsetView(margin: margin)
-        view.onBecomeKey = onBecomeKey
+        view.onShown = onShown
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let view = nsView as? EdgeInsetView else { return }
         view.margin = margin
-        view.onBecomeKey = onBecomeKey
+        view.onShown = onShown
         view.applyMargin()
     }
 }
 
 private final class EdgeInsetView: NSView {
     var margin: CGFloat
-    var onBecomeKey: (() -> Void)?
+    var onShown: (() -> Void)?
     private var isAdjusting = false
     private var moveObserver: NSObjectProtocol?
-    private var keyObserver: NSObjectProtocol?
+    private var visibilityObservation: NSKeyValueObservation?
 
     init(margin: CGFloat) {
         self.margin = margin
@@ -40,9 +40,7 @@ private final class EdgeInsetView: NSView {
         if let moveObserver {
             NotificationCenter.default.removeObserver(moveObserver)
         }
-        if let keyObserver {
-            NotificationCenter.default.removeObserver(keyObserver)
-        }
+        visibilityObservation?.invalidate()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -56,10 +54,8 @@ private final class EdgeInsetView: NSView {
             NotificationCenter.default.removeObserver(moveObserver)
             self.moveObserver = nil
         }
-        if let keyObserver {
-            NotificationCenter.default.removeObserver(keyObserver)
-            self.keyObserver = nil
-        }
+        visibilityObservation?.invalidate()
+        visibilityObservation = nil
 
         guard let window else { return }
 
@@ -70,17 +66,14 @@ private final class EdgeInsetView: NSView {
         ) { [weak self] _ in
             self?.applyMargin()
         }
-        keyObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            self?.onBecomeKey?()
+        visibilityObservation = window.observe(\.isVisible, options: [.new]) { [weak self] window, _ in
+            guard window.isVisible else { return }
+            self?.onShown?()
         }
 
         applyMargin()
-        if window.isKeyWindow {
-            onBecomeKey?()
+        if window.isVisible {
+            onShown?()
         }
     }
 

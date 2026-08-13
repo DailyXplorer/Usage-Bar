@@ -22,7 +22,7 @@ struct UsageMenuView: View {
             )
         )
         .background(
-            MenuWindowEdgeInset(onBecomeKey: updater.checkWhenMenuAppears)
+            MenuWindowEdgeInset(onShown: updater.checkWhenMenuAppears)
         )
         .environment(\.font, AppTheme.font(size: 13))
         .onAppear {
