@@ -23,7 +23,7 @@ tag step in [AGENTS.md](AGENTS.md).
 
 Format (Conventional Branch, short aliases):
 
-```
+```text
 <type>/<description>
 ```
 
@@ -51,7 +51,7 @@ This repo does **not** use long-lived `develop`. Cut a release from
 `main` as in [AGENTS.md](AGENTS.md). Do not open `release/` branches
 unless the release itself needs a PR.
 
-```
+```text
 Good:  feat/cursor-usage-settings
 Good:  fix/menu-overlap
 Bad:   Fix/MenuOverlap
@@ -82,7 +82,7 @@ Body (when the subject is not enough):
 
 Do not mix unrelated concerns in one commit. Do not skip hooks.
 
-```
+```text
 Good:
 Keep the menu window off the screen edge
 
@@ -119,7 +119,7 @@ rewrite.
 Same rules as a commit subject: imperative summary, no type prefix,
 no trailing period. GitHub’s release notes generator uses PR titles.
 
-```
+```text
 Good:  Keep the menu window off the screen edge
 Good:  Add Cursor usage pools to Settings
 Bad:   feat: add cursor settings
@@ -155,7 +155,7 @@ Do **not** bump `Support/Info.plist` versions in a feature PR. Do
 
 Title: short imperative or problem statement in English.
 
-```
+```text
 Good:  Menu popover clips on the left screen edge
 Good:  Show Cursor usage next to Codex and Claude
 Bad:   bug
@@ -236,7 +236,7 @@ Match existing files: `*Service.swift` for network/session work,
 Name the type after the production type plus `Tests`. Name methods
 after the behavior they lock:
 
-```
+```swift
 func menuBarLabelIsASingleImage()
 ```
 
