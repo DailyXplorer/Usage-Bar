@@ -312,6 +312,16 @@ final class AppUpdater: ObservableObject {
         checkForUpdates(installIfAvailable: automaticallyInstalls)
     }
 
+    func checkWhenMenuAppears() {
+        guard automaticallyChecks else { return }
+        switch state {
+        case .available, .checking, .downloading, .installing:
+            return
+        case .idle, .upToDate, .failed:
+            checkForUpdates(force: true, installIfAvailable: automaticallyInstalls)
+        }
+    }
+
     func performButtonAction() {
         if case .available(let release) = state {
             install(release)

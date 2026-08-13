@@ -230,6 +230,89 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuAppearanceCheckBypassesTheDailyThrottle() async throws {
+        let defaults = try makeDefaults(named: #function)
+        defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
+        defaults.set(Date(), forKey: UpdatePreferences.lastAttemptKey)
+        let client = MockGitHub(release: sampleRelease(tag: "v1.0.0"))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkWhenMenuAppears()
+        await waitForState(updater) { $0 == .upToDate }
+
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertEqual(updater.state, .upToDate)
+    }
+
+    @MainActor
+    func testMenuAppearanceCheckStaysOffWhenAutomaticChecksAreDisabled() throws {
+        let defaults = try makeDefaults(named: #function)
+        defaults.set(false, forKey: UpdatePreferences.checksKey)
+        let client = MockGitHub(release: sampleRelease(tag: "v9.0.0"))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkWhenMenuAppears()
+
+        XCTAssertEqual(client.callCount, 0)
+        XCTAssertEqual(updater.state, .idle)
+    }
+
+    @MainActor
+    func testMenuAppearanceCheckKeepsAKnownAvailableRelease() async throws {
+        let defaults = try makeDefaults(named: #function)
+        let client = MockGitHub(release: sampleRelease(tag: "v1.4.0"))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkForUpdates(force: true)
+        await waitForState(updater) { if case .available = $0 { return true }; return false }
+
+        updater.checkWhenMenuAppears()
+
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertEqual(updater.availableRelease?.versionString, "1.4.0")
+        XCTAssertEqual(updater.buttonTitle, "Install 1.4.0")
+    }
+
+    @MainActor
+    func testMenuAppearanceCheckRetriesAFailedCheckImmediately() async throws {
+        let defaults = try makeDefaults(named: #function)
+        let client = FailingGitHub()
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkForUpdates(force: true)
+        await waitForState(updater) {
+            $0 == .failed(UpdateError.network("offline").localizedDescription)
+        }
+
+        updater.checkWhenMenuAppears()
+        await waitForState(updater) {
+            $0 == .failed(UpdateError.network("offline").localizedDescription) && client.callCount == 2
+        }
+
+        XCTAssertEqual(client.callCount, 2)
+    }
+
+    @MainActor
     func testForcedCheckBypassesTheDailyThrottle() async throws {
         let defaults = try makeDefaults(named: #function)
         defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
