@@ -6,8 +6,8 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var launchAtLogin: LaunchAtLoginModel
 
-    init(launchAtLogin: LaunchAtLoginModel = LaunchAtLoginModel()) {
-        _launchAtLogin = StateObject(wrappedValue: launchAtLogin)
+    init(launchAtLogin: LaunchAtLoginModel? = nil) {
+        _launchAtLogin = StateObject(wrappedValue: launchAtLogin ?? LaunchAtLoginModel())
     }
 
     var body: some View {

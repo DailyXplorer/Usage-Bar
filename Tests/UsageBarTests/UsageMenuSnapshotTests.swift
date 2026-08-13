@@ -135,5 +135,5 @@ private struct SilentGitHub: GitHubReleasing {
 
 private struct SilentInstaller: AppUpdateInstalling {
     func install(fromAppBundle url: URL) throws {}
-    func relaunch() {}
+    func relaunch() throws {}
 }
