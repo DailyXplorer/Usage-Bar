@@ -95,7 +95,7 @@ final class AppUpdaterTests: XCTestCase {
 
         XCTAssertEqual(updater.availableRelease?.versionString, "1.4.0")
         XCTAssertEqual(updater.buttonTitle, "Install 1.4.0")
-        XCTAssertEqual(updater.statusLine, "Version 1.4.0 is available")
+        XCTAssertEqual(updater.statusLine, Optional("Version 1.4.0 is available"))
     }
 
     @MainActor
@@ -226,6 +226,7 @@ final class AppUpdaterTests: XCTestCase {
 
         XCTAssertEqual(client.callCount, 0)
         XCTAssertEqual(updater.state, .idle)
+        XCTAssertNil(updater.statusLine)
     }
 
     @MainActor
