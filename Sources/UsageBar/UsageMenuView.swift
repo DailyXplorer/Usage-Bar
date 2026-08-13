@@ -338,9 +338,7 @@ private struct ErrorView: View {
                 .appSecondaryLabelStyle()
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Retry", action: retry)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            AppBorderedButton(title: "Retry", action: retry)
         }
         .padding(16)
     }
