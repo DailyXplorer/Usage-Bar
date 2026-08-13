@@ -8,6 +8,7 @@ struct CursorCredentials {
 
 enum CursorUsageError: LocalizedError {
     case notSignedIn
+    case unreadableLogin
     case tokenExpired
     case throttled
     case network(String)
@@ -18,6 +19,8 @@ enum CursorUsageError: LocalizedError {
         switch self {
         case .notSignedIn:
             return "No Cursor session. Open Cursor and sign in."
+        case .unreadableLogin:
+            return "Couldn’t read the Cursor session. Open Cursor and try again."
         case .tokenExpired:
             return "Cursor token expired. Open Cursor to refresh it."
         case .throttled:
@@ -81,7 +84,9 @@ actor CursorUsageService {
         guard FileManager.default.fileExists(atPath: stateDB.path) else {
             throw CursorUsageError.notSignedIn
         }
-        let values = sqliteValues()
+        guard let values = sqliteValues() else {
+            throw CursorUsageError.unreadableLogin
+        }
         guard let accessToken = values["cursorAuth/accessToken"], !accessToken.isEmpty else {
             throw CursorUsageError.notSignedIn
         }
@@ -92,8 +97,8 @@ actor CursorUsageService {
         )
     }
 
-    private static func sqliteValues() -> [String: String] {
-        if let values = sqliteValuesInProcess(), !values.isEmpty {
+    private static func sqliteValues() -> [String: String]? {
+        if let values = sqliteValuesInProcess() {
             return values
         }
         let encodedPath = stateDB.path.addingPercentEncoding(
@@ -104,11 +109,11 @@ actor CursorUsageService {
             "file:\(encodedPath)?mode=ro",
         ]
         for database in queries {
-            if let values = sqliteValues(database: database), !values.isEmpty {
+            if let values = sqliteValues(database: database) {
                 return values
             }
         }
-        return [:]
+        return nil
     }
 
     private static func sqliteValuesInProcess() -> [String: String]? {
