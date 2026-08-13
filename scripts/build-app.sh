@@ -1,6 +1,24 @@
 #!/bin/sh
 set -eu
 
+no_install=0
+make_zip=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) no_install=1 ;;
+    --zip) make_zip=1 ;;
+    *)
+      printf 'unknown argument: %s\n' "$arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  no_install=1
+  make_zip=1
+fi
+
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 app_path="$project_dir/.build/UsageBar.app"
 contents_path="$app_path/Contents"
@@ -17,7 +35,36 @@ mkdir -p "$macos_path" "$resources_path"
 ditto "$release_path/UsageBar" "$macos_path/UsageBar"
 ditto "$project_dir/Support/Info.plist" "$contents_path/Info.plist"
 ditto "$release_path/UsageBar_UsageBar.bundle" "$resources_path/UsageBar_UsageBar.bundle"
+
+version="${USAGEBAR_VERSION:-}"
+version="${version#v}"
+if [ -z "$version" ]; then
+  if tag=$(git -C "$project_dir" describe --tags --exact-match 2>/dev/null); then
+    version=${tag#v}
+  fi
+fi
+if [ -n "$version" ]; then
+  plutil -replace CFBundleShortVersionString -string "$version" "$contents_path/Info.plist"
+  plutil -replace CFBundleVersion -string "$version" "$contents_path/Info.plist"
+fi
+
 xattr -cr "$app_path"
 codesign --force --sign - "$app_path"
 
-printf '%s\n' "$app_path"
+if [ "$no_install" -eq 0 ]; then
+  install_path="/Applications/UsageBar.app"
+  rm -rf "$install_path"
+  ditto "$app_path" "$install_path"
+  xattr -cr "$install_path"
+  codesign --force --sign - "$install_path"
+  printf '%s\n' "$install_path"
+else
+  printf '%s\n' "$app_path"
+fi
+
+if [ "$make_zip" -eq 1 ]; then
+  zip_path="$project_dir/.build/UsageBar.app.zip"
+  rm -f "$zip_path"
+  ditto -c -k --keepParent "$app_path" "$zip_path"
+  printf '%s\n' "$zip_path"
+fi

@@ -1,7 +1,7 @@
 # UsageBar
 
-Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan) and
-**Claude Code** (Anthropic plan) usage limits: **percentage
+Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
+**Claude Code** (Anthropic plan), and **Cursor** usage limits: **percentage
 remaining** and time until reset.
 
 <p align="center">
@@ -18,6 +18,66 @@ image and one text in its label, drops an image interpolated into a string, and
 freezes the view hierarchy on first render — a segment added later by an `if`
 would never appear. A single `Image` whose value alone changes works around all
 three constraints. Do not go back to sibling views: two tests lock this in.
+
+## Install
+
+macOS 14 or newer. The app installs into **Applications** as
+`/Applications/UsageBar.app` (Finder shows **Usage Bar**). It runs in the menu
+bar only — no Dock icon.
+
+### Option 1 — GitHub release (no Xcode)
+
+1. Open the [latest release](https://github.com/DailyXplorer/Usage-Bar/releases/latest).
+2. Download **`UsageBar.app.zip`**.
+3. Unzip it.
+4. Drag **Usage Bar** into **Applications**.
+5. Open it from Applications.
+
+If macOS refuses the first launch (ad-hoc signature), in Finder:
+**right-click → Open**.
+
+### Option 2 — one command
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DailyXplorer/Usage-Bar/main/scripts/install.sh | sh
+```
+
+That downloads `UsageBar.app.zip` from the latest GitHub release, installs it
+to Applications, and launches it.
+
+### After install
+
+- Open the popover from the menu bar icon.
+- **Settings…** → **Launch at login** to start Usage Bar when you log in.
+- **Settings…** → **Updates** to check GitHub or turn on automatic installs.
+  When a newer release exists, an **Update** button also appears in the popover.
+
+You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
+login for Anthropic limits, and a signed-in Cursor app for Cursor limits.
+Missing accounts are hidden, not errors.
+
+### From source
+
+Needs [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools):
+
+```sh
+git clone https://github.com/DailyXplorer/Usage-Bar.git
+cd Usage-Bar
+chmod +x scripts/build-app.sh
+scripts/build-app.sh
+```
+
+That compiles a release build and installs `/Applications/UsageBar.app`.
+
+```sh
+scripts/build-app.sh --no-install          # only .build/UsageBar.app
+scripts/build-app.sh --no-install --zip    # also .build/UsageBar.app.zip
+swift test                                 # unit tests
+swift build && ./.build/debug/UsageBar     # debug binary, not the .app
+```
+
+Agents and maintainers: contributing, PRs, and cutting a GitHub release are in
+[AGENTS.md](AGENTS.md).
 
 ## How it works
 
@@ -79,33 +139,20 @@ capture time, but countdowns are recomputed from the reset time when read back.
 - **Hugeicons** `chat-gpt` and `claude` logos (Logos category, stroke · rounded),
   bundled as SVG and rendered as templates so they follow the menu bar theme.
 
-## Build & run
-
-```sh
-chmod +x scripts/build-app.sh
-scripts/build-app.sh
-open .build/UsageBar.app
-```
-
-For the debug build:
-
-```sh
-swift build
-./.build/debug/UsageBar
-```
-
 ## Requirements
 
 - macOS 14+ (Sonoma or newer)
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
-- Xcode Command Line Tools: `xcode-select --install`
+- For the Cursor side: signed in to the Cursor app
+- To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Notes
 
 - The app runs as an accessory agent: no Dock icon, menu bar only.
 - No data leaves your machine beyond the usage requests to chatgpt.com and
-  api.anthropic.com, identical to the ones both CLIs make.
+  api.anthropic.com, identical to the ones both CLIs make, and the optional
+  GitHub Releases check for updates.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
   through the same path: no authorization prompt, including after a rebuild

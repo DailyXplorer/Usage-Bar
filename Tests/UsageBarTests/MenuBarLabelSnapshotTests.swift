@@ -27,7 +27,8 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         XCTAssertNotEqual(label.tiffRepresentation, other.tiffRepresentation)
 
         try render(
-            MenuBarLabel(model: model),
+            MenuBarLabel(model: model)
+                .environmentObject(stubMenuBarUpdater()),
             to: buildDirectory.appendingPathComponent("UsageBar-menubar.png")
         )
     }
@@ -140,4 +141,28 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try png.write(to: url, options: .atomic)
     }
+}
+
+private func stubMenuBarUpdater() -> AppUpdater {
+    let name = UUID().uuidString
+    let defaults = UserDefaults(suiteName: name)!
+    defaults.removePersistentDomain(forName: name)
+    defaults.set(false, forKey: UpdatePreferences.checksKey)
+    return AppUpdater(
+        client: SilentGitHub(),
+        installer: SilentInstaller(),
+        defaults: defaults,
+        currentVersion: "1.0.0"
+    )
+}
+
+private struct SilentGitHub: GitHubReleasing {
+    func latestRelease() async throws -> GitHubRelease {
+        throw UpdateError.noReleases
+    }
+}
+
+private struct SilentInstaller: AppUpdateInstalling {
+    func install(fromAppBundle url: URL) throws {}
+    func relaunch() {}
 }
