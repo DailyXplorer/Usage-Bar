@@ -31,8 +31,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                     resetAt: Date(timeIntervalSince1970: 1_789_244_447),
                     resetAfterSeconds: 600,
                     limitWindowSeconds: 2_678_400,
-                    reached: false,
-                    detail: CursorLimits.modelsDetail
+                    reached: false
                 )
             ],
             cursorPlan: "pro",
@@ -46,7 +45,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded.claudeBuckets[0].remainingPercent, 99)
         XCTAssertEqual(loaded.cursorPlan, "pro")
         XCTAssertEqual(loaded.cursorBuckets[0].remainingPercent, 88)
-        XCTAssertEqual(loaded.cursorBuckets[0].detail, CursorLimits.modelsDetail)
+        XCTAssertNil(loaded.cursorBuckets[0].detail)
         XCTAssertEqual(loaded.fetchedAt, snapshot.fetchedAt)
     }
 

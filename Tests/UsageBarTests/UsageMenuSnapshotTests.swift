@@ -63,8 +63,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     resetAt: Date(timeIntervalSince1970: 1_789_244_447),
                     resetAfterSeconds: 2_678_400,
                     limitWindowSeconds: 2_678_400,
-                    reached: false,
-                    detail: CursorLimits.modelsDetail
+                    reached: false
                 ),
                 LimitBucket(
                     provider: .cursor,
@@ -74,8 +73,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     resetAt: Date(timeIntervalSince1970: 1_789_244_447),
                     resetAfterSeconds: 2_678_400,
                     limitWindowSeconds: 2_678_400,
-                    reached: false,
-                    detail: CursorLimits.otherDetail
+                    reached: false
                 ),
             ],
             cursorPlan: "pro",

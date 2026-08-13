@@ -47,9 +47,6 @@ struct CursorPlanUsage: Decodable {
 }
 
 enum CursorLimits {
-    static let modelsDetail = "Includes Cursor Grok and Composer"
-    static let otherDetail = "Third-party models billed at API rates"
-
     static func buckets(from response: CursorUsageResponse, now: Date = Date()) -> [LimitBucket] {
         guard response.enabled != false, let plan = response.planUsage else { return [] }
 
@@ -69,7 +66,6 @@ enum CursorLimits {
                 bucket(
                     kind: .cursorModels,
                     name: "Cursor Models",
-                    detail: modelsDetail,
                     used: used,
                     resetAt: resetAt,
                     resetAfterSeconds: resetAfter,
@@ -82,7 +78,6 @@ enum CursorLimits {
                 bucket(
                     kind: .otherModels,
                     name: "Other Models",
-                    detail: otherDetail,
                     used: used,
                     resetAt: resetAt,
                     resetAfterSeconds: resetAfter,
@@ -96,7 +91,6 @@ enum CursorLimits {
     private static func bucket(
         kind: LimitBucket.Kind,
         name: String,
-        detail: String,
         used: Double,
         resetAt: Date?,
         resetAfterSeconds: Int?,
@@ -111,8 +105,7 @@ enum CursorLimits {
             resetAt: resetAt,
             resetAfterSeconds: resetAfterSeconds,
             limitWindowSeconds: limitWindowSeconds,
-            reached: usedPercent >= 100,
-            detail: detail
+            reached: usedPercent >= 100
         )
     }
 
