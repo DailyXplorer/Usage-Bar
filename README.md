@@ -20,6 +20,74 @@ freezes the view hierarchy on first render — a segment added later by an `if`
 would never appear. A single `Image` whose value alone changes works around all
 three constraints. Do not go back to sibling views: two tests lock this in.
 
+## Install
+
+macOS 14 or newer. The app installs into **Applications** as
+`/Applications/UsageBar.app` (Finder shows **Usage Bar**). It runs in the menu
+bar only — no Dock icon.
+
+### Option 1 — GitHub release (no Xcode)
+
+1. Open the [latest release](https://github.com/DailyXplorer/Usage-Bar/releases/latest).
+2. Download **`UsageBar.app.zip`**.
+3. Unzip it.
+4. Drag **Usage Bar** into **Applications**.
+5. Open it from Applications.
+
+If macOS refuses the first launch (ad-hoc signature), in Finder:
+**right-click → Open**.
+
+### Option 2 — checksum-verified installer script
+
+```sh
+curl -fsSLo UsageBar-install.sh https://raw.githubusercontent.com/DailyXplorer/Usage-Bar/main/scripts/install.sh
+less UsageBar-install.sh
+sh UsageBar-install.sh
+rm UsageBar-install.sh
+```
+
+Inspect the downloaded script before running it. It verifies the release
+tag once, downloads both assets from that exact tagged release, then checks the
+SHA-256 file, bundle identifier, executable name, and ad-hoc code signature. It
+stages the replacement in Applications with rollback before launching it and
+stops a running Usage Bar first, so installation cannot leave two menu bar
+instances.
+
+### After install
+
+- Open the popover from the menu bar icon.
+- **Settings…** → **Launch at login** to start Usage Bar when you log in.
+- **Settings…** → **Updates** to check GitHub or turn on automatic installs.
+  When a newer release exists, an **Update** button also appears in the popover.
+  Automatic checks are on by default; automatic installation requires opt-in.
+
+You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
+login for Anthropic limits, and a signed-in Cursor app for Cursor limits.
+Missing accounts are hidden, not errors.
+
+### From source
+
+Needs [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools):
+
+```sh
+git clone https://github.com/DailyXplorer/Usage-Bar.git
+cd Usage-Bar
+chmod +x scripts/build-app.sh
+scripts/build-app.sh
+```
+
+That compiles a release build and installs `/Applications/UsageBar.app`.
+
+```sh
+scripts/build-app.sh --no-install          # only .build/UsageBar.app
+scripts/build-app.sh --no-install --zip    # also zip + .sha256 release assets
+swift test                                 # unit tests
+swift build && ./.build/debug/UsageBar     # debug binary, not the .app
+```
+
+Agents and maintainers: contributing, PRs, and cutting a GitHub release are in
+[AGENTS.md](AGENTS.md).
+
 ## How it works
 
 ### Codex
@@ -95,35 +163,26 @@ capture time, but countdowns are recomputed from the reset time when read back.
   templates so they follow the menu bar theme; `dashboard-speed-02` is the
   application icon.
 
-## Build & run
-
-```sh
-chmod +x scripts/build-app.sh
-scripts/build-app.sh
-open .build/UsageBar.app
-```
-
-For the debug build:
-
-```sh
-swift build
-./.build/debug/UsageBar
-```
-
 ## Requirements
 
 - macOS 14+ (Sonoma or newer)
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
 - For the Cursor side: signed in to the Cursor app
-- Xcode Command Line Tools: `xcode-select --install`
+- To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Notes
 
 - The app runs as an accessory agent: no Dock icon, menu bar only.
+- Before installation, the archive must match the SHA-256 published beside it,
+  both asset URLs must belong to the same tagged Usage Bar release, and
+  code-signing verification checks the extracted app’s integrity. The
+  signature is ad hoc, not a Developer ID identity: it does not authenticate a
+  publisher. GitHub over HTTPS and the installer script you inspect remain the
+  trusted distribution channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
   api.anthropic.com and api2.cursor.sh, identical to the ones the CLIs and
-  Cursor itself make.
+  Cursor itself make, and the optional GitHub Releases check for updates.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
   through the same path: no authorization prompt, including after a rebuild

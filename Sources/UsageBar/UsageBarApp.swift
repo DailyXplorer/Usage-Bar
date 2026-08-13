@@ -5,6 +5,7 @@ import SwiftUI
 struct UsageBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var usageModel = UsageModel()
+    @StateObject private var appUpdater = AppUpdater()
 
     init() {
         AppTheme.loadFont()
@@ -14,14 +15,18 @@ struct UsageBarApp: App {
         MenuBarExtra {
             UsageMenuView()
                 .environmentObject(usageModel)
+                .environmentObject(appUpdater)
         } label: {
-            MenuBarLabel(model: usageModel)
+            MenuBarLabel(model: usageModel) {
+                appUpdater.startAutomaticChecks()
+            }
         }
         .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
                 .environmentObject(usageModel)
+                .environmentObject(appUpdater)
                 .onDisappear {
                     NSApp.setActivationPolicy(.accessory)
                 }
@@ -29,9 +34,17 @@ struct UsageBarApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        DispatchQueue.global(qos: .utility).async {
+            let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted()
+            guard completed else { return }
+            DispatchQueue.main.async {
+                UserDefaults.standard.set(false, forKey: AppInstallLocation.pendingKey)
+            }
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(windowWillClose(_:)),
@@ -69,12 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuBarLabel: View {
     @ObservedObject var model: UsageModel
+    var startAutomaticChecks: () -> Void = {}
 
     var body: some View {
         Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
         .id(model.menuBarSegments.map(\.value).joined(separator: "|"))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.menuBarAccessibilityLabel)
-        .onAppear { model.start() }
+        .onAppear {
+            model.start()
+            startAutomaticChecks()
+        }
     }
 }

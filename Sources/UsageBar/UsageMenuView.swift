@@ -2,6 +2,7 @@ import SwiftUI
 
 struct UsageMenuView: View {
     @EnvironmentObject private var model: UsageModel
+    @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -112,6 +113,16 @@ struct UsageMenuView: View {
             Spacer()
 
             HStack(spacing: 4) {
+                if updater.state.showsUpdateAction {
+                    FooterIconButton(
+                        systemImage: "arrow.down.app",
+                        accessibilityLabel: updater.buttonTitle
+                    ) {
+                        updater.performButtonAction()
+                    }
+                    .disabled(updater.isBusy)
+                }
+
                 SettingsFooterButton()
 
                 FooterIconButton(systemImage: "power", accessibilityLabel: "Quit") {
