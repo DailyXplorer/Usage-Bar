@@ -8,6 +8,8 @@
     <string>UsageBar</string>
     <key>CFBundleIdentifier</key>
     <string>com.usagebar.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
