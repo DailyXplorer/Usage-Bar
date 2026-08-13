@@ -33,6 +33,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 448)
         .environment(\.font, AppTheme.font(size: 13))
+        .background(SettingsWindowSpacePin())
     }
 
     private func visibility(for provider: LimitBucket.Provider) -> Binding<Bool> {
