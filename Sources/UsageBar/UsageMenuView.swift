@@ -113,8 +113,11 @@ struct UsageMenuView: View {
             Spacer()
 
             HStack(spacing: 4) {
-                if updater.availableRelease != nil {
-                    FooterIconButton(systemImage: "arrow.down.app", accessibilityLabel: "Update") {
+                if updater.state.showsUpdateAction {
+                    FooterIconButton(
+                        systemImage: "arrow.down.app",
+                        accessibilityLabel: updater.buttonTitle
+                    ) {
                         updater.performButtonAction()
                     }
                     .disabled(updater.isBusy)

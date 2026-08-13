@@ -48,8 +48,7 @@ final class AppUpdaterTests: XCTestCase {
 
     @MainActor
     func testAutomaticInstallationRequiresOptInByDefault() throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+        let defaults = try makeDefaults(named: #function)
         let updater = AppUpdater(
             client: MockGitHub(release: sampleRelease(tag: "v1.1.0")),
             installer: MockInstaller(),
@@ -62,9 +61,8 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     @MainActor
-    func testCheckMarksCurrentVersionAsUpToDate() async {
-        let defaults = try! XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+    func testCheckMarksCurrentVersionAsUpToDate() async throws {
+        let defaults = try makeDefaults(named: #function)
         let updater = AppUpdater(
             client: MockGitHub(release: sampleRelease(tag: "v1.0.0")),
             installer: MockInstaller(),
@@ -77,12 +75,13 @@ final class AppUpdaterTests: XCTestCase {
 
         XCTAssertEqual(updater.state, .upToDate)
         XCTAssertEqual(updater.buttonTitle, "Check for Updates")
+        XCTAssertNotNil(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date)
+        XCTAssertNotNil(defaults.object(forKey: UpdatePreferences.lastAttemptKey) as? Date)
     }
 
     @MainActor
-    func testCheckSurfacesANewerGitHubRelease() async {
-        let defaults = try! XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+    func testCheckSurfacesANewerGitHubRelease() async throws {
+        let defaults = try makeDefaults(named: #function)
         let release = sampleRelease(tag: "v1.4.0")
         let updater = AppUpdater(
             client: MockGitHub(release: release),
@@ -101,8 +100,7 @@ final class AppUpdaterTests: XCTestCase {
 
     @MainActor
     func testCheckRejectsAReleaseWithoutItsChecksum() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+        let defaults = try makeDefaults(named: #function)
         let release = GitHubRelease(
             tagName: "v1.4.0",
             name: "1.4.0",
@@ -132,8 +130,7 @@ final class AppUpdaterTests: XCTestCase {
 
     @MainActor
     func testCheckRejectsAssetsOutsideTheExpectedRelease() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+        let defaults = try makeDefaults(named: #function)
         let release = GitHubRelease(
             tagName: "v1.4.0",
             name: "1.4.0",
@@ -166,11 +163,11 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     @MainActor
-    func testFailedCheckStillThrottlesTheNextAutomaticAttempt() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+    func testFailedCheckUsesShortRetryThrottleWithoutClaimingSuccess() async throws {
+        let defaults = try makeDefaults(named: #function)
+        let client = FailingGitHub()
         let updater = AppUpdater(
-            client: FailingGitHub(),
+            client: client,
             installer: MockInstaller(),
             defaults: defaults,
             currentVersion: "1.0.0"
@@ -181,13 +178,41 @@ final class AppUpdaterTests: XCTestCase {
             $0 == .failed(UpdateError.network("offline").localizedDescription)
         }
 
-        XCTAssertNotNil(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date)
+        XCTAssertNil(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date)
+        XCTAssertNotNil(defaults.object(forKey: UpdatePreferences.lastAttemptKey) as? Date)
+
+        updater.startAutomaticChecks()
+
+        XCTAssertEqual(client.callCount, 1)
     }
 
     @MainActor
-    func testAutomaticCheckRespectsTheDailyThrottle() {
-        let defaults = try! XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+    func testAutomaticCheckRetriesAfterTheFailureBackoff() async throws {
+        let defaults = try makeDefaults(named: #function)
+        let now = Date(timeIntervalSince1970: 1_786_402_800)
+        defaults.set(
+            now.addingTimeInterval(-UpdatePreferences.retryInterval - 1),
+            forKey: UpdatePreferences.lastAttemptKey
+        )
+        let client = MockGitHub(release: sampleRelease(tag: "v1.0.0"))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            now: { now },
+            currentVersion: "1.0.0"
+        )
+
+        updater.startAutomaticChecks()
+        await waitForState(updater) { $0 == .upToDate }
+
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertEqual(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date, now)
+    }
+
+    @MainActor
+    func testAutomaticCheckRespectsTheDailyThrottle() throws {
+        let defaults = try makeDefaults(named: #function)
         defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
         let client = MockGitHub(release: sampleRelease(tag: "v9.0.0"))
         let updater = AppUpdater(
@@ -205,9 +230,9 @@ final class AppUpdaterTests: XCTestCase {
 
     @MainActor
     func testForcedCheckBypassesTheDailyThrottle() async throws {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+        let defaults = try makeDefaults(named: #function)
         defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
+        defaults.set(Date(), forKey: UpdatePreferences.lastAttemptKey)
         let client = MockGitHub(release: sampleRelease(tag: "v1.0.0"))
         let updater = AppUpdater(
             client: client,
@@ -222,6 +247,18 @@ final class AppUpdaterTests: XCTestCase {
         updater.checkForUpdates(force: true)
         await waitForState(updater) { $0 == .upToDate }
         XCTAssertEqual(client.callCount, 1)
+    }
+
+    func testUpdateActionStaysVisibleForEveryActionableState() {
+        let release = sampleRelease(tag: "v1.1.0")
+
+        XCTAssertFalse(UpdateState.idle.showsUpdateAction)
+        XCTAssertFalse(UpdateState.checking.showsUpdateAction)
+        XCTAssertFalse(UpdateState.upToDate.showsUpdateAction)
+        XCTAssertTrue(UpdateState.available(release).showsUpdateAction)
+        XCTAssertTrue(UpdateState.downloading.showsUpdateAction)
+        XCTAssertTrue(UpdateState.installing.showsUpdateAction)
+        XCTAssertTrue(UpdateState.failed("offline").showsUpdateAction)
     }
 
     func testChecksumVerificationAcceptsThePublishedArchiveHash() throws {
@@ -338,8 +375,7 @@ final class AppUpdaterTests: XCTestCase {
         ]
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [UpdateURLProtocol.self]
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
-        defaults.removePersistentDomain(forName: #function)
+        let defaults = try makeDefaults(named: #function)
         let updater = AppUpdater(
             client: MockGitHub(release: release),
             installer: MockInstaller(),
@@ -369,6 +405,15 @@ final class AppUpdaterTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTFail("Timed out waiting for updater state, last state: \(updater.state)")
+    }
+
+    private func makeDefaults(named name: String) throws -> UserDefaults {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.removePersistentDomain(forName: name)
+        addTeardownBlock {
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        }
+        return defaults
     }
 
     private func sampleRelease(tag: String) -> GitHubRelease {
@@ -432,33 +477,45 @@ final class AppUpdaterTests: XCTestCase {
     }
 }
 
-private final class MockGitHub: GitHubReleasing {
+private final class MockGitHub: GitHubReleasing, @unchecked Sendable {
     let release: GitHubRelease
-    private(set) var callCount = 0
+    private let counter = LockedCounter()
+
+    var callCount: Int { counter.value }
 
     init(release: GitHubRelease) {
         self.release = release
     }
 
     func latestRelease() async throws -> GitHubRelease {
-        callCount += 1
+        counter.increment()
         return release
     }
 }
 
-private struct FailingGitHub: GitHubReleasing {
+private final class FailingGitHub: GitHubReleasing, @unchecked Sendable {
+    private let counter = LockedCounter()
+
+    var callCount: Int { counter.value }
+
     func latestRelease() async throws -> GitHubRelease {
+        counter.increment()
         throw UpdateError.network("offline")
     }
 }
 
-private final class MockInstaller: AppUpdateInstalling {
+private struct MockInstaller: AppUpdateInstalling {
     func install(fromAppBundle url: URL) throws {}
     func relaunch() throws {}
 }
 
 private final class UpdateURLProtocol: URLProtocol {
-    static var responses: [URL: Data] = [:]
+    private static let responseStore = LockedResponses()
+
+    static var responses: [URL: Data] {
+        get { responseStore.value }
+        set { responseStore.value = newValue }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool {
         request.url != nil
@@ -485,4 +542,39 @@ private final class UpdateURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class LockedResponses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [URL: Data] = [:]
+
+    var value: [URL: Data] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+        set {
+            lock.lock()
+            storage = newValue
+            lock.unlock()
+        }
+    }
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func increment() {
+        lock.lock()
+        storage += 1
+        lock.unlock()
+    }
 }

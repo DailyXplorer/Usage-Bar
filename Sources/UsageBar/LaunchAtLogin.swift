@@ -171,24 +171,47 @@ enum LaunchAtLoginResolver {
     }
 }
 
+protocol MainAppServiceControlling {
+    var status: SMAppService.Status { get }
+    func register() throws
+    func unregister() throws
+}
+
+struct SystemMainAppServiceController: MainAppServiceControlling {
+    var status: SMAppService.Status {
+        SMAppService.mainApp.status
+    }
+
+    func register() throws {
+        try SMAppService.mainApp.register()
+    }
+
+    func unregister() throws {
+        try SMAppService.mainApp.unregister()
+    }
+}
+
 struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
     private let agent: LaunchAgentStore
     private let installLocation: AppInstallLocation
     private let defaults: UserDefaults
+    private let appService: any MainAppServiceControlling
 
     init(
         agent: LaunchAgentStore = LaunchAgentStore(),
         installLocation: AppInstallLocation = AppInstallLocation(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        appService: any MainAppServiceControlling = SystemMainAppServiceController()
     ) {
         self.agent = agent
         self.installLocation = installLocation
         self.defaults = defaults
+        self.appService = appService
     }
 
     var status: LaunchAtLoginStatus {
         LaunchAtLoginResolver.status(
-            appService: SMAppService.mainApp.status,
+            appService: appService.status,
             agentInstalled: agent.isInstalled
         )
     }
@@ -201,18 +224,15 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
         }
     }
 
-    static func completePendingIfNeeded(
+    static func pendingEnableCompleted(
         defaults: UserDefaults = .standard,
         makeService: () throws -> SMAppServiceLaunchAtLogin = { SMAppServiceLaunchAtLogin() }
-    ) {
-        guard defaults.bool(forKey: AppInstallLocation.pendingKey) else { return }
+    ) -> Bool {
+        guard defaults.bool(forKey: AppInstallLocation.pendingKey) else { return false }
         do {
-            let result = try makeService().enable()
-            if result == .enabled {
-                defaults.set(false, forKey: AppInstallLocation.pendingKey)
-            }
+            return try makeService().enable() == .enabled
         } catch {
-            return
+            return false
         }
     }
 
@@ -224,7 +244,7 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
             return .relaunchScheduled
         }
 
-        let current = SMAppService.mainApp.status
+        let current = appService.status
         if current == .enabled || current == .requiresApproval {
             try agent.uninstall()
             return .enabled
@@ -233,15 +253,15 @@ struct SMAppServiceLaunchAtLogin: LaunchAtLoginServicing {
             try agent.install(appURL: installed)
             return .enabled
         }
-        try SMAppService.mainApp.register()
+        try appService.register()
         try agent.uninstall()
         return .enabled
     }
 
     private func disable() throws {
-        let current = SMAppService.mainApp.status
+        let current = appService.status
         if current == .enabled || current == .requiresApproval {
-            try SMAppService.mainApp.unregister()
+            try appService.unregister()
         }
         try agent.uninstall()
         defaults.set(false, forKey: AppInstallLocation.pendingKey)

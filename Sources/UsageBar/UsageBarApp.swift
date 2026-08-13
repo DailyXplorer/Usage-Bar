@@ -34,10 +34,17 @@ struct UsageBarApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        SMAppServiceLaunchAtLogin.completePendingIfNeeded()
+        DispatchQueue.global(qos: .utility).async {
+            let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted()
+            guard completed else { return }
+            DispatchQueue.main.async {
+                UserDefaults.standard.set(false, forKey: AppInstallLocation.pendingKey)
+            }
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(windowWillClose(_:)),

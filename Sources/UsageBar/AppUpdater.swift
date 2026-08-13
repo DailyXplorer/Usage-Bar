@@ -3,11 +3,11 @@ import Combine
 import CryptoKit
 import Foundation
 
-protocol GitHubReleasing {
+protocol GitHubReleasing: Sendable {
     func latestRelease() async throws -> GitHubRelease
 }
 
-protocol AppUpdateInstalling {
+protocol AppUpdateInstalling: Sendable {
     func install(fromAppBundle url: URL) throws
     func relaunch() throws
 }
@@ -117,12 +117,11 @@ struct GitHubReleaseService: GitHubReleasing {
 
 struct AppUpdateInstaller: AppUpdateInstalling {
     var destination: URL = AppDistribution.installURL
-    var fileManager: FileManager = .default
 
     func install(fromAppBundle url: URL) throws {
         try verifyBundle(at: url)
         try clearQuarantine(at: url)
-        try AppBundleReplacement.install(from: url, to: destination, fileManager: fileManager)
+        try AppBundleReplacement.install(from: url, to: destination)
     }
 
     func relaunch() throws {
@@ -144,6 +143,7 @@ struct AppUpdateInstaller: AppUpdateInstalling {
     }
 
     func extractApp(fromZip zipURL: URL, to directory: URL) throws -> URL {
+        let fileManager = FileManager.default
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
@@ -202,6 +202,7 @@ struct AppUpdateInstaller: AppUpdateInstalling {
     }
 }
 
+@MainActor
 final class AppUpdater: ObservableObject {
     @Published private(set) var state: UpdateState = .idle
     @Published var automaticallyChecks: Bool {
@@ -223,8 +224,8 @@ final class AppUpdater: ObservableObject {
     private let unpacker: AppUpdateInstaller
     private let defaults: UserDefaults
     private let session: URLSession
-    private let fileManager: FileManager
     private let makeWorkDirectory: () -> URL
+    private let now: () -> Date
     private var checkTask: Task<Void, Never>?
 
     init(
@@ -233,11 +234,11 @@ final class AppUpdater: ObservableObject {
         unpacker: AppUpdateInstaller = AppUpdateInstaller(),
         defaults: UserDefaults = .standard,
         session: URLSession = .shared,
-        fileManager: FileManager = .default,
         makeWorkDirectory: @escaping () -> URL = {
             FileManager.default.temporaryDirectory
                 .appendingPathComponent("UsageBarUpdate-\(UUID().uuidString)", isDirectory: true)
         },
+        now: @escaping () -> Date = Date.init,
         currentVersion: String? = nil
     ) {
         self.client = client
@@ -245,8 +246,8 @@ final class AppUpdater: ObservableObject {
         self.unpacker = unpacker
         self.defaults = defaults
         self.session = session
-        self.fileManager = fileManager
         self.makeWorkDirectory = makeWorkDirectory
+        self.now = now
         self.currentVersion = currentVersion
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
             ?? "0"
@@ -321,12 +322,18 @@ final class AppUpdater: ObservableObject {
 
     func checkForUpdates(force: Bool = false, installIfAvailable: Bool = false) {
         if isBusy { return }
-        if !force,
-           let last = defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date,
-           Date().timeIntervalSince(last) < UpdatePreferences.checkInterval {
-            return
+        let checkDate = now()
+        if !force {
+            if let lastCheck = defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date,
+               checkDate.timeIntervalSince(lastCheck) < UpdatePreferences.checkInterval {
+                return
+            }
+            if let lastAttempt = defaults.object(forKey: UpdatePreferences.lastAttemptKey) as? Date,
+               checkDate.timeIntervalSince(lastAttempt) < UpdatePreferences.retryInterval {
+                return
+            }
         }
-        defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
+        defaults.set(checkDate, forKey: UpdatePreferences.lastAttemptKey)
         checkTask?.cancel()
         checkTask = Task { [weak self] in
             await self?.performCheck(installIfAvailable: installIfAvailable)
@@ -337,108 +344,131 @@ final class AppUpdater: ObservableObject {
         if isBusy { return }
         checkTask?.cancel()
         checkTask = Task { [weak self] in
-            await self?.performInstall(release)
+            _ = await self?.performInstall(release)
         }
     }
 
     private func performCheck(installIfAvailable: Bool) async {
-        await setState(.checking)
+        state = .checking
         do {
             let release = try await client.latestRelease()
             if Task.isCancelled {
-                await setState(.idle)
+                state = .idle
                 return
             }
             if AppVersion(release.versionString) <= AppVersion(currentVersion) {
-                await setState(.upToDate)
+                recordSuccessfulCheck()
+                state = .upToDate
                 return
             }
             guard release.zipAsset != nil else {
-                await setState(.failed(UpdateError.missingAsset.localizedDescription))
+                state = .failed(UpdateError.missingAsset.localizedDescription)
                 return
             }
             guard release.checksumAsset != nil else {
-                await setState(.failed(UpdateError.missingChecksum.localizedDescription))
+                state = .failed(UpdateError.missingChecksum.localizedDescription)
                 return
             }
             guard release.assetsAreTrusted else {
-                await setState(.failed(UpdateError.untrustedAsset.localizedDescription))
+                state = .failed(UpdateError.untrustedAsset.localizedDescription)
                 return
             }
             if installIfAvailable {
-                await performInstall(release)
+                if await performInstall(release) {
+                    recordSuccessfulCheck()
+                }
             } else {
-                await setState(.available(release))
+                recordSuccessfulCheck()
+                state = .available(release)
             }
         } catch {
             if Task.isCancelled {
-                await setState(.idle)
+                state = .idle
                 return
             }
-            await setState(.failed(error.localizedDescription))
+            state = .failed(error.localizedDescription)
         }
     }
 
-    private func performInstall(_ release: GitHubRelease) async {
+    private func performInstall(_ release: GitHubRelease) async -> Bool {
         guard let asset = release.zipAsset else {
-            await setState(.failed(UpdateError.missingAsset.localizedDescription))
-            return
+            state = .failed(UpdateError.missingAsset.localizedDescription)
+            return false
         }
         guard let checksumAsset = release.checksumAsset else {
-            await setState(.failed(UpdateError.missingChecksum.localizedDescription))
-            return
+            state = .failed(UpdateError.missingChecksum.localizedDescription)
+            return false
         }
         guard release.assetsAreTrusted else {
-            await setState(.failed(UpdateError.untrustedAsset.localizedDescription))
-            return
+            state = .failed(UpdateError.untrustedAsset.localizedDescription)
+            return false
         }
-        await setState(.downloading)
+        state = .downloading
         do {
             let (checksumData, checksumResponse) = try await session.data(
                 from: checksumAsset.browserDownloadURL
             )
             if Task.isCancelled {
-                await setState(.idle)
-                return
+                state = .idle
+                return false
             }
             guard let checksumHTTP = checksumResponse as? HTTPURLResponse,
                   checksumHTTP.statusCode == 200 else {
                 throw UpdateError.network("checksum download failed")
             }
             let (tempURL, response) = try await session.download(from: asset.browserDownloadURL)
-            defer { try? fileManager.removeItem(at: tempURL) }
+            defer { try? FileManager.default.removeItem(at: tempURL) }
             if Task.isCancelled {
-                await setState(.idle)
-                return
+                state = .idle
+                return false
             }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw UpdateError.network("download failed")
             }
-            await setState(.installing)
+            state = .installing
             let workDirectory = makeWorkDirectory()
-            try fileManager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: workDirectory) }
-            let zipURL = workDirectory.appendingPathComponent(AppDistribution.assetName)
-            if fileManager.fileExists(atPath: zipURL.path) {
-                try fileManager.removeItem(at: zipURL)
+            let unpacker = self.unpacker
+            let installer = self.installer
+            let installationTask = Task.detached(priority: .userInitiated) {
+                let fileManager = FileManager.default
+                try Task.checkCancellation()
+                try fileManager.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+                defer { try? fileManager.removeItem(at: workDirectory) }
+                let zipURL = workDirectory.appendingPathComponent(AppDistribution.assetName)
+                if fileManager.fileExists(atPath: zipURL.path) {
+                    try fileManager.removeItem(at: zipURL)
+                }
+                try fileManager.moveItem(at: tempURL, to: zipURL)
+                try Task.checkCancellation()
+                try UpdateChecksum.verify(fileURL: zipURL, checksumData: checksumData)
+                try Task.checkCancellation()
+                let extracted = workDirectory.appendingPathComponent("extracted", isDirectory: true)
+                let appURL = try unpacker.extractApp(fromZip: zipURL, to: extracted)
+                try Task.checkCancellation()
+                try installer.install(fromAppBundle: appURL)
             }
-            try fileManager.moveItem(at: tempURL, to: zipURL)
-            try UpdateChecksum.verify(fileURL: zipURL, checksumData: checksumData)
-            let extracted = workDirectory.appendingPathComponent("extracted", isDirectory: true)
-            let appURL = try unpacker.extractApp(fromZip: zipURL, to: extracted)
-            try installer.install(fromAppBundle: appURL)
+            try await withTaskCancellationHandler {
+                try await installationTask.value
+            } onCancel: {
+                installationTask.cancel()
+            }
+            if Task.isCancelled {
+                state = .idle
+                return false
+            }
             try installer.relaunch()
+            return true
         } catch {
             if Task.isCancelled {
-                await setState(.idle)
-                return
+                state = .idle
+                return false
             }
-            await setState(.failed(error.localizedDescription))
+            state = .failed(error.localizedDescription)
+            return false
         }
     }
 
-    @MainActor
-    private func setState(_ newState: UpdateState) {
-        state = newState
+    private func recordSuccessfulCheck() {
+        defaults.set(now(), forKey: UpdatePreferences.lastCheckKey)
     }
 }
