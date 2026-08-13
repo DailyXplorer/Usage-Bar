@@ -31,7 +31,7 @@ struct UsageMenuView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
-        .background(Color.primary.opacity(0.025))
+        .background(AppTheme.ink(colorScheme: colorScheme).opacity(0.025))
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -94,7 +94,7 @@ struct UsageMenuView: View {
                 }
             }
             .font(AppTheme.font(size: 10.5))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
             .monospacedDigit()
 
             Spacer()
@@ -116,6 +116,8 @@ struct UsageMenuView: View {
 }
 
 private struct ProviderSection: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let plan: String?
     let buckets: [LimitBucket]
@@ -126,7 +128,7 @@ private struct ProviderSection: View {
             HStack(spacing: 8) {
                 Text(title)
                     .font(AppTheme.font(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
 
                 Spacer()
 
@@ -148,6 +150,8 @@ private struct ProviderSection: View {
 }
 
 private struct PlanBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let plan: String
 
     private var displayName: String {
@@ -170,7 +174,7 @@ private struct PlanBadge: View {
             .padding(.horizontal, 8)
             .frame(height: 20)
             .background(Color.accentColor.opacity(0.12), in: Capsule())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
             .lineLimit(1)
     }
 }
@@ -229,7 +233,7 @@ private struct LimitCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(AppTheme.cardFill(colorScheme: colorScheme))
         }
-        .shadow(color: Color.primary.opacity(0.08), radius: 0, x: 0, y: 0)
+        .shadow(color: AppTheme.ink(colorScheme: colorScheme).opacity(0.08), radius: 0, x: 0, y: 0)
         .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(bucket.displayName), \(bucket.remainingPercent) percent left")
@@ -270,6 +274,8 @@ private struct UsageProgressBar: View {
 }
 
 private struct LoadingView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(spacing: 10) {
             ProgressView()
@@ -280,7 +286,7 @@ private struct LoadingView: View {
                     .font(AppTheme.font(size: 13, weight: .medium))
                 Text("Connecting to Codex, Claude and Cursor")
                     .font(AppTheme.font(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,6 +295,8 @@ private struct LoadingView: View {
 }
 
 private struct ErrorView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let message: String
     let retry: () -> Void
 
@@ -300,7 +308,7 @@ private struct ErrorView: View {
 
             Text(message)
                 .font(AppTheme.font(size: 11.5))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
             Button("Retry", action: retry)
@@ -357,7 +365,7 @@ private struct FooterButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.secondary)
+            .foregroundStyle(AppTheme.secondaryLabel(colorScheme: colorScheme))
             .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .background {
