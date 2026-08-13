@@ -363,9 +363,9 @@ private struct SettingsFooterButton: View {
 
     var body: some View {
         FooterIconButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            SettingsWindowPresenter.present {
+                openSettings()
+            }
         }
     }
 }
