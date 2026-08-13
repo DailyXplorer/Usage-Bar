@@ -52,6 +52,7 @@ rm -rf "$app_path"
 mkdir -p "$macos_path" "$resources_path"
 ditto "$release_path/UsageBar" "$macos_path/UsageBar"
 ditto "$project_dir/Support/Info.plist" "$contents_path/Info.plist"
+ditto "$project_dir/Support/AppIcon.icns" "$resources_path/AppIcon.icns"
 ditto "$release_path/UsageBar_UsageBar.bundle" "$resources_path/UsageBar_UsageBar.bundle"
 
 version="${USAGEBAR_VERSION:-}"

@@ -5,7 +5,7 @@ Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
 remaining** and time until reset.
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="UsageBar in the macOS menu bar, with the popover open" width="380">
+  <img src="docs/usage-bar-codex-cursor.png" alt="UsageBar in the macOS menu bar, with the popover open" width="380">
 </p>
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
@@ -158,9 +158,10 @@ capture time, but countdowns are recomputed from the reset time when read back.
   registered (`InstrumentSans-Regular`). Weights go through the `wght` axis
   (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
   **silently** falls back to the system font.
-- **Hugeicons** `chat-gpt`, `claude` and `cursor` logos (Logos category,
-  stroke · rounded), bundled as SVG and rendered as templates so they follow
-  the menu bar theme.
+- **Hugeicons** `chat-gpt`, `claude`, `cursor` and `dashboard-speed-02` icons
+  (stroke · rounded). The provider logos are bundled as SVG and rendered as
+  templates so they follow the menu bar theme; `dashboard-speed-02` is the
+  application icon.
 
 ## Requirements
 
@@ -206,8 +207,8 @@ Bundled third-party assets keep their own:
   ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), as the OFL
   requires: if you redistribute the app or the repo, keep that file next to the
   `.ttf`.
-- **Hugeicons** (`chat-gpt.svg`, `claude.svg`, `cursor.svg`) — icons from the
-  free set, MIT licensed, no attribution required.
+- **Hugeicons** (`chat-gpt.svg`, `claude.svg`, `cursor.svg`, `AppIcon.svg`) —
+  icons from the free set, MIT licensed, no attribution required.
 
 The ChatGPT/OpenAI, Claude/Anthropic and Cursor logos remain the property of
 their respective owners; they are used here to identify the services being
