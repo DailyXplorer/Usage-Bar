@@ -84,16 +84,23 @@ final class UsageMenuSnapshotTests: XCTestCase {
 
         let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build", isDirectory: true)
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let updater = stubUpdater(defaults: defaults)
 
         try render(
             UsageMenuView()
                 .environmentObject(model)
+                .environmentObject(updater)
                 .environment(\.colorScheme, .light),
             to: buildDirectory.appendingPathComponent("UsageBar-light.png")
         )
         try render(
             UsageMenuView()
                 .environmentObject(model)
+                .environmentObject(updater)
                 .environment(\.colorScheme, .dark),
             to: buildDirectory.appendingPathComponent("UsageBar-dark.png")
         )
@@ -110,4 +117,26 @@ final class UsageMenuSnapshotTests: XCTestCase {
         let pngData = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try pngData.write(to: url, options: .atomic)
     }
+}
+
+@MainActor
+private func stubUpdater(defaults: UserDefaults) -> AppUpdater {
+    defaults.set(false, forKey: UpdatePreferences.checksKey)
+    return AppUpdater(
+        client: SilentGitHub(),
+        installer: SilentInstaller(),
+        defaults: defaults,
+        currentVersion: "1.0.0"
+    )
+}
+
+private struct SilentGitHub: GitHubReleasing {
+    func latestRelease() async throws -> GitHubRelease {
+        throw UpdateError.noReleases
+    }
+}
+
+private struct SilentInstaller: AppUpdateInstalling {
+    func install(fromAppBundle url: URL) throws {}
+    func relaunch() throws {}
 }
