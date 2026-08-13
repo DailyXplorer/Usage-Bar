@@ -32,8 +32,7 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertEqual(buckets.map(\.usedPercent), [42, 11])
         XCTAssertEqual(buckets.map(\.remainingPercent), [58, 89])
         XCTAssertTrue(buckets.allSatisfy { $0.provider == .cursor })
-        XCTAssertEqual(buckets[0].detail, CursorLimits.modelsDetail)
-        XCTAssertEqual(buckets[1].detail, CursorLimits.otherDetail)
+        XCTAssertTrue(buckets.allSatisfy { $0.detail == nil })
     }
 
     func testResetCountdownUsesBillingCycleEnd() throws {
