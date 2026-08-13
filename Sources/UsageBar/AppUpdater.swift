@@ -271,10 +271,10 @@ final class AppUpdater: ObservableObject {
         return nil
     }
 
-    var statusLine: String {
+    var statusLine: String? {
         switch state {
         case .idle:
-            return "Checks GitHub for new releases"
+            return nil
         case .checking:
             return "Checking GitHub…"
         case .upToDate:
