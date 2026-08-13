@@ -283,14 +283,14 @@ final class LaunchAtLoginModel: ObservableObject {
         status == .enabled || status == .requiresApproval
     }
 
-    var footer: String {
+    var footer: String? {
         if let errorMessage {
             return errorMessage
         }
         if status == .requiresApproval {
             return "Allow Usage Bar in System Settings → General → Login Items & Extensions."
         }
-        return "Usage Bar starts in the menu bar after you log in to this Mac."
+        return nil
     }
 
     var accessibilityHint: String {

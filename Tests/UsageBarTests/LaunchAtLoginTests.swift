@@ -13,10 +13,7 @@ final class LaunchAtLoginTests: XCTestCase {
         XCTAssertEqual(model.status, .enabled)
         XCTAssertTrue(model.isEnabled)
         XCTAssertNil(model.errorMessage)
-        XCTAssertEqual(
-            model.footer,
-            "Usage Bar starts in the menu bar after you log in to this Mac."
-        )
+        XCTAssertNil(model.footer)
     }
 
     @MainActor
