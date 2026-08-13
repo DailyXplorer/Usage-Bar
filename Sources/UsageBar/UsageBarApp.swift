@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -25,6 +26,9 @@ struct UsageBarApp: App {
             SettingsView()
                 .environmentObject(usageModel)
                 .environmentObject(appUpdater)
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
     }
 }
@@ -33,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         SMAppServiceLaunchAtLogin.completePendingIfNeeded()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: nil
+        )
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -40,8 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidResignActive(_ notification: Notification) {
-        let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeKey }
-        if !hasVisibleWindow {
+        hideDockIconIfNoSettingsWindow()
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.hideDockIconIfNoSettingsWindow()
+        }
+    }
+
+    private func hideDockIconIfNoSettingsWindow() {
+        let hasSettingsWindow = NSApp.windows.contains { window in
+            window.isVisible
+                && !(window is NSPanel)
+                && window.canBecomeMain
+                && window.styleMask.contains(.titled)
+        }
+        if !hasSettingsWindow {
             NSApp.setActivationPolicy(.accessory)
         }
     }

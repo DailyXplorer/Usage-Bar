@@ -48,49 +48,39 @@ struct UsageMenuView: View {
         if model.isLoading && !hasAnyBucket {
             LoadingView()
         } else if !hasAnyBucket {
-            ErrorView(message: model.errorMessage ?? "No usage limits were returned.") {
+            ErrorView(message: model.visibleEmptyStateMessage) {
                 model.refreshNow(force: true)
             }
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if model.isVisibleInMenuBar(.codex) {
-                        ProviderSection(
-                            title: "Codex",
-                            plan: model.planType,
-                            buckets: model.buckets,
-                            message: model.errorMessage ?? (model.buckets.isEmpty ? "Codex returned no limits." : nil)
-                        )
-                    }
-
-                    if model.isVisibleInMenuBar(.claude) {
-                        ProviderSection(
-                            title: "Claude Code",
-                            plan: model.claudePlan,
-                            buckets: model.claudeBuckets,
-                            message: model.claudeErrorMessage
-                                ?? (model.claudeAvailable || model.isLoading
-                                    ? nil
-                                    : "No Claude Code session. Run `claude`, then `/login`.")
-                        )
-                    }
-
-                    if model.isVisibleInMenuBar(.cursor) {
-                        ProviderSection(
-                            title: "Cursor",
-                            plan: model.cursorPlan,
-                            buckets: model.cursorBuckets,
-                            message: model.cursorErrorMessage
-                                ?? (model.cursorAvailable || model.isLoading
-                                    ? nil
-                                    : "No Cursor session. Open Cursor and sign in.")
-                        )
-                    }
+            VStack(alignment: .leading, spacing: 14) {
+                if model.isVisibleInMenuBar(.codex) {
+                    ProviderSection(
+                        title: "Codex",
+                        plan: model.planType,
+                        buckets: model.buckets,
+                        message: model.sectionMessage(for: .codex)
+                    )
                 }
-                .padding(12)
+
+                if model.isVisibleInMenuBar(.claude) {
+                    ProviderSection(
+                        title: "Claude Code",
+                        plan: model.claudePlan,
+                        buckets: model.claudeBuckets,
+                        message: model.sectionMessage(for: .claude)
+                    )
+                }
+
+                if model.isVisibleInMenuBar(.cursor) {
+                    ProviderSection(
+                        title: "Cursor",
+                        plan: model.cursorPlan,
+                        buckets: model.cursorBuckets,
+                        message: model.sectionMessage(for: .cursor)
+                    )
+                }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxHeight: 560)
+            .padding(12)
         }
     }
 
@@ -109,20 +99,20 @@ struct UsageMenuView: View {
 
             Spacer()
 
-            if updater.availableRelease != nil {
-                Button("Update") {
-                    updater.performButtonAction()
+            HStack(spacing: 4) {
+                if updater.availableRelease != nil {
+                    FooterIconButton(systemImage: "arrow.down.app", accessibilityLabel: "Update") {
+                        updater.performButtonAction()
+                    }
+                    .disabled(updater.isBusy)
                 }
-                .buttonStyle(FooterButtonStyle())
-                .disabled(updater.isBusy)
-            }
 
-            SettingsFooterButton()
+                SettingsFooterButton()
 
-            Button("Quit") {
-                NSApp.terminate(nil)
+                FooterIconButton(systemImage: "power", accessibilityLabel: "Quit") {
+                    NSApp.terminate(nil)
+                }
             }
-            .buttonStyle(FooterButtonStyle())
         }
         .padding(.horizontal, 16)
         .frame(height: 40)
@@ -339,22 +329,36 @@ private struct SettingsFooterButton: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Button("Settings…") {
+        FooterIconButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             openSettings()
         }
+    }
+}
+
+private struct FooterIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .symbolRenderingMode(.monochrome)
+        }
         .buttonStyle(FooterButtonStyle())
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
 private struct FooterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(AppTheme.font(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
+            .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .background(
                 Color.primary.opacity(configuration.isPressed ? 0.08 : 0),

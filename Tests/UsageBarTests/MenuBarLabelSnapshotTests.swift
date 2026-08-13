@@ -48,6 +48,8 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
 
     @MainActor
     func testMenuBarOmitsHiddenProviders() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
         let model = UsageModel(
             previewBuckets: [codexBucket],
             planType: "prolite",
@@ -67,7 +69,8 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
                 )
             ],
             cursorPlan: "pro",
-            menuBarProviders: [.codex, .cursor]
+            menuBarProviders: [.codex, .cursor],
+            defaults: defaults
         )
 
         XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "90%"])

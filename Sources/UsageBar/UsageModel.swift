@@ -93,18 +93,6 @@ final class UsageModel: ObservableObject {
         }
     }
 
-    private var shouldRefreshDespiteCache: Bool {
-        if let lastUpdated, Date().timeIntervalSince(lastUpdated) < Self.refreshInterval {
-            return visibleProviderIsMissingData
-        }
-        return true
-    }
-
-    private var visibleProviderIsMissingData: Bool {
-        (menuBarProviders.contains(.codex) && buckets.isEmpty)
-            || (menuBarProviders.contains(.cursor) && cursorBuckets.isEmpty)
-    }
-
 #if DEBUG
     init(
         previewBuckets: [LimitBucket],
@@ -115,7 +103,9 @@ final class UsageModel: ObservableObject {
         cursorBuckets: [LimitBucket] = [],
         cursorPlan: String? = nil,
         menuBarProviders: Set<LimitBucket.Provider> = [.codex, .claude],
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        errorMessage: String? = nil,
+        cursorAvailable: Bool? = nil
     ) {
         self.defaults = defaults
         buckets = previewBuckets
@@ -126,8 +116,9 @@ final class UsageModel: ObservableObject {
         claudeAvailable = !claudeBuckets.isEmpty
         self.cursorBuckets = cursorBuckets
         self.cursorPlan = cursorPlan
-        cursorAvailable = !cursorBuckets.isEmpty
+        self.cursorAvailable = cursorAvailable ?? !cursorBuckets.isEmpty
         self.menuBarProviders = menuBarProviders
+        self.errorMessage = errorMessage
     }
 #endif
 
@@ -253,7 +244,8 @@ final class UsageModel: ObservableObject {
 
     func refreshNow(force: Bool = false) {
         guard !isLoading else { return }
-        if !force, !shouldRefreshDespiteCache {
+        if !force, let lastUpdated,
+           Date().timeIntervalSince(lastUpdated) < Self.refreshInterval {
             return
         }
 
@@ -362,10 +354,39 @@ final class UsageModel: ObservableObject {
     }
 
     private func applyCursor(_ usage: CursorUsageResponse, credentials: CursorCredentials) {
-        let buckets = CursorLimits.buckets(from: usage)
-        cursorAvailable = !buckets.isEmpty
+        cursorAvailable = true
         cursorPlan = credentials.membershipType
-        cursorBuckets = buckets
+        cursorBuckets = CursorLimits.buckets(from: usage)
+    }
+
+    func sectionMessage(for provider: LimitBucket.Provider) -> String? {
+        switch provider {
+        case .codex:
+            if let errorMessage { return errorMessage }
+            if isLoading || !buckets.isEmpty { return nil }
+            return "Codex returned no limits."
+        case .claude:
+            if let claudeErrorMessage { return claudeErrorMessage }
+            if claudeAvailable || isLoading { return nil }
+            return "No Claude Code session. Run `claude`, then `/login`."
+        case .cursor:
+            if let cursorErrorMessage { return cursorErrorMessage }
+            if isLoading { return nil }
+            if cursorAvailable && cursorBuckets.isEmpty {
+                return "Cursor returned no limits."
+            }
+            if !cursorAvailable {
+                return "No Cursor session. Open Cursor and sign in."
+            }
+            return nil
+        }
+    }
+
+    var visibleEmptyStateMessage: String {
+        let messages = LimitBucket.Provider.allCases
+            .filter(isVisibleInMenuBar)
+            .compactMap { sectionMessage(for: $0) }
+        return messages.first ?? "No usage limits were returned."
     }
 
     private func makeBucket(

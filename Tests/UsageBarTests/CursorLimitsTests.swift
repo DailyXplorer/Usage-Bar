@@ -102,4 +102,34 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertEqual(model.cursorModels?.kind, .cursorModels)
         XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "58%"])
     }
+
+    @MainActor
+    func testEmptyStateIgnoresHiddenCodexError() {
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            menuBarProviders: [.cursor],
+            errorMessage: "ChatGPT is unreachable.",
+            cursorAvailable: false
+        )
+
+        XCTAssertEqual(
+            model.visibleEmptyStateMessage,
+            "No Cursor session. Open Cursor and sign in."
+        )
+    }
+
+    @MainActor
+    func testSignedInCursorWithoutPoolsDoesNotLookSignedOut() {
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            menuBarProviders: [.cursor],
+            cursorAvailable: true
+        )
+
+        XCTAssertEqual(model.sectionMessage(for: .cursor), "Cursor returned no limits.")
+    }
 }
