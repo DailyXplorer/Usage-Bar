@@ -88,6 +88,7 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .appControlFont(size: 11)
                     .disabled(updater.isBusy)
                 }
 
