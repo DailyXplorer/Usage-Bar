@@ -37,7 +37,13 @@ struct UsageMenuView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
-        .background(AppTheme.ink(colorScheme: colorScheme).opacity(0.025))
+        .background(
+            AppTheme.inkOverlay(
+                colorScheme: colorScheme,
+                contrast: colorSchemeContrast,
+                standardOpacity: 0.025
+            )
+        )
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -184,6 +190,7 @@ private struct PlanBadge: View {
 private struct LimitCard: View {
     let bucket: LimitBucket
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private var color: Color {
         if bucket.reached {
@@ -233,7 +240,12 @@ private struct LimitCard: View {
         .padding(12)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(AppTheme.cardFill(colorScheme: colorScheme))
+                .fill(
+                    AppTheme.cardFill(
+                        colorScheme: colorScheme,
+                        contrast: colorSchemeContrast
+                    )
+                )
         }
         .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
@@ -256,12 +268,19 @@ private struct UsageProgressBar: View {
     let value: Int
     let color: Color
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(AppTheme.ink(colorScheme: colorScheme).opacity(0.08))
+                    .fill(
+                        AppTheme.inkOverlay(
+                            colorScheme: colorScheme,
+                            contrast: colorSchemeContrast,
+                            standardOpacity: 0.08
+                        )
+                    )
 
                 Capsule()
                     .fill(color)
@@ -367,6 +386,7 @@ private struct FooterButtonBody: View {
     let configuration: ButtonStyle.Configuration
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         configuration.label
@@ -375,7 +395,13 @@ private struct FooterButtonBody: View {
             .contentShape(Rectangle())
             .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(AppTheme.ink(colorScheme: colorScheme).opacity(configuration.isPressed ? 0.08 : 0))
+                    .fill(
+                        AppTheme.inkOverlay(
+                            colorScheme: colorScheme,
+                            contrast: colorSchemeContrast,
+                            standardOpacity: configuration.isPressed ? 0.08 : 0
+                        )
+                    )
             }
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

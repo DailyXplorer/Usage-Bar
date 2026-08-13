@@ -26,18 +26,22 @@ final class AppThemeTests: XCTestCase {
     }
 
     func testCardFillUsesAppearanceAwareInkAtExpectedOpacity() {
-        let cases: [(ColorScheme, String)] = [
-            (.light, "#000000"),
-            (.dark, "#FFFFFF"),
+        let cases: [(ColorScheme, ColorSchemeContrast, String, CGFloat)] = [
+            (.light, .standard, "#000000", 0.045),
+            (.dark, .standard, "#FFFFFF", 0.045),
+            (.light, .increased, "#000000", 0.09),
+            (.dark, .increased, "#FFFFFF", 0.09),
         ]
 
-        for (colorScheme, expectedHex) in cases {
-            let fill = NSColor(AppTheme.cardFill(colorScheme: colorScheme))
-                .usingColorSpace(.sRGB) ?? NSColor(AppTheme.cardFill(colorScheme: colorScheme))
+        for (colorScheme, contrast, expectedHex, expectedAlpha) in cases {
+            let fillColor = AppTheme.cardFill(
+                colorScheme: colorScheme,
+                contrast: contrast
+            )
+            let fill = NSColor(fillColor).usingColorSpace(.sRGB) ?? NSColor(fillColor)
 
-            XCTAssertEqual(AppTheme.ink(colorScheme: colorScheme).hexString, expectedHex)
-            XCTAssertEqual(AppTheme.cardFill(colorScheme: colorScheme).hexString, expectedHex)
-            XCTAssertEqual(fill.alphaComponent, 0.045, accuracy: 0.001)
+            XCTAssertEqual(fillColor.hexString, expectedHex)
+            XCTAssertEqual(fill.alphaComponent, expectedAlpha, accuracy: 0.001)
         }
     }
 

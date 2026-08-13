@@ -86,8 +86,26 @@ enum AppTheme {
         colorScheme == .dark ? Color.white : Color.black
     }
 
-    static func cardFill(colorScheme: ColorScheme) -> Color {
-        ink(colorScheme: colorScheme).opacity(0.045)
+    static func inkOverlay(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast,
+        standardOpacity: Double
+    ) -> Color {
+        let opacity = contrast == .increased
+            ? min(standardOpacity * 2, 1)
+            : standardOpacity
+        return ink(colorScheme: colorScheme).opacity(opacity)
+    }
+
+    static func cardFill(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        inkOverlay(
+            colorScheme: colorScheme,
+            contrast: contrast,
+            standardOpacity: 0.045
+        )
     }
 
     static func menuBackground(
