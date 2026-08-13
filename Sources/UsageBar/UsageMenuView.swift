@@ -2,6 +2,7 @@ import SwiftUI
 
 struct UsageMenuView: View {
     @EnvironmentObject private var model: UsageModel
+    @EnvironmentObject private var updater: AppUpdater
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -107,6 +108,14 @@ struct UsageMenuView: View {
             .monospacedDigit()
 
             Spacer()
+
+            if updater.availableRelease != nil {
+                Button("Update") {
+                    updater.performButtonAction()
+                }
+                .buttonStyle(FooterButtonStyle())
+                .disabled(updater.isBusy)
+            }
 
             SettingsFooterButton()
 

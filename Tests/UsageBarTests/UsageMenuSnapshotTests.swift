@@ -88,12 +88,14 @@ final class UsageMenuSnapshotTests: XCTestCase {
         try render(
             UsageMenuView()
                 .environmentObject(model)
+                .environmentObject(stubUpdater())
                 .environment(\.colorScheme, .light),
             to: buildDirectory.appendingPathComponent("UsageBar-light.png")
         )
         try render(
             UsageMenuView()
                 .environmentObject(model)
+                .environmentObject(stubUpdater())
                 .environment(\.colorScheme, .dark),
             to: buildDirectory.appendingPathComponent("UsageBar-dark.png")
         )
@@ -110,4 +112,28 @@ final class UsageMenuSnapshotTests: XCTestCase {
         let pngData = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try pngData.write(to: url, options: .atomic)
     }
+}
+
+private func stubUpdater() -> AppUpdater {
+    let name = UUID().uuidString
+    let defaults = UserDefaults(suiteName: name)!
+    defaults.removePersistentDomain(forName: name)
+    defaults.set(false, forKey: UpdatePreferences.checksKey)
+    return AppUpdater(
+        client: SilentGitHub(),
+        installer: SilentInstaller(),
+        defaults: defaults,
+        currentVersion: "1.0.0"
+    )
+}
+
+private struct SilentGitHub: GitHubReleasing {
+    func latestRelease() async throws -> GitHubRelease {
+        throw UpdateError.noReleases
+    }
+}
+
+private struct SilentInstaller: AppUpdateInstalling {
+    func install(fromAppBundle url: URL) throws {}
+    func relaunch() {}
 }
