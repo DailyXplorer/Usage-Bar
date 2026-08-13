@@ -12,6 +12,9 @@ let package = Package(
             path: "Sources/UsageBar",
             resources: [
                 .process("Resources")
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
             ]
         ),
         .testTarget(

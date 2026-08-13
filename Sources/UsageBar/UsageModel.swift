@@ -16,26 +16,41 @@ final class UsageModel: ObservableObject {
     @Published private(set) var claudeErrorMessage: String?
     @Published private(set) var claudeAvailable = false
 
+    @Published private(set) var cursorBuckets: [LimitBucket] = []
+    @Published private(set) var cursorPlan: String?
+    @Published private(set) var cursorErrorMessage: String?
+    @Published private(set) var cursorAvailable = false
+
+    @Published private(set) var menuBarProviders: Set<LimitBucket.Provider>
+
     private let service = UsageService()
     private let claudeService = ClaudeUsageService()
+    private let cursorService = CursorUsageService()
+    private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
     private var started = false
 
     private static let refreshInterval: TimeInterval = 5 * 60
 
     private var claudeBackoff = ThrottleBackoff()
+    private var cursorBackoff = ThrottleBackoff()
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        menuBarProviders = MenuBarPreferences.load(from: defaults)
         restoreSnapshot()
     }
 
     private func restoreSnapshot() {
-        guard let snapshot = UsageSnapshotStore.load()?.refreshed() else { return }
+        guard let snapshot = UsageSnapshotStore.load(from: defaults)?.refreshed() else { return }
         buckets = snapshot.codexBuckets
         planType = snapshot.codexPlan
         claudeBuckets = snapshot.claudeBuckets
         claudePlan = snapshot.claudePlan
         claudeAvailable = !snapshot.claudeBuckets.isEmpty
+        cursorBuckets = snapshot.cursorBuckets
+        cursorPlan = snapshot.cursorPlan
+        cursorAvailable = !snapshot.cursorBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
     }
 
@@ -46,9 +61,36 @@ final class UsageModel: ObservableObject {
                 codexPlan: planType,
                 claudeBuckets: claudeBuckets,
                 claudePlan: claudePlan,
+                cursorBuckets: cursorBuckets,
+                cursorPlan: cursorPlan,
                 fetchedAt: fetchedAt
-            )
+            ),
+            to: defaults
         )
+    }
+
+    var canHideMenuBarProvider: Bool {
+        menuBarProviders.count > 1
+    }
+
+    func isVisibleInMenuBar(_ provider: LimitBucket.Provider) -> Bool {
+        menuBarProviders.contains(provider)
+    }
+
+    func setVisibleInMenuBar(_ provider: LimitBucket.Provider, visible: Bool) {
+        var next = menuBarProviders
+        if visible {
+            next.insert(provider)
+        } else {
+            next.remove(provider)
+            if next.isEmpty { return }
+        }
+        let changed = next != menuBarProviders
+        menuBarProviders = next
+        MenuBarPreferences.save(next, to: defaults)
+        if changed, visible, started {
+            refreshNow(force: true)
+        }
     }
 
 #if DEBUG
@@ -57,14 +99,26 @@ final class UsageModel: ObservableObject {
         planType: String,
         lastUpdated: Date,
         claudeBuckets: [LimitBucket] = [],
-        claudePlan: String? = nil
+        claudePlan: String? = nil,
+        cursorBuckets: [LimitBucket] = [],
+        cursorPlan: String? = nil,
+        menuBarProviders: Set<LimitBucket.Provider> = [.codex, .claude],
+        defaults: UserDefaults = .standard,
+        errorMessage: String? = nil,
+        cursorAvailable: Bool? = nil
     ) {
+        self.defaults = defaults
         buckets = previewBuckets
         self.planType = planType
         self.lastUpdated = lastUpdated
         self.claudeBuckets = claudeBuckets
         self.claudePlan = claudePlan
         claudeAvailable = !claudeBuckets.isEmpty
+        self.cursorBuckets = cursorBuckets
+        self.cursorPlan = cursorPlan
+        self.cursorAvailable = cursorAvailable ?? !cursorBuckets.isEmpty
+        self.menuBarProviders = menuBarProviders
+        self.errorMessage = errorMessage
     }
 #endif
 
@@ -84,6 +138,56 @@ final class UsageModel: ObservableObject {
     var menuBarClaudeAccessibilityText: String? {
         guard let bucket = claudeAllModels else { return nil }
         return "Claude Code all models, \(bucket.remainingPercent) percent left"
+    }
+
+    var cursorModels: LimitBucket? {
+        cursorBuckets.first { $0.kind == .cursorModels } ?? cursorBuckets.first
+    }
+
+    var menuBarCursorText: String? {
+        guard let bucket = cursorModels else { return nil }
+        return "\(bucket.remainingPercent)%"
+    }
+
+    var menuBarCursorDisplay: String {
+        menuBarCursorText ?? "–"
+    }
+
+    var menuBarCursorAccessibilityText: String? {
+        guard let bucket = cursorModels else { return nil }
+        return "Cursor models, \(bucket.remainingPercent) percent left"
+    }
+
+    var menuBarSegments: [MenuBarSegment] {
+        LimitBucket.Provider.allCases.compactMap { provider in
+            guard menuBarProviders.contains(provider) else { return nil }
+            switch provider {
+            case .codex:
+                return MenuBarSegment(logo: AppTheme.codexLogo, value: menuBarText)
+            case .claude:
+                return MenuBarSegment(logo: AppTheme.claudeLogo, value: menuBarClaudeDisplay)
+            case .cursor:
+                return MenuBarSegment(logo: AppTheme.cursorLogo, value: menuBarCursorDisplay)
+            }
+        }
+    }
+
+    var menuBarAccessibilityLabel: String {
+        var parts: [String] = []
+        if menuBarProviders.contains(.codex) {
+            parts.append("Codex limits, \(menuBarAccessibilityText)")
+        }
+        if menuBarProviders.contains(.claude), let claude = menuBarClaudeAccessibilityText {
+            parts.append(claude)
+        } else if menuBarProviders.contains(.claude) {
+            parts.append("Claude Code unavailable")
+        }
+        if menuBarProviders.contains(.cursor), let cursor = menuBarCursorAccessibilityText {
+            parts.append(cursor)
+        } else if menuBarProviders.contains(.cursor) {
+            parts.append("Cursor unavailable")
+        }
+        return parts.joined(separator: ". ")
     }
 
     var menuBarText: String {
@@ -128,7 +232,7 @@ final class UsageModel: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        refreshNow()
+        refreshNow(force: true)
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(Self.refreshInterval * 1_000_000_000))
@@ -151,6 +255,9 @@ final class UsageModel: ObservableObject {
             let claudeFetch = claudeBackoff.isBlocked
                 ? nil
                 : Task { try await claudeService.fetchUsage() }
+            let cursorFetch = cursorBackoff.isBlocked
+                ? nil
+                : Task { try await cursorService.fetchUsage() }
 
             var succeeded = false
 
@@ -180,6 +287,27 @@ final class UsageModel: ObservableObject {
                 } catch {
                     claudeAvailable = true
                     claudeErrorMessage = error.localizedDescription
+                }
+            }
+
+            if let cursorFetch {
+                do {
+                    let (usage, credentials) = try await cursorFetch.value
+                    applyCursor(usage, credentials: credentials)
+                    cursorErrorMessage = nil
+                    cursorBackoff.reset()
+                    succeeded = true
+                } catch CursorUsageError.notSignedIn {
+                    cursorAvailable = false
+                    cursorBuckets = []
+                    cursorErrorMessage = nil
+                } catch CursorUsageError.throttled {
+                    cursorBackoff.recordThrottle()
+                    cursorAvailable = true
+                    cursorErrorMessage = CursorUsageError.throttled.errorDescription
+                } catch {
+                    cursorAvailable = true
+                    cursorErrorMessage = error.localizedDescription
                 }
             }
 
@@ -223,6 +351,42 @@ final class UsageModel: ObservableObject {
         claudeAvailable = true
         claudePlan = credentials.subscriptionType
         claudeBuckets = ClaudeLimits.buckets(from: usage)
+    }
+
+    private func applyCursor(_ usage: CursorUsageResponse, credentials: CursorCredentials) {
+        cursorAvailable = true
+        cursorPlan = credentials.membershipType
+        cursorBuckets = CursorLimits.buckets(from: usage)
+    }
+
+    func sectionMessage(for provider: LimitBucket.Provider) -> String? {
+        switch provider {
+        case .codex:
+            if let errorMessage { return errorMessage }
+            if isLoading || !buckets.isEmpty { return nil }
+            return "Codex returned no limits."
+        case .claude:
+            if let claudeErrorMessage { return claudeErrorMessage }
+            if claudeAvailable || isLoading { return nil }
+            return "No Claude Code session. Run `claude`, then `/login`."
+        case .cursor:
+            if let cursorErrorMessage { return cursorErrorMessage }
+            if isLoading { return nil }
+            if cursorAvailable && cursorBuckets.isEmpty {
+                return "Cursor returned no limits."
+            }
+            if !cursorAvailable {
+                return "No Cursor session. Open Cursor and sign in."
+            }
+            return nil
+        }
+    }
+
+    var visibleEmptyStateMessage: String {
+        let messages = LimitBucket.Provider.allCases
+            .filter(isVisibleInMenuBar)
+            .compactMap { sectionMessage(for: $0) }
+        return messages.first ?? "No usage limits were returned."
     }
 
     private func makeBucket(
