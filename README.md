@@ -22,9 +22,9 @@ three constraints. Do not go back to sibling views: two tests lock this in.
 
 ## Install
 
-macOS 14 or newer. The app installs into **Applications** as
-`/Applications/UsageBar.app` (Finder shows **Usage Bar**). It runs in the menu
-bar only — no Dock icon.
+macOS 14 or newer, Apple Silicon and Intel. The GitHub zip is a **universal
+binary**. The app installs into **Applications** as `/Applications/UsageBar.app`
+(Finder shows **Usage Bar**). It runs in the menu bar only — no Dock icon.
 
 ### Option 1 — GitHub release (no Xcode)
 
@@ -165,7 +165,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
 
 ## Requirements
 
-- macOS 14+ (Sonoma or newer)
+- macOS 14+ (Sonoma or newer), Apple Silicon and Intel
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
 - For the Cursor side: signed in to the Cursor app
