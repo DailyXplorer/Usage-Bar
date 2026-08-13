@@ -17,8 +17,9 @@ struct UsageBarApp: App {
                 .environmentObject(usageModel)
                 .environmentObject(appUpdater)
         } label: {
-            MenuBarLabel(model: usageModel)
-                .environmentObject(appUpdater)
+            MenuBarLabel(model: usageModel) {
+                appUpdater.startAutomaticChecks()
+            }
         }
         .menuBarExtraStyle(.window)
 
@@ -74,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuBarLabel: View {
     @ObservedObject var model: UsageModel
-    @EnvironmentObject private var updater: AppUpdater
+    var startAutomaticChecks: () -> Void = {}
 
     var body: some View {
         Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
@@ -83,7 +84,7 @@ struct MenuBarLabel: View {
         .accessibilityLabel(model.menuBarAccessibilityLabel)
         .onAppear {
             model.start()
-            updater.startAutomaticChecks()
+            startAutomaticChecks()
         }
     }
 }

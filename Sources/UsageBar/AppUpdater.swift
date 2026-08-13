@@ -29,6 +29,21 @@ enum AppRelaunchCommand {
             appURL.path,
         ]
     }
+
+    static func relaunch(
+        processIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
+        appURL: URL
+    ) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = arguments(processIdentifier: processIdentifier, appURL: appURL)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        DispatchQueue.main.async {
+            NSApp.terminate(nil)
+        }
+    }
 }
 
 enum UpdateChecksum {
@@ -106,23 +121,12 @@ struct AppUpdateInstaller: AppUpdateInstalling {
 
     func install(fromAppBundle url: URL) throws {
         try verifyBundle(at: url)
+        try clearQuarantine(at: url)
         try AppBundleReplacement.install(from: url, to: destination, fileManager: fileManager)
-        try clearQuarantine(at: destination)
     }
 
     func relaunch() throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = AppRelaunchCommand.arguments(
-            processIdentifier: ProcessInfo.processInfo.processIdentifier,
-            appURL: destination
-        )
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        DispatchQueue.main.async {
-            NSApp.terminate(nil)
-        }
+        try AppRelaunchCommand.relaunch(appURL: destination)
     }
 
     func verifyBundle(at url: URL) throws {
@@ -186,8 +190,15 @@ struct AppUpdateInstaller: AppUpdateInstalling {
         process.arguments = ["-dr", "com.apple.quarantine", url.path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            throw UpdateError.quarantineRemovalFailed
+        }
         process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.quarantineRemovalFailed
+        }
     }
 }
 
@@ -315,6 +326,7 @@ final class AppUpdater: ObservableObject {
            Date().timeIntervalSince(last) < UpdatePreferences.checkInterval {
             return
         }
+        defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
         checkTask?.cancel()
         checkTask = Task { [weak self] in
             await self?.performCheck(installIfAvailable: installIfAvailable)
@@ -333,8 +345,10 @@ final class AppUpdater: ObservableObject {
         await setState(.checking)
         do {
             let release = try await client.latestRelease()
-            if Task.isCancelled { return }
-            defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
+            if Task.isCancelled {
+                await setState(.idle)
+                return
+            }
             if AppVersion(release.versionString) <= AppVersion(currentVersion) {
                 await setState(.upToDate)
                 return
@@ -347,12 +361,20 @@ final class AppUpdater: ObservableObject {
                 await setState(.failed(UpdateError.missingChecksum.localizedDescription))
                 return
             }
-            await setState(.available(release))
+            guard release.assetsAreTrusted else {
+                await setState(.failed(UpdateError.untrustedAsset.localizedDescription))
+                return
+            }
             if installIfAvailable {
                 await performInstall(release)
+            } else {
+                await setState(.available(release))
             }
         } catch {
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                await setState(.idle)
+                return
+            }
             await setState(.failed(error.localizedDescription))
         }
     }
@@ -366,17 +388,29 @@ final class AppUpdater: ObservableObject {
             await setState(.failed(UpdateError.missingChecksum.localizedDescription))
             return
         }
+        guard release.assetsAreTrusted else {
+            await setState(.failed(UpdateError.untrustedAsset.localizedDescription))
+            return
+        }
         await setState(.downloading)
         do {
             let (checksumData, checksumResponse) = try await session.data(
                 from: checksumAsset.browserDownloadURL
             )
+            if Task.isCancelled {
+                await setState(.idle)
+                return
+            }
             guard let checksumHTTP = checksumResponse as? HTTPURLResponse,
                   checksumHTTP.statusCode == 200 else {
                 throw UpdateError.network("checksum download failed")
             }
             let (tempURL, response) = try await session.download(from: asset.browserDownloadURL)
-            if Task.isCancelled { return }
+            defer { try? fileManager.removeItem(at: tempURL) }
+            if Task.isCancelled {
+                await setState(.idle)
+                return
+            }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw UpdateError.network("download failed")
             }
@@ -395,7 +429,10 @@ final class AppUpdater: ObservableObject {
             try installer.install(fromAppBundle: appURL)
             try installer.relaunch()
         } catch {
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                await setState(.idle)
+                return
+            }
             await setState(.failed(error.localizedDescription))
         }
     }

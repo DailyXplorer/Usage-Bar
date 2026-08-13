@@ -16,6 +16,23 @@ enum AppDistribution {
     static var latestZipURL: URL {
         URL(string: "https://github.com/\(githubOwner)/\(githubRepo)/releases/latest/download/\(assetName)")!
     }
+
+    static func trustedAssetURL(named name: String, releaseTag: String) -> URL? {
+        let tagPattern = #"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"#
+        guard releaseTag.range(of: tagPattern, options: .regularExpression) != nil,
+              name == assetName || name == checksumAssetName else {
+            return nil
+        }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "github.com"
+        components.path = "/\(githubOwner)/\(githubRepo)/releases/download/\(releaseTag)/\(name)"
+        return components.url
+    }
+
+    static func isTrustedAsset(name: String, url: URL, releaseTag: String) -> Bool {
+        url == trustedAssetURL(named: name, releaseTag: releaseTag)
+    }
 }
 
 struct AppVersion: Comparable, Equatable, CustomStringConvertible {
@@ -28,12 +45,12 @@ struct AppVersion: Comparable, Equatable, CustomStringConvertible {
         if trimmed.first == "v" || trimmed.first == "V" {
             trimmed.removeFirst()
         }
-        original = trimmed
         let withoutBuildMetadata = trimmed.split(
             separator: "+",
             maxSplits: 1,
             omittingEmptySubsequences: false
         )[0]
+        original = String(withoutBuildMetadata)
         let components = withoutBuildMetadata.split(
             separator: "-",
             maxSplits: 1,
@@ -136,6 +153,19 @@ struct GitHubRelease: Decodable, Equatable {
         assets.first { $0.name == AppDistribution.checksumAssetName }
     }
 
+    var assetsAreTrusted: Bool {
+        guard let zipAsset, let checksumAsset else { return false }
+        return AppDistribution.isTrustedAsset(
+            name: zipAsset.name,
+            url: zipAsset.browserDownloadURL,
+            releaseTag: tagName
+        ) && AppDistribution.isTrustedAsset(
+            name: checksumAsset.name,
+            url: checksumAsset.browserDownloadURL,
+            releaseTag: tagName
+        )
+    }
+
     var displayNotes: String? {
         guard let body else { return nil }
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,11 +179,13 @@ enum UpdateError: LocalizedError, Equatable {
     case noReleases
     case missingAsset
     case missingChecksum
+    case untrustedAsset
     case invalidChecksum
     case checksumMismatch
     case extractFailed
     case invalidAppBundle
     case invalidCodeSignature
+    case quarantineRemovalFailed
 
     var errorDescription: String? {
         switch self {
@@ -167,6 +199,8 @@ enum UpdateError: LocalizedError, Equatable {
             return "This GitHub release has no \(AppDistribution.assetName) yet."
         case .missingChecksum:
             return "This GitHub release has no \(AppDistribution.checksumAssetName) yet."
+        case .untrustedAsset:
+            return "This update did not come from the expected Usage Bar release."
         case .invalidChecksum:
             return "The update checksum is invalid."
         case .checksumMismatch:
@@ -177,6 +211,8 @@ enum UpdateError: LocalizedError, Equatable {
             return "The download was not a Usage Bar app."
         case .invalidCodeSignature:
             return "The downloaded app has an invalid code signature."
+        case .quarantineRemovalFailed:
+            return "Could not prepare the downloaded app for launch."
         }
     }
 }
@@ -201,7 +237,12 @@ enum AppBundleReplacement {
 
         try fileManager.copyItem(at: source, to: staging)
         if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+            _ = try fileManager.replaceItemAt(
+                destination,
+                withItemAt: staging,
+                backupItemName: nil,
+                options: .usingNewMetadataOnly
+            )
         } else {
             try fileManager.moveItem(at: staging, to: destination)
         }

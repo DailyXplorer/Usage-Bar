@@ -7,7 +7,7 @@ export PATH
 repo="DailyXplorer/Usage-Bar"
 asset="UsageBar.app.zip"
 checksum_asset="${asset}.sha256"
-base_url="https://github.com/${repo}/releases/latest/download"
+release_api="https://api.github.com/repos/${repo}/releases/latest"
 install_path="/Applications/UsageBar.app"
 expected_bundle_id="com.usagebar.app"
 expected_executable="UsageBar"
@@ -25,7 +25,31 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-printf 'Downloading Usage Bar from GitHub…\n'
+if ! stage_root=$(mktemp -d "/Applications/.UsageBar-install.XXXXXX" 2>/dev/null); then
+  printf 'Usage Bar needs permission to install in /Applications. Run this installer from an administrator account.\n' >&2
+  exit 1
+fi
+
+printf 'Resolving the latest Usage Bar release…\n'
+if ! curl \
+  --proto '=https' \
+  --proto-redir '=https' \
+  -fsSL \
+  -H 'Accept: application/vnd.github+json' \
+  -H 'User-Agent: UsageBar installer' \
+  "$release_api" \
+  -o "$tmp/release.json"; then
+  printf 'Could not resolve the latest Usage Bar release from GitHub.\n' >&2
+  exit 1
+fi
+release_tag=$(/usr/bin/plutil -extract tag_name raw -o - "$tmp/release.json" 2>/dev/null || true)
+if ! printf '%s\n' "$release_tag" | /usr/bin/grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+  printf 'GitHub returned an invalid Usage Bar release tag.\n' >&2
+  exit 1
+fi
+base_url="https://github.com/${repo}/releases/download/${release_tag}"
+
+printf 'Downloading Usage Bar %s from GitHub…\n' "$release_tag"
 if ! curl \
   --proto '=https' \
   --proto-redir '=https' \
@@ -33,7 +57,7 @@ if ! curl \
   --progress-bar \
   "$base_url/$asset" \
   -o "$tmp/$asset"; then
-  printf 'Could not download %s/%s.\nPublish a GitHub release with that asset first.\n' "$base_url" "$asset" >&2
+  printf 'Could not download %s from Usage Bar release %s.\n' "$asset" "$release_tag" >&2
   exit 1
 fi
 if ! curl \
@@ -57,6 +81,7 @@ if [ "${#expected_hash}" -ne 64 ]; then
   printf 'The release checksum is invalid.\n' >&2
   exit 1
 fi
+expected_hash=$(printf '%s' "$expected_hash" | tr 'A-F' 'a-f')
 actual_hash=$(/usr/bin/shasum -a 256 "$tmp/$asset" | awk 'NR == 1 { print $1 }')
 if [ "$actual_hash" != "$expected_hash" ]; then
   printf 'The downloaded archive did not match its release checksum.\n' >&2
@@ -82,9 +107,8 @@ if ! /usr/bin/codesign --verify --deep --strict "$app" >/dev/null 2>&1; then
   exit 1
 fi
 
-stage_root=$(mktemp -d "/Applications/.UsageBar-install.XXXXXX")
 staged_app="$stage_root/UsageBar.app"
-ditto "$app" "$staged_app"
+ditto --norsrc --noextattr "$app" "$staged_app"
 if ! /usr/bin/codesign --verify --deep --strict "$staged_app" >/dev/null 2>&1; then
   printf 'The staged Usage Bar code signature is invalid.\n' >&2
   exit 1

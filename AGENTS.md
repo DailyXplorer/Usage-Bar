@@ -75,8 +75,10 @@ Users update from GitHub Releases. A tag on `main` is what ships.
   `CFBundleShortVersionString`.
 - GitHub’s “latest” release must include assets named **`UsageBar.app.zip`**
   (`AppDistribution.assetName`) and **`UsageBar.app.zip.sha256`**
-  (`AppDistribution.checksumAssetName`). Any other names and
-  `scripts/install.sh` plus the in-app updater will reject the release.
+  (`AppDistribution.checksumAssetName`). Their URLs must point to that exact
+  tag under `DailyXplorer/Usage-Bar`; any other names or origins and
+  `scripts/install.sh` plus the in-app updater will reject the release. The
+  installer resolves “latest” once and pins both downloads to the returned tag.
 
 ### Cut a release (after the PR is merged)
 
