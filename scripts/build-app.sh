@@ -47,16 +47,37 @@ if [ "$no_install" -eq 0 ]; then
 fi
 
 cd "$project_dir"
-rm -rf "$(swift build -c release --show-bin-path)/UsageBar_UsageBar.bundle"
-swift build -c release
-release_path=$(swift build -c release --show-bin-path)
+for arch in arm64 x86_64; do
+  arch_path=$(swift build -c release --arch "$arch" --show-bin-path)
+  rm -rf "$arch_path/UsageBar_UsageBar.bundle"
+  swift build -c release --arch "$arch"
+done
+
+arm_path=$(swift build -c release --arch arm64 --show-bin-path)
+intel_path=$(swift build -c release --arch x86_64 --show-bin-path)
 
 rm -rf "$app_path"
 mkdir -p "$macos_path" "$resources_path"
-ditto "$release_path/UsageBar" "$macos_path/UsageBar"
+lipo -create "$arm_path/UsageBar" "$intel_path/UsageBar" -output "$macos_path/UsageBar"
 ditto "$project_dir/Support/Info.plist" "$contents_path/Info.plist"
 ditto "$project_dir/Support/AppIcon.icns" "$resources_path/AppIcon.icns"
-ditto "$release_path/UsageBar_UsageBar.bundle" "$resources_path/UsageBar_UsageBar.bundle"
+ditto "$arm_path/UsageBar_UsageBar.bundle" "$resources_path/UsageBar_UsageBar.bundle"
+
+archs=$(lipo -archs "$macos_path/UsageBar")
+case "$archs" in
+  *arm64*) ;;
+  *)
+    printf 'Usage Bar must include an arm64 slice.\n' >&2
+    exit 1
+    ;;
+esac
+case "$archs" in
+  *x86_64*) ;;
+  *)
+    printf 'Usage Bar must include an x86_64 slice.\n' >&2
+    exit 1
+    ;;
+esac
 
 version="${USAGEBAR_VERSION:-}"
 version="${version#v}"

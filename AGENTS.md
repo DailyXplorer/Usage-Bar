@@ -23,9 +23,12 @@ swift test
 scripts/build-app.sh
 ```
 
-`scripts/build-app.sh` compiles Release, ad-hoc signs, and installs
-`/Applications/UsageBar.app`. With `--no-install --zip`, it writes
-`.build/UsageBar.app.zip` and `.build/UsageBar.app.zip.sha256`.
+`scripts/build-app.sh` compiles Release for arm64 and x86_64 separately, lipos
+them into a universal binary, ad-hoc signs, and installs
+`/Applications/UsageBar.app`. Separate `--arch` builds keep the documented
+Command Line Tools source path working; passing both architectures to one
+`swift build` would switch SwiftPM to XCBuild. With `--no-install --zip`, it
+writes `.build/UsageBar.app.zip` and `.build/UsageBar.app.zip.sha256`.
 
 ```sh
 scripts/build-app.sh --no-install
