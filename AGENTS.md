@@ -38,10 +38,15 @@ swift build && ./.build/debug/UsageBar
 
 The debug binary is not the `.app`. Do not tell users to run it.
 
+## Naming
+
+[CONVENTIONS.md](CONVENTIONS.md) is the source of truth for branch, commit, PR,
+file, and Swift names.
+
 ## Pull requests
 
-1. Branch from up-to-date `main`. Use a short name (`fix/menu-overlap`,
-   `feat/update-check`).
+1. Branch from up-to-date `main`. Name it as in [CONVENTIONS.md](CONVENTIONS.md)
+   (`fix/menu-overlap`, `feat/update-check`).
 2. One concern per PR. Do not mix a feature with a release tag or a README
    rewrite unless the PR *is* that rewrite.
 3. Match existing Swift style. Keep the interface in English. Do not add `//`
@@ -49,12 +54,12 @@ The debug binary is not the `.app`. Do not tell users to run it.
 4. Add or extend tests next to the behavior you change
    (`Tests/UsageBarTests`).
 5. Run `swift test` and fix failures before opening the PR.
-6. Commit in the repo’s style: imperative, one or two sentences, **why** more
-   than **what**. Example: `Keep the menu window off the screen edge`.
+6. Commit and title the PR as in [CONVENTIONS.md](CONVENTIONS.md): imperative,
+   **why** more than **what**. Example: `Keep the menu window off the screen
+   edge`.
 7. Push the branch and open a PR against `main`.
-8. Title: imperative summary. Body:
-   - what changed and why
-   - how you tested (`swift test`, plus a manual pass if UI is involved)
+8. PR body: what changed and why, plus how you tested (`swift test`, and a
+   manual pass if UI is involved).
 9. Do not bump `Support/Info.plist` versions in a feature PR. The release
    workflow stamps `CFBundleShortVersionString` / `CFBundleVersion` from the
    git tag.
@@ -124,6 +129,7 @@ broken. If you must, generate both files together and keep the exact
 
 | Path | Role |
 | --- | --- |
+| `CONVENTIONS.md` | Branch, commit, PR, file, and Swift naming |
 | `Sources/UsageBar/` | App sources |
 | `Support/Info.plist` | Bundle id `com.usagebar.app`; default version `1.0` |
 | `scripts/build-app.sh` | Build, sign, install, optional zip + checksum |
