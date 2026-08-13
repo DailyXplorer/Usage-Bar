@@ -53,7 +53,33 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     reached: false
                 ),
             ],
-            claudePlan: "max"
+            claudePlan: "max",
+            cursorBuckets: [
+                LimitBucket(
+                    provider: .cursor,
+                    kind: .cursorModels,
+                    name: "Cursor Models",
+                    usedPercent: 8,
+                    resetAt: Date(timeIntervalSince1970: 1_789_244_447),
+                    resetAfterSeconds: 2_678_400,
+                    limitWindowSeconds: 2_678_400,
+                    reached: false,
+                    detail: CursorLimits.modelsDetail
+                ),
+                LimitBucket(
+                    provider: .cursor,
+                    kind: .otherModels,
+                    name: "Other Models",
+                    usedPercent: 21,
+                    resetAt: Date(timeIntervalSince1970: 1_789_244_447),
+                    resetAfterSeconds: 2_678_400,
+                    limitWindowSeconds: 2_678_400,
+                    reached: false,
+                    detail: CursorLimits.otherDetail
+                ),
+            ],
+            cursorPlan: "pro",
+            menuBarProviders: [.codex, .cursor]
         )
 
         let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

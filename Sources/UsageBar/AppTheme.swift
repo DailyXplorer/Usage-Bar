@@ -29,6 +29,15 @@ enum AppTheme {
 
     static let codexLogo: NSImage? = logo(named: "chat-gpt")
     static let claudeLogo: NSImage? = logo(named: "claude")
+    static let cursorLogo: NSImage? = logo(named: "cursor")
+
+    static func logo(for provider: LimitBucket.Provider) -> NSImage? {
+        switch provider {
+        case .codex: return codexLogo
+        case .claude: return claudeLogo
+        case .cursor: return cursorLogo
+        }
+    }
 
     private static func logo(named name: String) -> NSImage? {
         guard let url = resourceBundle.url(forResource: name, withExtension: "svg"),

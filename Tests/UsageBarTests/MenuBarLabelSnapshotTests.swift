@@ -17,8 +17,9 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
 
         XCTAssertEqual(model.menuBarText, "99%")
         XCTAssertEqual(model.menuBarClaudeDisplay, "100%")
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "100%"])
 
-        let label = MenuBarLabelImage.make(codex: model.menuBarText, claude: model.menuBarClaudeDisplay)
+        let label = MenuBarLabelImage.make(segments: model.menuBarSegments)
         XCTAssertTrue(label.isTemplate)
         XCTAssertGreaterThan(label.size.width, MenuBarLabelImage.iconSize * 2)
 
@@ -41,6 +42,59 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
 
         XCTAssertNil(model.menuBarClaudeText)
         XCTAssertEqual(model.menuBarClaudeDisplay, "–")
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "–"])
+    }
+
+    @MainActor
+    func testMenuBarOmitsHiddenProviders() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let model = UsageModel(
+            previewBuckets: [codexBucket],
+            planType: "prolite",
+            lastUpdated: Date(),
+            claudeBuckets: [claudeAllModelsBucket],
+            claudePlan: "max",
+            cursorBuckets: [
+                LimitBucket(
+                    provider: .cursor,
+                    kind: .cursorModels,
+                    name: "Cursor Models",
+                    usedPercent: 10,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 2_678_400,
+                    reached: false
+                )
+            ],
+            cursorPlan: "pro",
+            menuBarProviders: [.codex, .cursor],
+            defaults: defaults
+        )
+
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "90%"])
+        XCTAssertEqual(model.menuBarAccessibilityLabel, "Codex limits, 99 percent left. Cursor models, 90 percent left")
+
+        model.setVisibleInMenuBar(.claude, visible: true)
+        model.setVisibleInMenuBar(.codex, visible: false)
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["100%", "90%"])
+    }
+
+    @MainActor
+    func testLastMenuBarProviderCannotBeHidden() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let model = UsageModel(
+            previewBuckets: [codexBucket],
+            planType: "prolite",
+            lastUpdated: Date(),
+            menuBarProviders: [.codex],
+            defaults: defaults
+        )
+
+        model.setVisibleInMenuBar(.codex, visible: false)
+        XCTAssertEqual(model.menuBarProviders, [.codex])
+        XCTAssertFalse(model.canHideMenuBarProvider)
     }
 
     private var codexBucket: LimitBucket {

@@ -37,7 +37,9 @@ struct UsageMenuView: View {
     }
 
     private var hasAnyBucket: Bool {
-        !model.buckets.isEmpty || !model.claudeBuckets.isEmpty
+        (model.isVisibleInMenuBar(.codex) && !model.buckets.isEmpty)
+            || (model.isVisibleInMenuBar(.claude) && !model.claudeBuckets.isEmpty)
+            || (model.isVisibleInMenuBar(.cursor) && !model.cursorBuckets.isEmpty)
     }
 
     @ViewBuilder
@@ -45,24 +47,35 @@ struct UsageMenuView: View {
         if model.isLoading && !hasAnyBucket {
             LoadingView()
         } else if !hasAnyBucket {
-            ErrorView(message: model.errorMessage ?? "Codex returned no limits.") {
+            ErrorView(message: model.visibleEmptyStateMessage) {
                 model.refreshNow(force: true)
             }
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                ProviderSection(
-                    title: "Codex",
-                    plan: model.planType,
-                    buckets: model.buckets,
-                    message: model.errorMessage ?? (model.buckets.isEmpty ? "Codex returned no limits." : nil)
-                )
+                if model.isVisibleInMenuBar(.codex) {
+                    ProviderSection(
+                        title: "Codex",
+                        plan: model.planType,
+                        buckets: model.buckets,
+                        message: model.sectionMessage(for: .codex)
+                    )
+                }
 
-                if model.claudeAvailable {
+                if model.isVisibleInMenuBar(.claude) {
                     ProviderSection(
                         title: "Claude Code",
                         plan: model.claudePlan,
                         buckets: model.claudeBuckets,
-                        message: model.claudeErrorMessage
+                        message: model.sectionMessage(for: .claude)
+                    )
+                }
+
+                if model.isVisibleInMenuBar(.cursor) {
+                    ProviderSection(
+                        title: "Cursor",
+                        plan: model.cursorPlan,
+                        buckets: model.cursorBuckets,
+                        message: model.sectionMessage(for: .cursor)
                     )
                 }
             }
@@ -76,7 +89,7 @@ struct UsageMenuView: View {
                 if let updatedAt = model.lastUpdated {
                     Text("Updated at \(updatedAt.formatted(date: .omitted, time: .shortened))")
                 } else {
-                    Text("Codex & Claude usage")
+                    Text("Codex, Claude & Cursor usage")
                 }
             }
             .font(AppTheme.font(size: 10.5))
@@ -85,10 +98,13 @@ struct UsageMenuView: View {
 
             Spacer()
 
-            Button("Quit") {
-                NSApp.terminate(nil)
+            HStack(spacing: 4) {
+                SettingsFooterButton()
+
+                FooterIconButton(systemImage: "power", accessibilityLabel: "Quit") {
+                    NSApp.terminate(nil)
+                }
             }
-            .buttonStyle(FooterButtonStyle())
         }
         .padding(.horizontal, 16)
         .frame(height: 40)
@@ -135,11 +151,13 @@ private struct PlanBadge: View {
 
     private var displayName: String {
         switch plan.lowercased() {
-        case "prolite": return "Pro"
+        case "prolite", "pro": return "Pro"
+        case "pro_plus", "proplus", "pro+": return "Pro+"
         case "plus": return "Plus"
         case "team": return "Team"
         case "business": return "Business"
         case "enterprise": return "Enterprise"
+        case "ultra": return "Ultra"
         case "max": return "Max"
         default: return plan.capitalized
         }
@@ -169,10 +187,19 @@ private struct LimitCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(bucket.displayName)
-                    .font(AppTheme.font(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(bucket.displayName)
+                        .font(AppTheme.font(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if let detail = bucket.detail {
+                        Text(detail)
+                            .font(AppTheme.font(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 Spacer()
 
@@ -245,7 +272,7 @@ private struct LoadingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading limits…")
                     .font(AppTheme.font(size: 13, weight: .medium))
-                Text("Connecting to Codex and Claude")
+                Text("Connecting to Codex, Claude and Cursor")
                     .font(AppTheme.font(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -290,13 +317,40 @@ private struct InlineWarning: View {
     }
 }
 
+private struct SettingsFooterButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        FooterIconButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            openSettings()
+        }
+    }
+}
+
+private struct FooterIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .symbolRenderingMode(.monochrome)
+        }
+        .buttonStyle(FooterButtonStyle())
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 private struct FooterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(AppTheme.font(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
+            .frame(width: 28, height: 28)
             .contentShape(Rectangle())
             .background(
                 Color.primary.opacity(configuration.isPressed ? 0.08 : 0),

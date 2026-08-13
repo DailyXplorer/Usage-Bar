@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -17,12 +18,52 @@ struct UsageBarApp: App {
             MenuBarLabel(model: usageModel)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView()
+                .environmentObject(usageModel)
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+        }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: nil
+        )
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        false
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        hideDockIconIfNoSettingsWindow()
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.hideDockIconIfNoSettingsWindow()
+        }
+    }
+
+    private func hideDockIconIfNoSettingsWindow() {
+        let hasSettingsWindow = NSApp.windows.contains { window in
+            window.isVisible
+                && !(window is NSPanel)
+                && window.canBecomeMain
+                && window.styleMask.contains(.titled)
+        }
+        if !hasSettingsWindow {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
 
@@ -30,18 +71,10 @@ struct MenuBarLabel: View {
     @ObservedObject var model: UsageModel
 
     var body: some View {
-        Image(nsImage: MenuBarLabelImage.make(
-            codex: model.menuBarText,
-            claude: model.menuBarClaudeDisplay
-        ))
+        Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
+        .id(model.menuBarSegments.map(\.value).joined(separator: "|"))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(model.menuBarAccessibilityLabel)
         .onAppear { model.start() }
-    }
-
-    private var accessibilityLabel: String {
-        let codex = "Codex limits, \(model.menuBarAccessibilityText)"
-        guard let claude = model.menuBarClaudeAccessibilityText else { return codex }
-        return "\(codex). \(claude)"
     }
 }
