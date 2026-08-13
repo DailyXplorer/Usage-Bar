@@ -25,11 +25,20 @@ final class AppThemeTests: XCTestCase {
         XCTAssertNotEqual(semibold, bold)
     }
 
-    func testCardFillUsesOpaqueInkInsteadOfVibrantPrimary() {
-        XCTAssertEqual(AppTheme.ink(colorScheme: .light).hexString, "#000000")
-        XCTAssertEqual(AppTheme.ink(colorScheme: .dark).hexString, "#FFFFFF")
-        XCTAssertEqual(AppTheme.cardFill(colorScheme: .light).hexString, "#000000")
-        XCTAssertEqual(AppTheme.cardFill(colorScheme: .dark).hexString, "#FFFFFF")
+    func testCardFillUsesAppearanceAwareInkAtExpectedOpacity() {
+        let cases: [(ColorScheme, String)] = [
+            (.light, "#000000"),
+            (.dark, "#FFFFFF"),
+        ]
+
+        for (colorScheme, expectedHex) in cases {
+            let fill = NSColor(AppTheme.cardFill(colorScheme: colorScheme))
+                .usingColorSpace(.sRGB) ?? NSColor(AppTheme.cardFill(colorScheme: colorScheme))
+
+            XCTAssertEqual(AppTheme.ink(colorScheme: colorScheme).hexString, expectedHex)
+            XCTAssertEqual(AppTheme.cardFill(colorScheme: colorScheme).hexString, expectedHex)
+            XCTAssertEqual(fill.alphaComponent, 0.045, accuracy: 0.001)
+        }
     }
 
     func testMenuBackgroundIsOpaqueInEveryAppearance() {
