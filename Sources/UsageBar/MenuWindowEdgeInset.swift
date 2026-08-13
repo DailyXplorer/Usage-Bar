@@ -3,22 +3,28 @@ import SwiftUI
 
 struct MenuWindowEdgeInset: NSViewRepresentable {
     var margin: CGFloat = 8
+    var onShown: () -> Void = {}
 
     func makeNSView(context: Context) -> NSView {
-        EdgeInsetView(margin: margin)
+        let view = EdgeInsetView(margin: margin)
+        view.onShown = onShown
+        return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let view = nsView as? EdgeInsetView else { return }
         view.margin = margin
+        view.onShown = onShown
         view.applyMargin()
     }
 }
 
 private final class EdgeInsetView: NSView {
     var margin: CGFloat
+    var onShown: (() -> Void)?
     private var isAdjusting = false
     private var moveObserver: NSObjectProtocol?
+    private var visibilityObservation: NSKeyValueObservation?
 
     init(margin: CGFloat) {
         self.margin = margin
@@ -34,6 +40,7 @@ private final class EdgeInsetView: NSView {
         if let moveObserver {
             NotificationCenter.default.removeObserver(moveObserver)
         }
+        visibilityObservation?.invalidate()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -47,6 +54,8 @@ private final class EdgeInsetView: NSView {
             NotificationCenter.default.removeObserver(moveObserver)
             self.moveObserver = nil
         }
+        visibilityObservation?.invalidate()
+        visibilityObservation = nil
 
         guard let window else { return }
 
@@ -57,8 +66,15 @@ private final class EdgeInsetView: NSView {
         ) { [weak self] _ in
             self?.applyMargin()
         }
+        visibilityObservation = window.observe(\.isVisible, options: [.new]) { [weak self] window, _ in
+            guard window.isVisible else { return }
+            self?.onShown?()
+        }
 
         applyMargin()
+        if window.isVisible {
+            onShown?()
+        }
     }
 
     func applyMargin() {

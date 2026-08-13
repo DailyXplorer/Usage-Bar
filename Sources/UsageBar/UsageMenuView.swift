@@ -21,10 +21,13 @@ struct UsageMenuView: View {
                 contrast: colorSchemeContrast
             )
         )
-        .background(MenuWindowEdgeInset())
+        .background(
+            MenuWindowEdgeInset(onShown: updater.checkWhenMenuAppears)
+        )
         .environment(\.font, AppTheme.font(size: 13))
         .onAppear {
             model.refreshNow()
+            updater.checkWhenMenuAppears()
         }
     }
 
