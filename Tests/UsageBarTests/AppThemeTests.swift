@@ -43,23 +43,47 @@ final class AppThemeTests: XCTestCase {
 
     func testMenuBackgroundIsOpaqueInEveryAppearance() {
         for colorScheme in [ColorScheme.light, .dark] {
-            let background = NSColor(AppTheme.menuBackground(colorScheme: colorScheme))
-                .usingColorSpace(.sRGB) ?? NSColor(AppTheme.menuBackground(colorScheme: colorScheme))
+            for contrast in [ColorSchemeContrast.standard, .increased] {
+                let backgroundColor = AppTheme.menuBackground(
+                    colorScheme: colorScheme,
+                    contrast: contrast
+                )
+                let background = NSColor(backgroundColor).usingColorSpace(.sRGB)
+                    ?? NSColor(backgroundColor)
 
-            XCTAssertEqual(background.alphaComponent, 1, accuracy: 0.001)
+                XCTAssertEqual(background.alphaComponent, 1, accuracy: 0.001)
+            }
         }
     }
 
-    func testSecondaryLabelStaysDarkInLightAppearance() throws {
-        let light = NSColor(AppTheme.secondaryLabel(colorScheme: .light))
-            .usingColorSpace(.sRGB) ?? NSColor(AppTheme.secondaryLabel(colorScheme: .light))
-        let dark = NSColor(AppTheme.secondaryLabel(colorScheme: .dark))
-            .usingColorSpace(.sRGB) ?? NSColor(AppTheme.secondaryLabel(colorScheme: .dark))
+    func testSecondaryLabelMatchesColorSchemeInEveryContrastMode() {
+        for contrast in [ColorSchemeContrast.standard, .increased] {
+            let lightColor = AppTheme.secondaryLabel(colorScheme: .light, contrast: contrast)
+            let darkColor = AppTheme.secondaryLabel(colorScheme: .dark, contrast: contrast)
+            let light = NSColor(lightColor).usingColorSpace(.sRGB) ?? NSColor(lightColor)
+            let dark = NSColor(darkColor).usingColorSpace(.sRGB) ?? NSColor(darkColor)
 
-        let lightLuma = light.redComponent + light.greenComponent + light.blueComponent
-        let darkLuma = dark.redComponent + dark.greenComponent + dark.blueComponent
+            let lightLuma = light.redComponent + light.greenComponent + light.blueComponent
+            let darkLuma = dark.redComponent + dark.greenComponent + dark.blueComponent
 
-        XCTAssertLessThan(lightLuma, 1.5)
-        XCTAssertGreaterThan(darkLuma, 1.5)
+            XCTAssertLessThan(lightLuma, 1.5)
+            XCTAssertGreaterThan(darkLuma, 1.5)
+        }
+    }
+
+    func testSystemColorAppearanceHonorsContrastPreference() {
+        let cases: [(ColorScheme, ColorSchemeContrast, NSAppearance.Name)] = [
+            (.light, .standard, .aqua),
+            (.dark, .standard, .darkAqua),
+            (.light, .increased, .accessibilityHighContrastAqua),
+            (.dark, .increased, .accessibilityHighContrastDarkAqua),
+        ]
+
+        for (colorScheme, contrast, expectedName) in cases {
+            XCTAssertEqual(
+                AppTheme.appearanceName(colorScheme: colorScheme, contrast: contrast),
+                expectedName
+            )
+        }
     }
 }

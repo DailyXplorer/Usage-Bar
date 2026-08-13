@@ -90,16 +90,50 @@ enum AppTheme {
         ink(colorScheme: colorScheme).opacity(0.045)
     }
 
-    static func menuBackground(colorScheme: ColorScheme) -> Color {
-        resolvedSystemColor(.windowBackgroundColor, colorScheme: colorScheme)
+    static func menuBackground(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        resolvedSystemColor(
+            .windowBackgroundColor,
+            colorScheme: colorScheme,
+            contrast: contrast
+        )
     }
 
-    static func secondaryLabel(colorScheme: ColorScheme) -> Color {
-        resolvedSystemColor(.secondaryLabelColor, colorScheme: colorScheme)
+    static func secondaryLabel(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        resolvedSystemColor(
+            .secondaryLabelColor,
+            colorScheme: colorScheme,
+            contrast: contrast
+        )
     }
 
-    private static func resolvedSystemColor(_ color: NSColor, colorScheme: ColorScheme) -> Color {
-        let appearanceName: NSAppearance.Name = colorScheme == .dark ? .darkAqua : .aqua
+    static func appearanceName(
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> NSAppearance.Name {
+        switch contrast {
+        case .increased:
+            return colorScheme == .dark
+                ? .accessibilityHighContrastDarkAqua
+                : .accessibilityHighContrastAqua
+        case .standard:
+            return colorScheme == .dark ? .darkAqua : .aqua
+        @unknown default:
+            return colorScheme == .dark ? .darkAqua : .aqua
+        }
+    }
+
+    private static func resolvedSystemColor(
+        _ color: NSColor,
+        colorScheme: ColorScheme,
+        contrast: ColorSchemeContrast
+    ) -> Color {
+        let appearanceName = appearanceName(colorScheme: colorScheme, contrast: contrast)
         guard let appearance = NSAppearance(named: appearanceName) else {
             return Color(nsColor: color)
         }
@@ -108,6 +142,26 @@ enum AppTheme {
             resolved = color.usingColorSpace(.sRGB) ?? color
         }
         return Color(nsColor: resolved)
+    }
+}
+
+private struct AppSecondaryLabelStyle: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(
+            AppTheme.secondaryLabel(
+                colorScheme: colorScheme,
+                contrast: colorSchemeContrast
+            )
+        )
+    }
+}
+
+extension View {
+    func appSecondaryLabelStyle() -> some View {
+        modifier(AppSecondaryLabelStyle())
     }
 }
 
