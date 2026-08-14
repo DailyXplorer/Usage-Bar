@@ -42,6 +42,33 @@ final class ClaudeLimitsTests: XCTestCase {
         XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Fable")).name, "Fable")
     }
 
+    func testRelabeledPreservesBucketMetadata() {
+        let resetAt = Date(timeIntervalSince1970: 1_786_402_800)
+        let original = LimitBucket(
+            provider: .claude,
+            kind: .weeklyScoped,
+            name: "Week · Fable",
+            usedPercent: 73,
+            resetAt: resetAt,
+            resetAfterSeconds: 4_200,
+            limitWindowSeconds: 604_800,
+            reached: true,
+            detail: "Resets in 1h"
+        )
+
+        let relabeled = ClaudeLimits.relabeled(original)
+
+        XCTAssertEqual(relabeled.name, "Fable")
+        XCTAssertEqual(relabeled.provider, .claude)
+        XCTAssertEqual(relabeled.kind, .weeklyScoped)
+        XCTAssertEqual(relabeled.usedPercent, 73)
+        XCTAssertEqual(relabeled.resetAt, resetAt)
+        XCTAssertEqual(relabeled.resetAfterSeconds, 4_200)
+        XCTAssertEqual(relabeled.limitWindowSeconds, 604_800)
+        XCTAssertTrue(relabeled.reached)
+        XCTAssertEqual(relabeled.detail, "Resets in 1h")
+    }
+
     private func cachedClaude(kind: LimitBucket.Kind, name: String) -> LimitBucket {
         LimitBucket(
             provider: .claude,
