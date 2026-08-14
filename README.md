@@ -109,9 +109,9 @@ release are in [AGENTS.md](AGENTS.md).
   `~/.claude/.credentials.json`. No token is ever copied or rewritten.
 - Queries `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code
   uses for its `/usage` command.
-- Mirrors Claude Code's three built-in bars: **Session 5h**,
-  **Week · All models** and **Week · ‹model›** (the pinned per-model limit,
-  e.g. Opus), each with its reset time.
+- Mirrors Claude Code's three built-in bars: **Current session**,
+  **All models** and **‹model›** (the pinned per-model limit, e.g. Fable),
+  each with its reset time.
 - If there is no Claude Code session, the section is simply hidden.
 
 ### Cursor
