@@ -6,7 +6,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
         LimitBucket(
             provider: .claude,
             kind: .weeklyAll,
-            name: "Week · All models",
+            name: "All models",
             usedPercent: 1,
             resetAt: resetAt,
             resetAfterSeconds: resetAfterSeconds,
