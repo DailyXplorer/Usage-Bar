@@ -113,7 +113,7 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         LimitBucket(
             provider: .claude,
             kind: .weeklyAll,
-            name: "Week · All models",
+            name: "All models",
             usedPercent: 0,
             resetAt: nil,
             resetAfterSeconds: nil,

@@ -24,15 +24,24 @@ final class ClaudeLimitsTests: XCTestCase {
         try JSONDecoder().decode(ClaudeUsageResponse.self, from: Data(payload.utf8))
     }
 
+    func testLabelsDropWindowPrefixes() {
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.sessionKind, scopeModel: nil), "Current session")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyAllKind, scopeModel: nil), "All models")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: "Fable"), "Fable")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: "Opus"), "Opus")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: nil), "Pinned model")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: ""), "Pinned model")
+    }
+
     func testBucketsMatchClaudeCodeUsageBars() throws {
         let now = Date(timeIntervalSince1970: 1_786_000_000)
         let buckets = ClaudeLimits.buckets(from: try decode(), now: now)
 
         XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
         XCTAssertEqual(buckets.map(\.displayName), [
-            "Session 5h",
-            "Week · All models",
-            "Week · Opus",
+            "Current session",
+            "All models",
+            "Opus",
         ])
         XCTAssertEqual(buckets.map(\.remainingPercent), [88, 60, 0])
         XCTAssertTrue(buckets.allSatisfy { $0.provider == .claude })
@@ -64,7 +73,7 @@ final class ClaudeLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
         XCTAssertEqual(buckets.map(\.remainingPercent), [75, 90, 10])
-        XCTAssertEqual(buckets[2].displayName, "Week · Opus")
+        XCTAssertEqual(buckets[2].displayName, "Opus")
     }
 
     func testISODateParsesSixDigitFractionalSeconds() {
