@@ -111,12 +111,12 @@ enum ClaudeLimits {
     static func label(kind: String?, scopeModel: String?) -> String {
         switch kind {
         case sessionKind:
-            return "Session 5h"
+            return "Current session"
         case weeklyAllKind:
-            return "Week · All models"
+            return "All models"
         case weeklyScopedKind:
-            guard let scopeModel, !scopeModel.isEmpty else { return "Week · pinned model" }
-            return "Week · \(scopeModel)"
+            guard let scopeModel, !scopeModel.isEmpty else { return "Pinned model" }
+            return scopeModel
         default:
             guard let kind, !kind.isEmpty else { return "Limit" }
             return kind.replacingOccurrences(of: "_", with: " ").capitalized
