@@ -123,6 +123,45 @@ enum ClaudeLimits {
         }
     }
 
+    static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
+        guard bucket.provider == .claude else { return bucket }
+        let nextName: String
+        switch bucket.kind {
+        case .session:
+            nextName = label(kind: sessionKind, scopeModel: nil)
+        case .weeklyAll:
+            nextName = label(kind: weeklyAllKind, scopeModel: nil)
+        case .weeklyScoped:
+            nextName = label(kind: weeklyScopedKind, scopeModel: scopedModel(fromStoredName: bucket.name))
+        default:
+            return bucket
+        }
+        guard nextName != bucket.name else { return bucket }
+        return LimitBucket(
+            provider: bucket.provider,
+            kind: bucket.kind,
+            name: nextName,
+            usedPercent: bucket.usedPercent,
+            resetAt: bucket.resetAt,
+            resetAfterSeconds: bucket.resetAfterSeconds,
+            limitWindowSeconds: bucket.limitWindowSeconds,
+            reached: bucket.reached,
+            detail: bucket.detail
+        )
+    }
+
+    private static func scopedModel(fromStoredName name: String) -> String? {
+        var remainder = name
+        for prefix in ["Week · ", "Week • "] where remainder.hasPrefix(prefix) {
+            remainder = String(remainder.dropFirst(prefix.count))
+        }
+        if remainder.isEmpty { return nil }
+        if remainder.compare("pinned model", options: .caseInsensitive) == .orderedSame {
+            return nil
+        }
+        return remainder
+    }
+
     private static func kind(for rawKind: String?) -> LimitBucket.Kind {
         switch rawKind {
         case sessionKind: return .session

@@ -80,6 +80,116 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .cursor])
     }
 
+    func testRefreshRewritesLegacyClaudeTitles() {
+        let snapshot = UsageSnapshot(
+            claudeBuckets: [
+                LimitBucket(
+                    provider: .claude,
+                    kind: .session,
+                    name: "Session 5h",
+                    usedPercent: 100,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 18_000,
+                    reached: true
+                ),
+                LimitBucket(
+                    provider: .claude,
+                    kind: .weeklyAll,
+                    name: "Week · All models",
+                    usedPercent: 97,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                ),
+                LimitBucket(
+                    provider: .claude,
+                    kind: .weeklyScoped,
+                    name: "Week · Fable",
+                    usedPercent: 100,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: true
+                ),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.claudeBuckets.map(\.name), [
+            "Current session",
+            "All models",
+            "Fable",
+        ])
+    }
+
+    @MainActor
+    func testRestorePersistsCanonicalClaudeTitles() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+
+        let fetchedAt = Date(timeIntervalSince1970: 1_786_400_000)
+        UsageSnapshotStore.save(
+            UsageSnapshot(
+                claudeBuckets: [
+                    LimitBucket(
+                        provider: .claude,
+                        kind: .session,
+                        name: "Session 5h",
+                        usedPercent: 100,
+                        resetAt: nil,
+                        resetAfterSeconds: nil,
+                        limitWindowSeconds: 18_000,
+                        reached: true
+                    ),
+                    LimitBucket(
+                        provider: .claude,
+                        kind: .weeklyAll,
+                        name: "Week · All models",
+                        usedPercent: 97,
+                        resetAt: nil,
+                        resetAfterSeconds: nil,
+                        limitWindowSeconds: 604_800,
+                        reached: false
+                    ),
+                    LimitBucket(
+                        provider: .claude,
+                        kind: .weeklyScoped,
+                        name: "Week · Fable",
+                        usedPercent: 100,
+                        resetAt: nil,
+                        resetAfterSeconds: nil,
+                        limitWindowSeconds: 604_800,
+                        reached: true
+                    ),
+                ],
+                claudePlan: "max",
+                fetchedAt: fetchedAt
+            ),
+            to: defaults
+        )
+
+        let model = UsageModel(defaults: defaults)
+        XCTAssertEqual(model.claudeBuckets.map(\.name), [
+            "Current session",
+            "All models",
+            "Fable",
+        ])
+
+        let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
+        XCTAssertEqual(persisted.claudeBuckets.map(\.name), [
+            "Current session",
+            "All models",
+            "Fable",
+        ])
+        XCTAssertEqual(persisted.fetchedAt, fetchedAt)
+        XCTAssertEqual(persisted.claudePlan, "max")
+    }
+
     func testCountdownIsRecomputedOnLoad() {
         let resetAt = Date(timeIntervalSince1970: 1_786_402_800)
         let snapshot = UsageSnapshot(

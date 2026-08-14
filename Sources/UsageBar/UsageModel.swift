@@ -52,6 +52,7 @@ final class UsageModel: ObservableObject {
         cursorPlan = snapshot.cursorPlan
         cursorAvailable = !snapshot.cursorBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
+        persistSnapshot(fetchedAt: snapshot.fetchedAt)
     }
 
     private func persistSnapshot(fetchedAt: Date) {
