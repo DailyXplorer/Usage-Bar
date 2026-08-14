@@ -33,6 +33,28 @@ final class ClaudeLimitsTests: XCTestCase {
         XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: ""), "Pinned model")
     }
 
+    func testRelabeledRewritesCachedWindowPrefixes() {
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .session, name: "Session 5h")).name, "Current session")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyAll, name: "Week · All models")).name, "All models")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · Fable")).name, "Fable")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · Opus")).name, "Opus")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · pinned model")).name, "Pinned model")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Fable")).name, "Fable")
+    }
+
+    private func cachedClaude(kind: LimitBucket.Kind, name: String) -> LimitBucket {
+        LimitBucket(
+            provider: .claude,
+            kind: kind,
+            name: name,
+            usedPercent: 1,
+            resetAt: nil,
+            resetAfterSeconds: nil,
+            limitWindowSeconds: 18_000,
+            reached: false
+        )
+    }
+
     func testBucketsMatchClaudeCodeUsageBars() throws {
         let now = Date(timeIntervalSince1970: 1_786_000_000)
         let buckets = ClaudeLimits.buckets(from: try decode(), now: now)

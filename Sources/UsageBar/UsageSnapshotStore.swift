@@ -46,7 +46,7 @@ struct UsageSnapshot: Codable {
     func refreshed(now: Date = Date()) -> UsageSnapshot {
         var copy = self
         copy.codexBuckets = codexBuckets.map { $0.recountingReset(from: now) }
-        copy.claudeBuckets = claudeBuckets.map { $0.recountingReset(from: now) }
+        copy.claudeBuckets = claudeBuckets.map { ClaudeLimits.relabeled($0).recountingReset(from: now) }
         copy.cursorBuckets = cursorBuckets.map { $0.recountingReset(from: now) }
         return copy
     }

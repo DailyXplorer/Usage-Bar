@@ -80,6 +80,52 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .cursor])
     }
 
+    func testRefreshRewritesLegacyClaudeTitles() {
+        let snapshot = UsageSnapshot(
+            claudeBuckets: [
+                LimitBucket(
+                    provider: .claude,
+                    kind: .session,
+                    name: "Session 5h",
+                    usedPercent: 100,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 18_000,
+                    reached: true
+                ),
+                LimitBucket(
+                    provider: .claude,
+                    kind: .weeklyAll,
+                    name: "Week · All models",
+                    usedPercent: 97,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                ),
+                LimitBucket(
+                    provider: .claude,
+                    kind: .weeklyScoped,
+                    name: "Week · Fable",
+                    usedPercent: 100,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: true
+                ),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.claudeBuckets.map(\.name), [
+            "Current session",
+            "All models",
+            "Fable",
+        ])
+    }
+
     func testCountdownIsRecomputedOnLoad() {
         let resetAt = Date(timeIntervalSince1970: 1_786_402_800)
         let snapshot = UsageSnapshot(
