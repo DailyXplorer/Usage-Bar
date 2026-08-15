@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsSectionHeader: View {
     static let fontSize: CGFloat = 11
     static let fontWeight = Font.Weight.medium
-    static let groupedFormInset: CGFloat = 20
 
     let title: String
 

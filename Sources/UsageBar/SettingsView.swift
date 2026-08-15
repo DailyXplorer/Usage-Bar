@@ -11,8 +11,10 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SettingsFormGroup(title: "Visible plans") {
+        Form {
+            GroupedFormHeaderAlignmentAnchor()
+
+            Section {
                 ForEach(LimitBucket.Provider.allCases) { provider in
                     Toggle(isOn: visibility(for: provider)) {
                         Label {
@@ -26,9 +28,11 @@ struct SettingsView: View {
                     .disabled(isLastEnabled(provider))
                     .accessibilityHint(hint(for: provider))
                 }
+            } header: {
+                SettingsSectionHeader(title: "Visible plans")
             }
 
-            SettingsFormGroup(title: "General", footer: launchAtLogin.footer) {
+            Section {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {
                         Text("Launch at login")
@@ -45,9 +49,15 @@ struct SettingsView: View {
                         launchAtLogin.openLoginItemsSettings()
                     }
                 }
+            } header: {
+                SettingsSectionHeader(title: "General")
+            } footer: {
+                if let footer = launchAtLogin.footer {
+                    Text(footer)
+                }
             }
 
-            SettingsFormGroup(title: "Updates") {
+            Section {
                 HStack(alignment: .center, spacing: 10) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
@@ -93,9 +103,11 @@ struct SettingsView: View {
                         .font(AppTheme.font(size: 13, weight: .medium))
                 }
                 .toggleStyle(.switch)
+            } header: {
+                SettingsSectionHeader(title: "Updates")
             }
         }
-        .padding(.vertical, 8)
+        .formStyle(.grouped)
         .frame(width: 448)
         .environment(\.font, AppTheme.font(size: 13))
         .background(SettingsWindowSpacePin())
@@ -146,53 +158,18 @@ struct SettingsView: View {
     }
 }
 
-private struct SettingsFormGroup<Content: View>: View {
-    let title: String
-    var footer: String?
-    let content: Content
-
-    init(
-        title: String,
-        footer: String? = nil,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.footer = footer
-        self.content = content()
-    }
-
+private struct GroupedFormHeaderAlignmentAnchor: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: title)
-                .padding(.horizontal, SettingsSectionHeader.groupedFormInset)
-
-            form
-                .formStyle(.grouped)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(true)
-                .fixedSize(horizontal: false, vertical: true)
-                .contentMargins(.top, 4, for: .scrollContent)
-                .contentMargins(.bottom, 8, for: .scrollContent)
+        Section {
+            Color.clear
+                .frame(height: 0)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .environment(\.defaultMinListRowHeight, 0)
         }
-    }
-
-    @ViewBuilder
-    private var form: some View {
-        if let footer {
-            Form {
-                Section {
-                    content
-                } footer: {
-                    Text(footer)
-                }
-            }
-        } else {
-            Form {
-                Section {
-                    content
-                }
-            }
-        }
+        .listSectionSeparator(.hidden)
+        .accessibilityHidden(true)
     }
 }
 

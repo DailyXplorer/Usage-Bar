@@ -18,7 +18,6 @@ final class SettingsSectionHeaderTests: XCTestCase {
 
         XCTAssertEqual(SettingsSectionHeader.fontSize, 11)
         XCTAssertEqual(SettingsSectionHeader.fontWeight, Font.Weight.medium)
-        XCTAssertEqual(SettingsSectionHeader.groupedFormInset, 20)
         XCTAssertEqual(font.familyName, "Instrument Sans")
         XCTAssertEqual(font.pointSize, 11)
         XCTAssertNotEqual(font.fontName, regular.fontName)
