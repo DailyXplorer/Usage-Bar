@@ -48,6 +48,19 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 )
             ],
             opencodePlan: "Go",
+            commandcodeBuckets: [
+                LimitBucket(
+                    provider: .commandcode,
+                    kind: .rolling,
+                    name: "Current session",
+                    usedPercent: 13,
+                    resetAt: Date(timeIntervalSince1970: 1_786_638_458),
+                    resetAfterSeconds: 600,
+                    limitWindowSeconds: CommandCodeLimits.rollingWindowSeconds,
+                    reached: false
+                )
+            ],
+            commandcodePlan: "individual-go",
             fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
         )
         UsageSnapshotStore.save(snapshot, to: defaults)
@@ -61,6 +74,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertNil(loaded.cursorBuckets[0].detail)
         XCTAssertEqual(loaded.opencodePlan, "Go")
         XCTAssertEqual(loaded.opencodeBuckets[0].remainingPercent, 96)
+        XCTAssertEqual(loaded.commandcodePlan, "individual-go")
+        XCTAssertEqual(loaded.commandcodeBuckets[0].remainingPercent, 87)
         XCTAssertEqual(loaded.fetchedAt, snapshot.fetchedAt)
     }
 
@@ -77,6 +92,10 @@ final class UsageSnapshotStoreTests: XCTestCase {
         var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         object.removeValue(forKey: "cursorBuckets")
         object.removeValue(forKey: "cursorPlan")
+        object.removeValue(forKey: "opencodeBuckets")
+        object.removeValue(forKey: "opencodePlan")
+        object.removeValue(forKey: "commandcodeBuckets")
+        object.removeValue(forKey: "commandcodePlan")
         defaults.set(try JSONSerialization.data(withJSONObject: object), forKey: "lastUsageSnapshot")
 
         let loaded = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
@@ -84,6 +103,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertNil(loaded.cursorPlan)
         XCTAssertTrue(loaded.opencodeBuckets.isEmpty)
         XCTAssertNil(loaded.opencodePlan)
+        XCTAssertTrue(loaded.commandcodeBuckets.isEmpty)
+        XCTAssertNil(loaded.commandcodePlan)
         XCTAssertEqual(loaded.claudePlan, "max")
     }
 
@@ -190,6 +211,30 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(refreshed.opencodePlan, OpenCodeLimits.planName)
     }
 
+    func testRefreshRewritesLegacyCommandCodeRollingTitle() {
+        let snapshot = UsageSnapshot(
+            commandcodeBuckets: [
+                LimitBucket(
+                    provider: .commandcode,
+                    kind: .rolling,
+                    name: "Rolling 5h",
+                    usedPercent: 13,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: CommandCodeLimits.rollingWindowSeconds,
+                    reached: false
+                )
+            ],
+            commandcodePlan: "individual-go",
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.commandcodeBuckets.map(\.name), [CommandCodeLimits.rollingDisplayName])
+        XCTAssertEqual(refreshed.commandcodePlan, "individual-go")
+    }
+
     @MainActor
     func testRestorePersistsCanonicalClaudeTitles() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
@@ -288,6 +333,43 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertEqual(persisted.opencodePlan, OpenCodeLimits.planName)
         XCTAssertEqual(persisted.opencodeBuckets.map(\.name), [OpenCodeLimits.rollingDisplayName])
+        XCTAssertEqual(persisted.fetchedAt, fetchedAt)
+    }
+
+    @MainActor
+    func testRestoreKeepsCommandCodePlanAndRelabelsRolling() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+
+        let fetchedAt = Date(timeIntervalSince1970: 1_786_400_000)
+        UsageSnapshotStore.save(
+            UsageSnapshot(
+                commandcodeBuckets: [
+                    LimitBucket(
+                        provider: .commandcode,
+                        kind: .rolling,
+                        name: "Rolling 5h",
+                        usedPercent: 13,
+                        resetAt: Date(timeIntervalSince1970: 1_786_638_458),
+                        resetAfterSeconds: 600,
+                        limitWindowSeconds: CommandCodeLimits.rollingWindowSeconds,
+                        reached: false
+                    )
+                ],
+                commandcodePlan: "individual-go",
+                fetchedAt: fetchedAt
+            ),
+            to: defaults
+        )
+
+        let model = UsageModel(defaults: defaults)
+        XCTAssertEqual(model.commandcodePlan, "individual-go")
+        XCTAssertEqual(model.commandcodeBuckets.map(\.name), [CommandCodeLimits.rollingDisplayName])
+
+        let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
+        XCTAssertEqual(persisted.commandcodePlan, "individual-go")
+        XCTAssertEqual(persisted.commandcodeBuckets.map(\.name), [CommandCodeLimits.rollingDisplayName])
         XCTAssertEqual(persisted.fetchedAt, fetchedAt)
     }
 

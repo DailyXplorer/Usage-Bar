@@ -26,12 +26,18 @@ final class UsageModel: ObservableObject {
     @Published private(set) var opencodeErrorMessage: String?
     @Published private(set) var opencodeAvailable = false
 
+    @Published private(set) var commandcodeBuckets: [LimitBucket] = []
+    @Published private(set) var commandcodePlan: String?
+    @Published private(set) var commandcodeErrorMessage: String?
+    @Published private(set) var commandcodeAvailable = false
+
     @Published private(set) var menuBarProviders: Set<LimitBucket.Provider>
 
     private let service = UsageService()
     private let claudeService = ClaudeUsageService()
     private let cursorService = CursorUsageService()
     private let opencodeService = OpenCodeUsageService()
+    private let commandcodeService = CommandCodeUsageService()
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
     private var started = false
@@ -41,6 +47,7 @@ final class UsageModel: ObservableObject {
     private var claudeBackoff = ThrottleBackoff()
     private var cursorBackoff = ThrottleBackoff()
     private var opencodeBackoff = ThrottleBackoff()
+    private var commandcodeBackoff = ThrottleBackoff()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -61,6 +68,9 @@ final class UsageModel: ObservableObject {
         opencodeBuckets = snapshot.opencodeBuckets
         opencodePlan = snapshot.opencodePlan
         opencodeAvailable = !snapshot.opencodeBuckets.isEmpty
+        commandcodeBuckets = snapshot.commandcodeBuckets
+        commandcodePlan = snapshot.commandcodePlan
+        commandcodeAvailable = !snapshot.commandcodeBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
         persistSnapshot(fetchedAt: snapshot.fetchedAt)
     }
@@ -76,6 +86,8 @@ final class UsageModel: ObservableObject {
                 cursorPlan: cursorPlan,
                 opencodeBuckets: opencodeBuckets,
                 opencodePlan: opencodePlan,
+                commandcodeBuckets: commandcodeBuckets,
+                commandcodePlan: commandcodePlan,
                 fetchedAt: fetchedAt
             ),
             to: defaults
@@ -117,11 +129,14 @@ final class UsageModel: ObservableObject {
         cursorPlan: String? = nil,
         opencodeBuckets: [LimitBucket] = [],
         opencodePlan: String? = nil,
+        commandcodeBuckets: [LimitBucket] = [],
+        commandcodePlan: String? = nil,
         menuBarProviders: Set<LimitBucket.Provider> = [.codex, .claude],
         defaults: UserDefaults = .standard,
         errorMessage: String? = nil,
         cursorAvailable: Bool? = nil,
-        opencodeAvailable: Bool? = nil
+        opencodeAvailable: Bool? = nil,
+        commandcodeAvailable: Bool? = nil
     ) {
         self.defaults = defaults
         buckets = previewBuckets
@@ -136,6 +151,9 @@ final class UsageModel: ObservableObject {
         self.opencodeBuckets = opencodeBuckets
         self.opencodePlan = opencodePlan
         self.opencodeAvailable = opencodeAvailable ?? !opencodeBuckets.isEmpty
+        self.commandcodeBuckets = commandcodeBuckets
+        self.commandcodePlan = commandcodePlan
+        self.commandcodeAvailable = commandcodeAvailable ?? !commandcodeBuckets.isEmpty
         self.menuBarProviders = menuBarProviders
         self.errorMessage = errorMessage
     }
@@ -199,6 +217,28 @@ final class UsageModel: ObservableObject {
         isVisibleInMenuBar(.opencode) && (opencodeAvailable || opencodeErrorMessage != nil)
     }
 
+    var commandcodeRolling: LimitBucket? {
+        commandcodeBuckets.first { $0.kind == .rolling }
+    }
+
+    var menuBarCommandCodeText: String? {
+        guard let bucket = commandcodeRolling else { return nil }
+        return "\(bucket.remainingPercent)%"
+    }
+
+    var menuBarCommandCodeDisplay: String {
+        menuBarCommandCodeText ?? "–"
+    }
+
+    var menuBarCommandCodeAccessibilityText: String? {
+        guard let bucket = commandcodeRolling else { return nil }
+        return "Command Code current session, \(bucket.remainingPercent) percent left"
+    }
+
+    var showsCommandCode: Bool {
+        isVisibleInMenuBar(.commandcode) && (commandcodeAvailable || commandcodeErrorMessage != nil)
+    }
+
     var menuBarSegments: [MenuBarSegment] {
         LimitBucket.Provider.allCases.compactMap { provider in
             guard menuBarProviders.contains(provider) else { return nil }
@@ -212,6 +252,9 @@ final class UsageModel: ObservableObject {
             case .opencode:
                 guard showsOpenCode else { return nil }
                 return MenuBarSegment(logo: AppTheme.opencodeLogo, value: menuBarOpenCodeDisplay)
+            case .commandcode:
+                guard showsCommandCode else { return nil }
+                return MenuBarSegment(logo: AppTheme.commandcodeLogo, value: menuBarCommandCodeDisplay)
             }
         }
     }
@@ -235,6 +278,11 @@ final class UsageModel: ObservableObject {
             parts.append(opencode)
         } else if showsOpenCode {
             parts.append("OpenCode unavailable")
+        }
+        if showsCommandCode, let commandcode = menuBarCommandCodeAccessibilityText {
+            parts.append(commandcode)
+        } else if showsCommandCode {
+            parts.append("Command Code unavailable")
         }
         return parts.joined(separator: ". ")
     }
@@ -310,6 +358,9 @@ final class UsageModel: ObservableObject {
             let opencodeFetch = opencodeBackoff.isBlocked
                 ? nil
                 : Task { try await opencodeService.fetchUsage() }
+            let commandcodeFetch = commandcodeBackoff.isBlocked
+                ? nil
+                : Task { try await commandcodeService.fetchUsage() }
 
             var succeeded = false
 
@@ -384,6 +435,28 @@ final class UsageModel: ObservableObject {
                 }
             }
 
+            if let commandcodeFetch {
+                do {
+                    let (usage, _) = try await commandcodeFetch.value
+                    applyCommandCode(usage)
+                    commandcodeErrorMessage = nil
+                    commandcodeBackoff.reset()
+                    succeeded = true
+                } catch CommandCodeUsageError.notSignedIn {
+                    commandcodeAvailable = false
+                    commandcodeBuckets = []
+                    commandcodePlan = nil
+                    commandcodeErrorMessage = nil
+                } catch CommandCodeUsageError.throttled {
+                    commandcodeBackoff.recordThrottle()
+                    commandcodeAvailable = true
+                    commandcodeErrorMessage = CommandCodeUsageError.throttled.errorDescription
+                } catch {
+                    commandcodeAvailable = true
+                    commandcodeErrorMessage = error.localizedDescription
+                }
+            }
+
             isLoading = false
             if succeeded {
                 let now = Date()
@@ -438,6 +511,18 @@ final class UsageModel: ObservableObject {
         opencodePlan = OpenCodeLimits.plan(for: opencodeBuckets)
     }
 
+    private func applyCommandCode(_ usage: CommandCodeUsageSnapshot) {
+        if CommandCodeLimits.shouldHide(usage) {
+            commandcodeAvailable = false
+            commandcodeBuckets = []
+            commandcodePlan = nil
+            return
+        }
+        commandcodeAvailable = true
+        commandcodePlan = usage.planId
+        commandcodeBuckets = CommandCodeLimits.buckets(from: usage)
+    }
+
     func sectionMessage(for provider: LimitBucket.Provider) -> String? {
         switch provider {
         case .codex:
@@ -463,6 +548,13 @@ final class UsageModel: ObservableObject {
             if isLoading { return nil }
             if opencodeAvailable && opencodeBuckets.isEmpty {
                 return "OpenCode returned no limits."
+            }
+            return nil
+        case .commandcode:
+            if let commandcodeErrorMessage { return commandcodeErrorMessage }
+            if isLoading { return nil }
+            if commandcodeAvailable && commandcodeBuckets.isEmpty {
+                return "Command Code returned no limits."
             }
             return nil
         }

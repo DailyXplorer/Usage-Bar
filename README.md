@@ -1,8 +1,8 @@
 # UsageBar
 
 Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
-**Claude Code** (Anthropic plan), **Cursor** and **OpenCode** usage limits:
-**percentage remaining** and time until reset.
+**Claude Code** (Anthropic plan), **Cursor**, **OpenCode** and **Command Code**
+usage limits: **percentage remaining** and time until reset.
 
 <p align="center">
   <img src="docs/usage-bar-codex-cursor.png" alt="UsageBar in the macOS menu bar, with the popover open" width="380">
@@ -11,8 +11,9 @@ Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex primary window, Claude Code's **All models** bar (the weekly all-models
 limit), then Cursor's **Cursor Models** pool (Grok and Composer). OpenCode's
-**Current session** window can be turned on in Settings. Settings let you pick which
-plans appear. The popover breaks down every window on each side.
+**Current session** and Command Code's **Current session** windows can be turned
+on in Settings. Settings let you pick which plans appear. The popover breaks
+down every window on each side.
 
 The whole label is **composed off-screen into a single template image**
 (`MenuBarLabelImage`), and that is deliberate: `MenuBarExtra` renders only one
@@ -63,8 +64,9 @@ instances.
   Automatic checks are on by default; automatic installation requires opt-in.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
-login for Anthropic limits, a signed-in Cursor app for Cursor limits, and an
-`opencode-go` API key (`/connect` → OpenCode Go) for OpenCode limits. Missing accounts
+login for Anthropic limits, a signed-in Cursor app for Cursor limits, an
+`opencode-go` API key (`/connect` → OpenCode Go) for OpenCode limits, and a
+Command Code login (`cmd login`) for Command Code limits. Missing accounts
 are hidden, not errors.
 
 ### From source
@@ -143,12 +145,27 @@ release are in [AGENTS.md](AGENTS.md).
   session window.
 - If there is no `opencode-go` key, the section is simply hidden.
 
+### Command Code
+
+- Reads the API key the Command Code CLI writes to `~/.commandcode/auth.json`
+  on `cmd login` (`apiKey`). `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`)
+  overrides that file when set. No key is ever copied or rewritten.
+- Queries the same public `/alpha` endpoints the CLI `/usage` view uses on
+  `api.commandcode.ai`: `whoami` → `billing/subscriptions` → `billing/credits`
+  → `usage/summary`.
+- Mirrors the three subscription windows: **Current session** (5-hour cap),
+  **Weekly** and **Monthly**, each with its reset time. The menu bar shows the
+  current session window. Pay-as-you-go Provider accounts have no rolling
+  windows, so the section stays hidden — the same treatment as OpenCode Zen.
+- Plan badge: **Go**, **Goat**, **Pro**, **Max 10x**, **Max 20x**, **Team Pro**.
+- If there is no Command Code key, the section is simply hidden.
+
 All accounts are queried in parallel: a slow backend does not block the others,
 and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Claude's, Cursor's and OpenCode's usage endpoints return **429** if you hit
+Claude's, Cursor's, OpenCode's and Command Code's usage endpoints return **429** if you hit
 them too often. Three safeguards:
 
 - the last state is **persisted** (`UserDefaults`) and redisplayed before any
@@ -176,10 +193,10 @@ capture time, but countdowns are recomputed from the reset time when read back.
   (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
   **silently** falls back to the system font.
 - Provider logomarks (Codex command-prompt mark, Claude spark, Cursor cube,
-  OpenCode **O**) are bundled as SVG and rendered as templates so they follow
-  the menu bar theme. They are optically padded to read at the same size in
-  the 12 px menu bar label and 16 px Settings row. **Hugeicons**
-  `dashboard-speed-02` is the application icon.
+  OpenCode **O**, Command Code command symbol) are bundled as SVG and rendered
+  as templates so they follow the menu bar theme. They are optically padded to
+  read at the same size in the 12 px menu bar label and 16 px Settings row.
+  **Hugeicons** `dashboard-speed-02` is the application icon.
 
 ## Requirements
 
@@ -188,6 +205,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
 - For the Cursor side: signed in to the Cursor app
 - For the OpenCode side: an `opencode-go` key (`/connect` → OpenCode Go)
+- For the Command Code side: signed in to the Command Code CLI (`cmd login`)
 - To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Notes
@@ -200,9 +218,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
   publisher. GitHub over HTTPS and the installer script you inspect remain the
   trusted distribution channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
-  api.anthropic.com, api2.cursor.sh and opencode.ai, identical to the ones the
-  CLIs, Cursor and OpenCode themselves make, and the optional GitHub Releases
-  check for updates.
+  api.anthropic.com, api2.cursor.sh, opencode.ai and api.commandcode.ai,
+  identical to the ones the CLIs, Cursor, OpenCode and Command Code themselves
+  make, and the optional GitHub Releases check for updates.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
   through the same path: no authorization prompt, including after a rebuild
@@ -215,6 +233,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
 - The `opencode-go` key is read from OpenCode's local `auth.json`. If it is
   missing or rejected, the section stays hidden or shows that the key is
   invalid until the next `/connect`.
+- The Command Code key is read from `~/.commandcode/auth.json`. If it is
+  missing or rejected, the section stays hidden or shows that the key is
+  invalid until the next `cmd login`.
 
 ## License
 
@@ -233,7 +254,7 @@ Bundled third-party assets keep their own:
 - **Hugeicons** (`Support/AppIcon.svg`) — `dashboard-speed-02` from the free
   set, MIT licensed, no attribution required.
 
-The Codex/OpenAI, Claude/Anthropic, Cursor and OpenCode logos remain the
-property of their respective owners; they are used here to identify the
-services being queried, not to imply any affiliation. This project is
-affiliated with neither OpenAI, Anthropic, Cursor nor OpenCode.
+The Codex/OpenAI, Claude/Anthropic, Cursor, OpenCode and Command Code logos
+remain the property of their respective owners; they are used here to identify
+the services being queried, not to imply any affiliation. This project is
+affiliated with neither OpenAI, Anthropic, Cursor, OpenCode nor Command Code.

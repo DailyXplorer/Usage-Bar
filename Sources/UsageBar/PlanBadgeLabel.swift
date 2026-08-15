@@ -12,6 +12,9 @@ enum PlanBadgeLabel {
             return sharedText(for: key, original: plan)
         case .opencode:
             return opencodeText(for: key, original: plan)
+        case .commandcode:
+            return CommandCodeLimits.displayName(for: plan)
+                ?? sharedText(for: key, original: plan)
         }
     }
 
