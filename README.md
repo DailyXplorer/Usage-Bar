@@ -1,7 +1,7 @@
 # UsageBar
 
 Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
-**Claude Code** (Anthropic plan), **Cursor** and **OpenCode Go** usage limits:
+**Claude Code** (Anthropic plan), **Cursor** and **OpenCode** usage limits:
 **percentage remaining** and time until reset.
 
 <p align="center">
@@ -64,7 +64,7 @@ instances.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
 login for Anthropic limits, a signed-in Cursor app for Cursor limits, and an
-OpenCode Go API key (`/connect` → OpenCode Go) for Go limits. Missing accounts
+`opencode-go` API key (`/connect` → OpenCode Go) for OpenCode limits. Missing accounts
 are hidden, not errors.
 
 ### From source
@@ -129,7 +129,7 @@ release are in [AGENTS.md](AGENTS.md).
   billing-cycle reset. The menu bar shows the Cursor Models pool.
 - If there is no Cursor session, the section is simply hidden.
 
-### OpenCode Go
+### OpenCode
 
 - Reads the `opencode-go` API key from OpenCode's `auth.json`. OpenCode stores
   that file under `$XDG_DATA_HOME/opencode` when set, otherwise
@@ -141,14 +141,14 @@ release are in [AGENTS.md](AGENTS.md).
 - Mirrors the three Go windows: **Current session** ($12), **Weekly** ($30) and
   **Monthly** ($60), each with its reset time. The menu bar shows the current
   session window.
-- If there is no OpenCode Go key, the section is simply hidden.
+- If there is no `opencode-go` key, the section is simply hidden.
 
 All accounts are queried in parallel: a slow backend does not block the others,
 and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Claude's, Cursor's and OpenCode Go's usage endpoints return **429** if you hit
+Claude's, Cursor's and OpenCode's usage endpoints return **429** if you hit
 them too often. Three safeguards:
 
 - the last state is **persisted** (`UserDefaults`) and redisplayed before any
@@ -186,7 +186,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
 - For the Cursor side: signed in to the Cursor app
-- For the OpenCode Go side: an OpenCode Go key (`/connect` in OpenCode)
+- For the OpenCode side: an `opencode-go` key (`/connect` → OpenCode Go)
 - To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Notes
@@ -211,7 +211,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
   until the next time Claude Code opens.
 - The Cursor token is read from Cursor's local session store. If it has expired,
   the section shows "Cursor token expired" until the next time Cursor opens.
-- The OpenCode Go key is read from OpenCode's local `auth.json`. If it is
+- The `opencode-go` key is read from OpenCode's local `auth.json`. If it is
   missing or rejected, the section stays hidden or shows that the key is
   invalid until the next `/connect`.
 
