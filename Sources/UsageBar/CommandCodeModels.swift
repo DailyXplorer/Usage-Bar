@@ -53,7 +53,6 @@ struct CommandCodeCreditsResponse: Decodable {
 
     struct WindowLimits: Decodable {
         let limited: Bool?
-        let exceeded: String?
         let fiveHour: CommandCodeWindow?
         let weekly: CommandCodeWindow?
     }
@@ -250,11 +249,13 @@ enum CommandCodeLimits {
 
     private static func monthlyBucket(from snapshot: CommandCodeUsageSnapshot, now: Date) -> LimitBucket? {
         guard let total = monthlyCredits(for: snapshot.planId), total > 0 else { return nil }
-        let remaining = max(0, snapshot.credits?.monthlyCredits ?? 0)
-        let used = snapshot.monthlyUsed.map { max(0, min($0, total)) }
-            ?? max(0, total - min(remaining, total))
+        let remaining = snapshot.credits?.monthlyCredits.map { max(0, $0) }
+        guard let used = snapshot.monthlyUsed.map({ max(0, min($0, total)) })
+            ?? remaining.map({ max(0, total - min($0, total)) }) else {
+            return nil
+        }
         let usedPercent = clampPercent((used / total) * 100)
-        let reached = used >= total || remaining <= 0
+        let reached = used >= total || remaining == 0
         let resetAt = ISODate.parse(snapshot.currentPeriodEnd)
         return LimitBucket(
             provider: .commandcode,
