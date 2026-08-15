@@ -32,6 +32,17 @@ final class PlanBadgeLabelTests: XCTestCase {
         XCTAssertEqual(PlanBadgeLabel.text(for: OpenCodeLimits.planName, provider: .opencode), "Go")
     }
 
+    func testCommandCodeMapsPlanIds() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-go", provider: .commandcode), "Go")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-goat", provider: .commandcode), "Goat")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-pro", provider: .commandcode), "Pro")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-pro-v1", provider: .commandcode), "Pro")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-max", provider: .commandcode), "Max 10x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-ultra", provider: .commandcode), "Max 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "teams-pro", provider: .commandcode), "Team Pro")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Go", provider: .commandcode), "Go")
+    }
+
     func testSharedLabelsStayUnchanged() {
         XCTAssertEqual(PlanBadgeLabel.text(for: "plus", provider: .codex), "Plus")
         XCTAssertEqual(PlanBadgeLabel.text(for: "team", provider: .codex), "Team")

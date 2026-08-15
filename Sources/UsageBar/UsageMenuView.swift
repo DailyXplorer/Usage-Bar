@@ -58,6 +58,7 @@ struct UsageMenuView: View {
             || (model.isVisibleInMenuBar(.claude) && !model.claudeBuckets.isEmpty)
             || (model.isVisibleInMenuBar(.cursor) && !model.cursorBuckets.isEmpty)
             || (model.isVisibleInMenuBar(.opencode) && !model.opencodeBuckets.isEmpty)
+            || (model.isVisibleInMenuBar(.commandcode) && !model.commandcodeBuckets.isEmpty)
     }
 
     @ViewBuilder
@@ -109,6 +110,16 @@ struct UsageMenuView: View {
                         message: model.sectionMessage(for: .opencode)
                     )
                 }
+
+                if model.showsCommandCode {
+                    ProviderSection(
+                        title: LimitBucket.Provider.commandcode.title,
+                        provider: .commandcode,
+                        plan: model.commandcodePlan,
+                        buckets: model.commandcodeBuckets,
+                        message: model.sectionMessage(for: .commandcode)
+                    )
+                }
             }
             .padding(12)
         }
@@ -120,7 +131,7 @@ struct UsageMenuView: View {
                 if let updatedAt = model.lastUpdated {
                     Text("Updated at \(updatedAt.formatted(date: .omitted, time: .shortened))")
                 } else {
-                    Text("Codex, Claude, Cursor & OpenCode usage")
+                    Text("Codex, Claude, Cursor, OpenCode & Command Code usage")
                 }
             }
             .font(AppTheme.font(size: 10.5))
@@ -322,7 +333,7 @@ private struct LoadingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading limits…")
                     .font(AppTheme.font(size: 13, weight: .medium))
-                Text("Connecting to Codex, Claude, Cursor and OpenCode")
+                Text("Connecting to Codex, Claude, Cursor, OpenCode and Command Code")
                     .font(AppTheme.font(size: 11))
                     .appSecondaryLabelStyle()
             }
