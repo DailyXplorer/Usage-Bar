@@ -11,7 +11,7 @@ final class CommandCodeLimitsTests: XCTestCase {
         weeklyCap: Double = 6,
         weeklyExceeded: Bool = false,
         weeklyResetAt: Double = 1_786_800_000_000,
-        monthlyRemaining: Double = 8.5,
+        monthlyRemaining: Double? = 8.5,
         monthlyUsed: Double? = 1.5,
         planId: String? = "individual-go",
         limited: Bool? = true,
@@ -28,7 +28,6 @@ final class CommandCodeLimitsTests: XCTestCase {
             ),
             windowLimits: CommandCodeCreditsResponse.WindowLimits(
                 limited: limited,
-                exceeded: nil,
                 fiveHour: CommandCodeWindow(
                     used: fiveHourUsed,
                     cap: fiveHourCap,
@@ -116,7 +115,6 @@ final class CommandCodeLimitsTests: XCTestCase {
         var snapshot = goSnapshot()
         snapshot.windowLimits = CommandCodeCreditsResponse.WindowLimits(
             limited: true,
-            exceeded: nil,
             fiveHour: CommandCodeWindow(used: 1, cap: 0, exceeded: false, resetAt: 1),
             weekly: nil
         )
@@ -296,7 +294,6 @@ final class CommandCodeLimitsTests: XCTestCase {
                 monthlyCredits: 8.5,
                 windowLimits: CommandCodeCreditsResponse.WindowLimits(
                     limited: true,
-                    exceeded: nil,
                     fiveHour: CommandCodeWindow(
                         used: 0.4,
                         cap: 3,
@@ -329,6 +326,45 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertEqual(buckets[2].kind, .monthly)
         XCTAssertEqual(buckets[2].usedPercent, 15)
         XCTAssertFalse(buckets[2].reached)
+    }
+
+    func testOmittedMonthlyCreditsDoesNotMarkTheBarReached() {
+        let buckets = CommandCodeLimits.buckets(
+            from: goSnapshot(monthlyRemaining: nil, monthlyUsed: 1.5)
+        )
+
+        XCTAssertEqual(buckets[2].kind, .monthly)
+        XCTAssertEqual(buckets[2].usedPercent, 15)
+        XCTAssertFalse(buckets[2].reached)
+    }
+
+    func testMonthlyBarIsSkippedWhenRemainingAndUsedAreUnknown() {
+        XCTAssertEqual(
+            CommandCodeLimits.buckets(
+                from: goSnapshot(monthlyRemaining: nil, monthlyUsed: nil)
+            ).map(\.kind),
+            [.rolling, .weekly]
+        )
+    }
+
+    func testCreditsResponseIgnoresBooleanExceededOnWindowLimits() throws {
+        let payload = """
+        {
+          "credits": {"monthlyCredits": 8.5},
+          "windowLimits": {
+            "limited": true,
+            "exceeded": true,
+            "fiveHour": {"used": 0.4, "cap": 3, "resetAt": 1786638458000}
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(
+            CommandCodeCreditsResponse.self,
+            from: Data(payload.utf8)
+        )
+
+        XCTAssertEqual(response.windowLimits?.limited, true)
+        XCTAssertEqual(response.windowLimits?.fiveHour?.cap, 3)
     }
 
     func testLoadCredentialsPrefersCommandCodeApiKeyEnv() throws {
@@ -447,7 +483,6 @@ final class CommandCodeLimitsTests: XCTestCase {
         var snapshot = goSnapshot()
         snapshot.windowLimits = CommandCodeCreditsResponse.WindowLimits(
             limited: true,
-            exceeded: nil,
             fiveHour: nil,
             weekly: CommandCodeWindow(
                 used: 1.2,
