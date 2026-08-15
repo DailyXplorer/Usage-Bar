@@ -3,7 +3,25 @@ import Foundation
 struct ClaudeCredentials {
     let accessToken: String
     let subscriptionType: String?
+    let rateLimitTier: String?
     let expiresAt: Date?
+
+    var planToken: String? {
+        guard let subscriptionType, !subscriptionType.isEmpty else { return nil }
+        guard subscriptionType.lowercased() == "max" else { return subscriptionType }
+        guard let multiplier = Self.maxMultiplier(from: rateLimitTier) else {
+            return subscriptionType
+        }
+        return "max_\(multiplier)"
+    }
+
+    private static func maxMultiplier(from rateLimitTier: String?) -> String? {
+        guard let rateLimitTier, !rateLimitTier.isEmpty else { return nil }
+        let normalized = rateLimitTier.lowercased()
+        if normalized.contains("20x") { return "20x" }
+        if normalized.contains("5x") { return "5x" }
+        return nil
+    }
 }
 
 enum ClaudeUsageError: LocalizedError {
@@ -80,11 +98,13 @@ actor ClaudeUsageService {
             let accessToken: String?
             let expiresAt: Double?
             let subscriptionType: String?
+            let rateLimitTier: String?
 
             enum CodingKeys: String, CodingKey {
                 case accessToken
                 case expiresAt
                 case subscriptionType
+                case rateLimitTier
             }
         }
 
@@ -108,6 +128,7 @@ actor ClaudeUsageService {
         return ClaudeCredentials(
             accessToken: accessToken,
             subscriptionType: oauth.subscriptionType,
+            rateLimitTier: oauth.rateLimitTier,
             expiresAt: oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }

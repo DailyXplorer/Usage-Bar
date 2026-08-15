@@ -422,7 +422,7 @@ final class UsageModel: ObservableObject {
 
     private func applyClaude(_ usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
         claudeAvailable = true
-        claudePlan = credentials.subscriptionType
+        claudePlan = credentials.planToken
         claudeBuckets = ClaudeLimits.buckets(from: usage)
     }
 

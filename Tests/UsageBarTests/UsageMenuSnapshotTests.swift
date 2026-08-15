@@ -53,7 +53,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     reached: false
                 ),
             ],
-            claudePlan: "max",
+            claudePlan: "max_5x",
             cursorBuckets: [
                 LimitBucket(
                     provider: .cursor,
