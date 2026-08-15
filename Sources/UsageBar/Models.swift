@@ -5,12 +5,26 @@ struct UsageResponse: Decodable {
     let rateLimit: RateLimitStatus?
     let rateLimitReachedType: String?
     let rateLimitResetCredits: RateLimitResetCreditsSummary?
+    let additionalRateLimits: [AdditionalRateLimit]?
 
     enum CodingKeys: String, CodingKey {
         case planType = "plan_type"
         case rateLimit = "rate_limit"
         case rateLimitReachedType = "rate_limit_reached_type"
         case rateLimitResetCredits = "rate_limit_reset_credits"
+        case additionalRateLimits = "additional_rate_limits"
+    }
+}
+
+struct AdditionalRateLimit: Decodable {
+    let limitName: String?
+    let meteredFeature: String?
+    let rateLimit: RateLimitStatus?
+
+    enum CodingKeys: String, CodingKey {
+        case limitName = "limit_name"
+        case meteredFeature = "metered_feature"
+        case rateLimit = "rate_limit"
     }
 }
 
@@ -70,7 +84,7 @@ struct LimitBucket: Identifiable, Codable {
     }
 
     enum Kind: String, Codable {
-        case primary, secondary
+        case primary, secondary, spark
         case session, weeklyAll, weeklyScoped
         case cursorModels, otherModels
         case rolling, weekly, monthly
@@ -197,5 +211,82 @@ enum WindowLabels {
         let m = Double(minutes)
         let e = Double(expected)
         return m >= e * 0.95 && m <= e * 1.05
+    }
+}
+
+enum CodexLimits {
+    static let sparkMeteredFeature = "codex_bengalfox"
+    static let sparkDisplayName = "Spark"
+
+    static func buckets(from usage: UsageResponse, now: Date = Date()) -> [LimitBucket] {
+        var result: [LimitBucket] = []
+        let parentReached = usage.rateLimit?.limitReached ?? false
+        if let primary = usage.rateLimit?.primaryWindow {
+            result.append(makeBucket(
+                kind: .primary,
+                window: primary,
+                isSecondary: false,
+                reached: parentReached,
+                now: now
+            ))
+        }
+        if let secondary = usage.rateLimit?.secondaryWindow {
+            result.append(makeBucket(
+                kind: .secondary,
+                window: secondary,
+                isSecondary: true,
+                reached: parentReached,
+                now: now
+            ))
+        }
+        if let spark = sparkWindow(from: usage) {
+            result.append(makeBucket(
+                kind: .spark,
+                name: sparkDisplayName,
+                window: spark.window,
+                reached: spark.reached,
+                now: now
+            ))
+        }
+        return result
+    }
+
+    private static func sparkWindow(
+        from usage: UsageResponse
+    ) -> (window: RateLimitWindow, reached: Bool)? {
+        guard let match = usage.additionalRateLimits?.first(where: isSpark) else { return nil }
+        guard let window = match.rateLimit?.primaryWindow else { return nil }
+        return (window, match.rateLimit?.limitReached ?? false)
+    }
+
+    private static func isSpark(_ item: AdditionalRateLimit) -> Bool {
+        if item.meteredFeature == sparkMeteredFeature { return true }
+        guard let name = item.limitName else { return false }
+        return name.range(of: "spark", options: .caseInsensitive) != nil
+    }
+
+    private static func makeBucket(
+        kind: LimitBucket.Kind,
+        name: String? = nil,
+        window: RateLimitWindow,
+        isSecondary: Bool = false,
+        reached: Bool,
+        now: Date
+    ) -> LimitBucket {
+        let resetAt = window.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        let resetAfterSeconds = window.resetAfterSeconds
+            ?? resetAt.map { max(0, Int($0.timeIntervalSince(now).rounded())) }
+        return LimitBucket(
+            kind: kind,
+            name: name ?? WindowLabels.label(
+                forWindowSeconds: window.limitWindowSeconds,
+                isSecondary: isSecondary
+            ),
+            usedPercent: window.usedPercent ?? 0,
+            resetAt: resetAt,
+            resetAfterSeconds: resetAfterSeconds,
+            limitWindowSeconds: window.limitWindowSeconds,
+            reached: reached
+        )
     }
 }

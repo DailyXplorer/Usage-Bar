@@ -473,24 +473,7 @@ final class UsageModel: ObservableObject {
             ?? usage.rateLimitResetCredits?.availableCount
             ?? 0
 
-        var result: [LimitBucket] = []
-        if let primary = usage.rateLimit?.primaryWindow {
-            result.append(makeBucket(
-                kind: .primary,
-                window: primary,
-                isSecondary: false,
-                reached: usage.rateLimit?.limitReached ?? false
-            ))
-        }
-        if let secondary = usage.rateLimit?.secondaryWindow {
-            result.append(makeBucket(
-                kind: .secondary,
-                window: secondary,
-                isSecondary: true,
-                reached: usage.rateLimit?.limitReached ?? false
-            ))
-        }
-        buckets = result
+        buckets = CodexLimits.buckets(from: usage)
     }
 
     private func applyClaude(_ usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
@@ -565,23 +548,6 @@ final class UsageModel: ObservableObject {
             .filter(isVisibleInMenuBar)
             .compactMap { sectionMessage(for: $0) }
         return messages.first ?? "No usage limits were returned."
-    }
-
-    private func makeBucket(
-        kind: LimitBucket.Kind,
-        window: RateLimitWindow,
-        isSecondary: Bool,
-        reached: Bool
-    ) -> LimitBucket {
-        LimitBucket(
-            kind: kind,
-            name: WindowLabels.label(forWindowSeconds: window.limitWindowSeconds, isSecondary: isSecondary),
-            usedPercent: window.usedPercent ?? 0,
-            resetAt: window.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) },
-            resetAfterSeconds: window.resetAfterSeconds,
-            limitWindowSeconds: window.limitWindowSeconds,
-            reached: reached
-        )
     }
 
     func formattedReset(_ bucket: LimitBucket) -> String {

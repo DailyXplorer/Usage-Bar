@@ -103,7 +103,9 @@ release are in [AGENTS.md](AGENTS.md).
   (the same one `codex /status` uses).
 - Shows the primary window ("weekly", "5h", … depending on the duration the
   backend returns, same heuristic as the CLI) and the secondary window when
-  present.
+  present. When ChatGPT returns a Spark extra limit, the popover adds a
+  **Spark** bar after those windows. Spark stays out of the menu bar, and the
+  bar is hidden when the response has no matching Spark entry.
 
 ### Claude Code
 
