@@ -191,7 +191,7 @@ The installed app is always `/Applications/UsageBar.app` (Finder:
 | Swift source | PascalCase, one primary type per file | `MenuBarLabelImage.swift` |
 | Swift tests | `TypeNameTests.swift` next to the behavior | `AppUpdaterTests.swift` |
 | Scripts | kebab-case, executable | `scripts/build-app.sh` |
-| Markdown / docs images | kebab-case | `docs/usage-bar-codex-cursor.png` |
+| Markdown / docs images | kebab-case | `docs/usage-bar-codex-opencode.png` |
 | This file | uppercase root doc | `CONVENTIONS.md`, `AGENTS.md`, `README.md` |
 | GitHub workflows | kebab-case | `.github/workflows/release.yml` |
 | Resources | descriptive, stable names | `InstrumentSans.ttf`, `AppIcon.svg` |
