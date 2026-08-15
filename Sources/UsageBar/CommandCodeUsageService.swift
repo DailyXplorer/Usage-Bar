@@ -44,11 +44,11 @@ actor CommandCodeUsageService {
         self.session = session
     }
 
-    func fetchUsage() async throws -> (usage: CommandCodeUsageSnapshot, credentials: CommandCodeCredentials) {
-        let credentials = try Self.loadCredentials(
-            from: Self.authFileCandidates(),
-            environment: ProcessInfo.processInfo.environment
-        )
+    func fetchUsage(
+        from files: [URL] = CommandCodeUsageService.authFileCandidates(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) async throws -> (usage: CommandCodeUsageSnapshot, credentials: CommandCodeCredentials) {
+        let credentials = try Self.loadCredentials(from: files, environment: environment)
         let whoami: CommandCodeWhoamiResponse = try await get(
             path: "/alpha/whoami",
             token: credentials.apiKey
@@ -74,13 +74,6 @@ actor CommandCodeUsageService {
                 query: Self.query(orgId: orgId, since: subscriptions.data?.currentPeriodStart)
             )
             monthlyUsed = summary.totalMonthlyCredits
-        } catch let error as CommandCodeUsageError {
-            switch error {
-            case .throttled, .invalidKey:
-                throw error
-            default:
-                monthlyUsed = nil
-            }
         } catch {
             monthlyUsed = nil
         }
