@@ -13,8 +13,6 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            GroupedFormHeaderAlignmentAnchor()
-
             Section {
                 ForEach(LimitBucket.Provider.allCases) { provider in
                     Toggle(isOn: visibility(for: provider)) {
@@ -181,21 +179,6 @@ struct SettingsView: View {
             return "At least one plan must stay in the menu bar"
         }
         return "Show \(provider.title) in the menu bar"
-    }
-}
-
-private struct GroupedFormHeaderAlignmentAnchor: View {
-    var body: some View {
-        Section {
-            Color.clear
-                .frame(height: 0)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .environment(\.defaultMinListRowHeight, 0)
-        }
-        .listSectionSeparator(.hidden)
-        .accessibilityHidden(true)
     }
 }
 
