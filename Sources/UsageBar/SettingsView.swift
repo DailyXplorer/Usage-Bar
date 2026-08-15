@@ -128,7 +128,7 @@ struct SettingsView: View {
                     .accessibilityLabel("Open GitHub repository")
                 }
             } header: {
-                Text("About")
+                SettingsSectionHeader(title: "About")
             }
         }
         .formStyle(.grouped)
