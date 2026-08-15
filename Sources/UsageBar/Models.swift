@@ -54,7 +54,7 @@ struct RateLimitResetCreditsSummary: Decodable {
 
 struct LimitBucket: Identifiable, Codable {
     enum Provider: String, Codable, CaseIterable, Identifiable {
-        case codex, claude, cursor
+        case codex, claude, cursor, opencode
 
         var id: String { rawValue }
 
@@ -63,6 +63,7 @@ struct LimitBucket: Identifiable, Codable {
             case .codex: return "Codex"
             case .claude: return "Claude"
             case .cursor: return "Cursor"
+            case .opencode: return "OpenCode Go"
             }
         }
     }
@@ -71,6 +72,7 @@ struct LimitBucket: Identifiable, Codable {
         case primary, secondary
         case session, weeklyAll, weeklyScoped
         case cursorModels, otherModels
+        case rolling, weekly, monthly
         case other
     }
 
