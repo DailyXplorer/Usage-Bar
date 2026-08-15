@@ -11,7 +11,7 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
             previewBuckets: [codexBucket],
             planType: "prolite",
             lastUpdated: Date(),
-            claudeBuckets: [claudeAllModelsBucket],
+            claudeBuckets: [claudeSessionBucket],
             claudePlan: "max"
         )
 
@@ -53,7 +53,7 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
             previewBuckets: [codexBucket],
             planType: "prolite",
             lastUpdated: Date(),
-            claudeBuckets: [claudeAllModelsBucket],
+            claudeBuckets: [claudeSessionBucket],
             claudePlan: "max",
             cursorBuckets: [
                 LimitBucket(
@@ -109,15 +109,15 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         )
     }
 
-    private var claudeAllModelsBucket: LimitBucket {
+    private var claudeSessionBucket: LimitBucket {
         LimitBucket(
             provider: .claude,
-            kind: .weeklyAll,
-            name: "All models",
+            kind: .session,
+            name: "Current session",
             usedPercent: 0,
             resetAt: nil,
             resetAfterSeconds: nil,
-            limitWindowSeconds: 604_800,
+            limitWindowSeconds: 18_000,
             reached: false
         )
     }

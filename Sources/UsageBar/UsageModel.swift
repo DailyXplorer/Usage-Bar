@@ -159,12 +159,12 @@ final class UsageModel: ObservableObject {
     }
 #endif
 
-    var claudeAllModels: LimitBucket? {
-        claudeBuckets.first { $0.kind == .weeklyAll } ?? claudeBuckets.first
+    var claudeSession: LimitBucket? {
+        claudeBuckets.first { $0.kind == .session }
     }
 
     var menuBarClaudeText: String? {
-        guard let bucket = claudeAllModels else { return nil }
+        guard let bucket = claudeSession else { return nil }
         return "\(bucket.remainingPercent)%"
     }
 
@@ -173,8 +173,8 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarClaudeAccessibilityText: String? {
-        guard let bucket = claudeAllModels else { return nil }
-        return "Claude Code all models, \(bucket.remainingPercent) percent left"
+        guard let bucket = claudeSession else { return nil }
+        return "Claude Code current session, \(bucket.remainingPercent) percent left"
     }
 
     var cursorModels: LimitBucket? {
