@@ -175,10 +175,11 @@ capture time, but countdowns are recomputed from the reset time when read back.
   registered (`InstrumentSans-Regular`). Weights go through the `wght` axis
   (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
   **silently** falls back to the system font.
-- **Hugeicons** `chat-gpt`, `claude`, `cursor` and `dashboard-speed-02` icons
-  (stroke · rounded), plus a stroke OpenCode **O** for Go. The provider logos
-  are bundled as SVG and rendered as templates so they follow the menu bar
-  theme; `dashboard-speed-02` is the application icon.
+- Provider logomarks (Codex command-prompt mark, Claude spark, Cursor cube,
+  OpenCode **O**) are bundled as SVG and rendered as templates so they follow
+  the menu bar theme. They are optically padded to read at the same size in
+  the 12 px menu bar label and 16 px Settings row. **Hugeicons**
+  `dashboard-speed-02` is the application icon.
 
 ## Requirements
 
@@ -229,12 +230,10 @@ Bundled third-party assets keep their own:
   ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), as the OFL
   requires: if you redistribute the app or the repo, keep that file next to the
   `.ttf`.
-- **Hugeicons** (`chat-gpt.svg`, `claude.svg`, `cursor.svg`, `AppIcon.svg`) —
-  icons from the free set, MIT licensed, no attribution required.
-- **OpenCode** (`opencode.svg`) — a stroke mark used only to identify OpenCode
-  Go, not to imply affiliation.
+- **Hugeicons** (`Support/AppIcon.svg`) — `dashboard-speed-02` from the free
+  set, MIT licensed, no attribution required.
 
-The ChatGPT/OpenAI, Claude/Anthropic, Cursor and OpenCode logos remain the
+The Codex/OpenAI, Claude/Anthropic, Cursor and OpenCode logos remain the
 property of their respective owners; they are used here to identify the
 services being queried, not to imply any affiliation. This project is
 affiliated with neither OpenAI, Anthropic, Cursor nor OpenCode.
