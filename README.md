@@ -1,8 +1,8 @@
 # UsageBar
 
 Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
-**Claude Code** (Anthropic plan) and **Cursor** usage limits: **percentage
-remaining** and time until reset.
+**Claude Code** (Anthropic plan), **Cursor** and **OpenCode Go** usage limits:
+**percentage remaining** and time until reset.
 
 <p align="center">
   <img src="docs/usage-bar-codex-cursor.png" alt="UsageBar in the macOS menu bar, with the popover open" width="380">
@@ -10,8 +10,9 @@ remaining** and time until reset.
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex primary window, Claude Code's **All models** bar (the weekly all-models
-limit), then Cursor's **Cursor Models** pool (Grok and Composer). Settings let
-you pick which plans appear. The popover breaks down every window on each side.
+limit), then Cursor's **Cursor Models** pool (Grok and Composer). OpenCode Go's
+**Rolling 5h** window can be turned on in Settings. Settings let you pick which
+plans appear. The popover breaks down every window on each side.
 
 The whole label is **composed off-screen into a single template image**
 (`MenuBarLabelImage`), and that is deliberate: `MenuBarExtra` renders only one
@@ -62,8 +63,9 @@ instances.
   Automatic checks are on by default; automatic installation requires opt-in.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
-login for Anthropic limits, and a signed-in Cursor app for Cursor limits.
-Missing accounts are hidden, not errors.
+login for Anthropic limits, a signed-in Cursor app for Cursor limits, and an
+OpenCode Go API key (`/connect` → OpenCode Go) for Go limits. Missing accounts
+are hidden, not errors.
 
 ### From source
 
@@ -127,13 +129,27 @@ release are in [AGENTS.md](AGENTS.md).
   billing-cycle reset. The menu bar shows the Cursor Models pool.
 - If there is no Cursor session, the section is simply hidden.
 
+### OpenCode Go
+
+- Reads the `opencode-go` API key from OpenCode's `auth.json`. OpenCode stores
+  that file under `$XDG_DATA_HOME/opencode` when set, otherwise
+  `~/.local/share/opencode/auth.json`, then
+  `~/Library/Application Support/opencode/auth.json`. No key is ever copied or
+  rewritten.
+- Queries `https://opencode.ai/zen/go/v1/usage`, the official Go quota endpoint,
+  with the same Bearer key the TUI already uses.
+- Mirrors the three Go windows: **Rolling 5h** ($12), **Weekly** ($30) and
+  **Monthly** ($60), each with its reset time. The menu bar shows the rolling
+  5-hour window.
+- If there is no OpenCode Go key, the section is simply hidden.
+
 All accounts are queried in parallel: a slow backend does not block the others,
 and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Claude's and Cursor's usage endpoints return **429** if you hit them too often.
-Three safeguards:
+Claude's, Cursor's and OpenCode Go's usage endpoints return **429** if you hit
+them too often. Three safeguards:
 
 - the last state is **persisted** (`UserDefaults`) and redisplayed before any
   request, so restarting the app costs no network call and never shows "–" when
@@ -160,9 +176,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
   (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
   **silently** falls back to the system font.
 - **Hugeicons** `chat-gpt`, `claude`, `cursor` and `dashboard-speed-02` icons
-  (stroke · rounded). The provider logos are bundled as SVG and rendered as
-  templates so they follow the menu bar theme; `dashboard-speed-02` is the
-  application icon.
+  (stroke · rounded), plus a stroke OpenCode **O** for Go. The provider logos
+  are bundled as SVG and rendered as templates so they follow the menu bar
+  theme; `dashboard-speed-02` is the application icon.
 
 ## Requirements
 
@@ -170,6 +186,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
 - For the Cursor side: signed in to the Cursor app
+- For the OpenCode Go side: an OpenCode Go key (`/connect` in OpenCode)
 - To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
 
 ## Notes
@@ -182,8 +199,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
   publisher. GitHub over HTTPS and the installer script you inspect remain the
   trusted distribution channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
-  api.anthropic.com and api2.cursor.sh, identical to the ones the CLIs and
-  Cursor itself make, and the optional GitHub Releases check for updates.
+  api.anthropic.com, api2.cursor.sh and opencode.ai, identical to the ones the
+  CLIs, Cursor and OpenCode themselves make, and the optional GitHub Releases
+  check for updates.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
   through the same path: no authorization prompt, including after a rebuild
@@ -193,6 +211,9 @@ capture time, but countdowns are recomputed from the reset time when read back.
   until the next time Claude Code opens.
 - The Cursor token is read from Cursor's local session store. If it has expired,
   the section shows "Cursor token expired" until the next time Cursor opens.
+- The OpenCode Go key is read from OpenCode's local `auth.json`. If it is
+  missing or rejected, the section stays hidden or shows that the key is
+  invalid until the next `/connect`.
 
 ## License
 
@@ -210,8 +231,10 @@ Bundled third-party assets keep their own:
   `.ttf`.
 - **Hugeicons** (`chat-gpt.svg`, `claude.svg`, `cursor.svg`, `AppIcon.svg`) —
   icons from the free set, MIT licensed, no attribution required.
+- **OpenCode** (`opencode.svg`) — a stroke mark used only to identify OpenCode
+  Go, not to imply affiliation.
 
-The ChatGPT/OpenAI, Claude/Anthropic and Cursor logos remain the property of
-their respective owners; they are used here to identify the services being
-queried, not to imply any affiliation. This project is affiliated with neither
-OpenAI, Anthropic nor Cursor.
+The ChatGPT/OpenAI, Claude/Anthropic, Cursor and OpenCode logos remain the
+property of their respective owners; they are used here to identify the
+services being queried, not to imply any affiliation. This project is
+affiliated with neither OpenAI, Anthropic, Cursor nor OpenCode.

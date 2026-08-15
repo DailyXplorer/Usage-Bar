@@ -35,6 +35,19 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 )
             ],
             cursorPlan: "pro",
+            opencodeBuckets: [
+                LimitBucket(
+                    provider: .opencode,
+                    kind: .rolling,
+                    name: "Rolling 5h",
+                    usedPercent: 4,
+                    resetAt: Date(timeIntervalSince1970: 1_786_634_858),
+                    resetAfterSeconds: 600,
+                    limitWindowSeconds: 18_000,
+                    reached: false
+                )
+            ],
+            opencodePlan: "Go",
             fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
         )
         UsageSnapshotStore.save(snapshot, to: defaults)
@@ -46,6 +59,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded.cursorPlan, "pro")
         XCTAssertEqual(loaded.cursorBuckets[0].remainingPercent, 88)
         XCTAssertNil(loaded.cursorBuckets[0].detail)
+        XCTAssertEqual(loaded.opencodePlan, "Go")
+        XCTAssertEqual(loaded.opencodeBuckets[0].remainingPercent, 96)
         XCTAssertEqual(loaded.fetchedAt, snapshot.fetchedAt)
     }
 
@@ -67,6 +82,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let loaded = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertTrue(loaded.cursorBuckets.isEmpty)
         XCTAssertNil(loaded.cursorPlan)
+        XCTAssertTrue(loaded.opencodeBuckets.isEmpty)
+        XCTAssertNil(loaded.opencodePlan)
         XCTAssertEqual(loaded.claudePlan, "max")
     }
 
