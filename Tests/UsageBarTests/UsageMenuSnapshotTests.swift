@@ -53,7 +53,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     reached: false
                 ),
             ],
-            claudePlan: "max",
+            claudePlan: "max_5x",
             cursorBuckets: [
                 LimitBucket(
                     provider: .cursor,
@@ -77,7 +77,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 ),
             ],
             cursorPlan: "pro",
-            menuBarProviders: [.codex, .cursor]
+            menuBarProviders: [.codex, .claude, .cursor]
         )
 
         let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
