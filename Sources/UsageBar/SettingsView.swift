@@ -13,6 +13,8 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            GroupedFormHeaderAlignmentAnchor()
+
             Section {
                 ForEach(LimitBucket.Provider.allCases) { provider in
                     Toggle(isOn: visibility(for: provider)) {
@@ -28,7 +30,7 @@ struct SettingsView: View {
                     .accessibilityHint(hint(for: provider))
                 }
             } header: {
-                Text("Visible plans")
+                SettingsSectionHeader(title: "Visible plans")
             }
 
             Section {
@@ -49,7 +51,7 @@ struct SettingsView: View {
                     }
                 }
             } header: {
-                Text("General")
+                SettingsSectionHeader(title: "General")
             } footer: {
                 if let footer = launchAtLogin.footer {
                     Text(footer)
@@ -103,7 +105,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
             } header: {
-                Text("Updates")
+                SettingsSectionHeader(title: "Updates")
             }
 
             Section {
@@ -179,6 +181,21 @@ struct SettingsView: View {
             return "At least one plan must stay in the menu bar"
         }
         return "Show \(provider.title) in the menu bar"
+    }
+}
+
+private struct GroupedFormHeaderAlignmentAnchor: View {
+    var body: some View {
+        Section {
+            Color.clear
+                .frame(height: 0)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .environment(\.defaultMinListRowHeight, 0)
+        }
+        .listSectionSeparator(.hidden)
+        .accessibilityHidden(true)
     }
 }
 
