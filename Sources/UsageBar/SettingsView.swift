@@ -11,8 +11,8 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
+        VStack(alignment: .leading, spacing: 4) {
+            SettingsFormGroup(title: "Visible plans") {
                 ForEach(LimitBucket.Provider.allCases) { provider in
                     Toggle(isOn: visibility(for: provider)) {
                         Label {
@@ -26,11 +26,9 @@ struct SettingsView: View {
                     .disabled(isLastEnabled(provider))
                     .accessibilityHint(hint(for: provider))
                 }
-            } header: {
-                Text("Visible plans")
             }
 
-            Section {
+            SettingsFormGroup(title: "General", footer: launchAtLogin.footer) {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {
                         Text("Launch at login")
@@ -47,15 +45,9 @@ struct SettingsView: View {
                         launchAtLogin.openLoginItemsSettings()
                     }
                 }
-            } header: {
-                Text("General")
-            } footer: {
-                if let footer = launchAtLogin.footer {
-                    Text(footer)
-                }
             }
 
-            Section {
+            SettingsFormGroup(title: "Updates") {
                 HStack(alignment: .center, spacing: 10) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
@@ -101,11 +93,9 @@ struct SettingsView: View {
                         .font(AppTheme.font(size: 13, weight: .medium))
                 }
                 .toggleStyle(.switch)
-            } header: {
-                Text("Updates")
             }
         }
-        .formStyle(.grouped)
+        .padding(.vertical, 8)
         .frame(width: 448)
         .environment(\.font, AppTheme.font(size: 13))
         .background(SettingsWindowSpacePin())
@@ -153,6 +143,56 @@ struct SettingsView: View {
             return "At least one plan must stay in the menu bar"
         }
         return "Show \(provider.title) in the menu bar"
+    }
+}
+
+private struct SettingsFormGroup<Content: View>: View {
+    let title: String
+    var footer: String?
+    let content: Content
+
+    init(
+        title: String,
+        footer: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.footer = footer
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: title)
+                .padding(.horizontal, SettingsSectionHeader.groupedFormInset)
+
+            form
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentMargins(.top, 4, for: .scrollContent)
+                .contentMargins(.bottom, 8, for: .scrollContent)
+        }
+    }
+
+    @ViewBuilder
+    private var form: some View {
+        if let footer {
+            Form {
+                Section {
+                    content
+                } footer: {
+                    Text(footer)
+                }
+            }
+        } else {
+            Form {
+                Section {
+                    content
+                }
+            }
+        }
     }
 }
 
