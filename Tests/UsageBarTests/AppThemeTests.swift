@@ -4,6 +4,18 @@ import XCTest
 @testable import UsageBar
 
 final class AppThemeTests: XCTestCase {
+    func testProviderLogosLoadAsTemplates() throws {
+        for provider in LimitBucket.Provider.allCases {
+            let logo = try XCTUnwrap(
+                AppTheme.logo(for: provider),
+                "Missing logo for \(provider.rawValue)"
+            )
+            XCTAssertTrue(logo.isTemplate, provider.rawValue)
+            XCTAssertGreaterThan(logo.size.width, 0, provider.rawValue)
+            XCTAssertGreaterThan(logo.size.height, 0, provider.rawValue)
+        }
+    }
+
     func testEveryWeightStaysInInstrumentSans() throws {
         AppTheme.loadFont()
 
