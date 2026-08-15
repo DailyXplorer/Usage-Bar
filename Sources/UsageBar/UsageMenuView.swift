@@ -57,6 +57,7 @@ struct UsageMenuView: View {
         (model.isVisibleInMenuBar(.codex) && !model.buckets.isEmpty)
             || (model.isVisibleInMenuBar(.claude) && !model.claudeBuckets.isEmpty)
             || (model.isVisibleInMenuBar(.cursor) && !model.cursorBuckets.isEmpty)
+            || (model.isVisibleInMenuBar(.opencode) && !model.opencodeBuckets.isEmpty)
     }
 
     @ViewBuilder
@@ -95,6 +96,15 @@ struct UsageMenuView: View {
                         message: model.sectionMessage(for: .cursor)
                     )
                 }
+
+                if model.showsOpenCode {
+                    ProviderSection(
+                        title: "OpenCode Go",
+                        plan: model.opencodePlan,
+                        buckets: model.opencodeBuckets,
+                        message: model.sectionMessage(for: .opencode)
+                    )
+                }
             }
             .padding(12)
         }
@@ -106,7 +116,7 @@ struct UsageMenuView: View {
                 if let updatedAt = model.lastUpdated {
                     Text("Updated at \(updatedAt.formatted(date: .omitted, time: .shortened))")
                 } else {
-                    Text("Codex, Claude & Cursor usage")
+                    Text("Codex, Claude, Cursor & OpenCode usage")
                 }
             }
             .font(AppTheme.font(size: 10.5))
@@ -186,6 +196,7 @@ private struct PlanBadge: View {
         case "enterprise": return "Enterprise"
         case "ultra": return "Ultra"
         case "max": return "Max"
+        case "go": return "Go"
         default: return plan.capitalized
         }
     }
@@ -316,7 +327,7 @@ private struct LoadingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading limits…")
                     .font(AppTheme.font(size: 13, weight: .medium))
-                Text("Connecting to Codex, Claude and Cursor")
+                Text("Connecting to Codex, Claude, Cursor and OpenCode")
                     .font(AppTheme.font(size: 11))
                     .appSecondaryLabelStyle()
             }
