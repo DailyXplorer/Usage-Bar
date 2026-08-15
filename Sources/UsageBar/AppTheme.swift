@@ -32,6 +32,7 @@ enum AppTheme {
     static let claudeLogo: NSImage? = logo(named: "claude")
     static let cursorLogo: NSImage? = logo(named: "cursor")
     static let opencodeLogo: NSImage? = logo(named: "opencode")
+    static let commandcodeLogo: NSImage? = logo(named: "commandcode")
 
     static func logo(for provider: LimitBucket.Provider) -> NSImage? {
         switch provider {
@@ -39,6 +40,7 @@ enum AppTheme {
         case .claude: return claudeLogo
         case .cursor: return cursorLogo
         case .opencode: return opencodeLogo
+        case .commandcode: return commandcodeLogo
         }
     }
 

@@ -10,7 +10,7 @@ can update.
 ## What this repo is
 
 SwiftUI macOS 14+ **menu bar extra** (no Dock icon). It shows Codex, Claude
-Code, Cursor, and OpenCode Go usage limits. The installed app is always
+Code, Cursor, OpenCode Go, and Command Code usage limits. The installed app is always
 `/Applications/UsageBar.app`. In-app updates download `UsageBar.app.zip` and
 `UsageBar.app.zip.sha256` from GitHub Releases.
 

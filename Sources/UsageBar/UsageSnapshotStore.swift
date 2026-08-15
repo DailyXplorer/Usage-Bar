@@ -9,11 +9,14 @@ struct UsageSnapshot: Codable {
     var cursorPlan: String?
     var opencodeBuckets: [LimitBucket] = []
     var opencodePlan: String?
+    var commandcodeBuckets: [LimitBucket] = []
+    var commandcodePlan: String?
     var fetchedAt: Date
 
     private enum CodingKeys: String, CodingKey {
         case codexBuckets, codexPlan, claudeBuckets, claudePlan
-        case cursorBuckets, cursorPlan, opencodeBuckets, opencodePlan, fetchedAt
+        case cursorBuckets, cursorPlan, opencodeBuckets, opencodePlan
+        case commandcodeBuckets, commandcodePlan, fetchedAt
     }
 
     init(
@@ -25,6 +28,8 @@ struct UsageSnapshot: Codable {
         cursorPlan: String? = nil,
         opencodeBuckets: [LimitBucket] = [],
         opencodePlan: String? = nil,
+        commandcodeBuckets: [LimitBucket] = [],
+        commandcodePlan: String? = nil,
         fetchedAt: Date
     ) {
         self.codexBuckets = codexBuckets
@@ -35,6 +40,8 @@ struct UsageSnapshot: Codable {
         self.cursorPlan = cursorPlan
         self.opencodeBuckets = opencodeBuckets
         self.opencodePlan = opencodePlan
+        self.commandcodeBuckets = commandcodeBuckets
+        self.commandcodePlan = commandcodePlan
         self.fetchedAt = fetchedAt
     }
 
@@ -48,6 +55,8 @@ struct UsageSnapshot: Codable {
         cursorPlan = try container.decodeIfPresent(String.self, forKey: .cursorPlan)
         opencodeBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .opencodeBuckets) ?? []
         opencodePlan = try container.decodeIfPresent(String.self, forKey: .opencodePlan)
+        commandcodeBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .commandcodeBuckets) ?? []
+        commandcodePlan = try container.decodeIfPresent(String.self, forKey: .commandcodePlan)
         fetchedAt = try container.decode(Date.self, forKey: .fetchedAt)
     }
 
@@ -58,6 +67,9 @@ struct UsageSnapshot: Codable {
         copy.cursorBuckets = cursorBuckets.map { $0.recountingReset(from: now) }
         copy.opencodeBuckets = opencodeBuckets.map { OpenCodeLimits.relabeled($0).recountingReset(from: now) }
         copy.opencodePlan = OpenCodeLimits.plan(for: copy.opencodeBuckets)
+        copy.commandcodeBuckets = commandcodeBuckets.map {
+            CommandCodeLimits.relabeled($0).recountingReset(from: now)
+        }
         return copy
     }
 }
