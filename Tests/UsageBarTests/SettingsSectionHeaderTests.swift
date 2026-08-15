@@ -49,12 +49,13 @@ final class SettingsSectionHeaderTests: XCTestCase {
     @MainActor
     func testEverySettingsSectionTitleRendersAtTheSameHeight() throws {
         AppTheme.loadFont()
-        let heights = try ["Visible plans", "General", "Updates"].map { title in
+        let heights = try ["Visible plans", "General", "Updates", "About"].map { title in
             try pngSize(for: SettingsSectionHeader(title: title)).height
         }
 
         XCTAssertEqual(heights[0], heights[1])
         XCTAssertEqual(heights[1], heights[2])
+        XCTAssertEqual(heights[2], heights[3])
     }
 }
 
