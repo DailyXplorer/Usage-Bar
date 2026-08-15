@@ -28,7 +28,7 @@ enum AppTheme {
         }
     }
 
-    static let codexLogo: NSImage? = logo(named: "chat-gpt")
+    static let codexLogo: NSImage? = logo(named: "codex")
     static let claudeLogo: NSImage? = logo(named: "claude")
     static let cursorLogo: NSImage? = logo(named: "cursor")
     static let opencodeLogo: NSImage? = logo(named: "opencode")
