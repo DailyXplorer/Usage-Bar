@@ -21,11 +21,17 @@ final class UsageModel: ObservableObject {
     @Published private(set) var cursorErrorMessage: String?
     @Published private(set) var cursorAvailable = false
 
+    @Published private(set) var opencodeBuckets: [LimitBucket] = []
+    @Published private(set) var opencodePlan: String?
+    @Published private(set) var opencodeErrorMessage: String?
+    @Published private(set) var opencodeAvailable = false
+
     @Published private(set) var menuBarProviders: Set<LimitBucket.Provider>
 
     private let service = UsageService()
     private let claudeService = ClaudeUsageService()
     private let cursorService = CursorUsageService()
+    private let opencodeService = OpenCodeUsageService()
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
     private var started = false
@@ -34,6 +40,7 @@ final class UsageModel: ObservableObject {
 
     private var claudeBackoff = ThrottleBackoff()
     private var cursorBackoff = ThrottleBackoff()
+    private var opencodeBackoff = ThrottleBackoff()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -51,6 +58,9 @@ final class UsageModel: ObservableObject {
         cursorBuckets = snapshot.cursorBuckets
         cursorPlan = snapshot.cursorPlan
         cursorAvailable = !snapshot.cursorBuckets.isEmpty
+        opencodeBuckets = snapshot.opencodeBuckets
+        opencodePlan = snapshot.opencodePlan
+        opencodeAvailable = !snapshot.opencodeBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
         persistSnapshot(fetchedAt: snapshot.fetchedAt)
     }
@@ -64,6 +74,8 @@ final class UsageModel: ObservableObject {
                 claudePlan: claudePlan,
                 cursorBuckets: cursorBuckets,
                 cursorPlan: cursorPlan,
+                opencodeBuckets: opencodeBuckets,
+                opencodePlan: opencodePlan,
                 fetchedAt: fetchedAt
             ),
             to: defaults
@@ -103,10 +115,13 @@ final class UsageModel: ObservableObject {
         claudePlan: String? = nil,
         cursorBuckets: [LimitBucket] = [],
         cursorPlan: String? = nil,
+        opencodeBuckets: [LimitBucket] = [],
+        opencodePlan: String? = nil,
         menuBarProviders: Set<LimitBucket.Provider> = [.codex, .claude],
         defaults: UserDefaults = .standard,
         errorMessage: String? = nil,
-        cursorAvailable: Bool? = nil
+        cursorAvailable: Bool? = nil,
+        opencodeAvailable: Bool? = nil
     ) {
         self.defaults = defaults
         buckets = previewBuckets
@@ -118,6 +133,9 @@ final class UsageModel: ObservableObject {
         self.cursorBuckets = cursorBuckets
         self.cursorPlan = cursorPlan
         self.cursorAvailable = cursorAvailable ?? !cursorBuckets.isEmpty
+        self.opencodeBuckets = opencodeBuckets
+        self.opencodePlan = opencodePlan
+        self.opencodeAvailable = opencodeAvailable ?? !opencodeBuckets.isEmpty
         self.menuBarProviders = menuBarProviders
         self.errorMessage = errorMessage
     }
@@ -159,6 +177,28 @@ final class UsageModel: ObservableObject {
         return "Cursor models, \(bucket.remainingPercent) percent left"
     }
 
+    var opencodeRolling: LimitBucket? {
+        opencodeBuckets.first { $0.kind == .rolling }
+    }
+
+    var menuBarOpenCodeText: String? {
+        guard let bucket = opencodeRolling else { return nil }
+        return "\(bucket.remainingPercent)%"
+    }
+
+    var menuBarOpenCodeDisplay: String {
+        menuBarOpenCodeText ?? "–"
+    }
+
+    var menuBarOpenCodeAccessibilityText: String? {
+        guard let bucket = opencodeRolling else { return nil }
+        return "OpenCode Go rolling 5 hours, \(bucket.remainingPercent) percent left"
+    }
+
+    var showsOpenCode: Bool {
+        isVisibleInMenuBar(.opencode) && (opencodeAvailable || opencodeErrorMessage != nil)
+    }
+
     var menuBarSegments: [MenuBarSegment] {
         LimitBucket.Provider.allCases.compactMap { provider in
             guard menuBarProviders.contains(provider) else { return nil }
@@ -169,6 +209,9 @@ final class UsageModel: ObservableObject {
                 return MenuBarSegment(logo: AppTheme.claudeLogo, value: menuBarClaudeDisplay)
             case .cursor:
                 return MenuBarSegment(logo: AppTheme.cursorLogo, value: menuBarCursorDisplay)
+            case .opencode:
+                guard showsOpenCode else { return nil }
+                return MenuBarSegment(logo: AppTheme.opencodeLogo, value: menuBarOpenCodeDisplay)
             }
         }
     }
@@ -187,6 +230,11 @@ final class UsageModel: ObservableObject {
             parts.append(cursor)
         } else if menuBarProviders.contains(.cursor) {
             parts.append("Cursor unavailable")
+        }
+        if showsOpenCode, let opencode = menuBarOpenCodeAccessibilityText {
+            parts.append(opencode)
+        } else if showsOpenCode {
+            parts.append("OpenCode Go unavailable")
         }
         return parts.joined(separator: ". ")
     }
@@ -259,6 +307,9 @@ final class UsageModel: ObservableObject {
             let cursorFetch = cursorBackoff.isBlocked
                 ? nil
                 : Task { try await cursorService.fetchUsage() }
+            let opencodeFetch = opencodeBackoff.isBlocked
+                ? nil
+                : Task { try await opencodeService.fetchUsage() }
 
             var succeeded = false
 
@@ -312,6 +363,27 @@ final class UsageModel: ObservableObject {
                 }
             }
 
+            if let opencodeFetch {
+                do {
+                    let (usage, _) = try await opencodeFetch.value
+                    applyOpenCode(usage)
+                    opencodeErrorMessage = nil
+                    opencodeBackoff.reset()
+                    succeeded = true
+                } catch OpenCodeUsageError.notSignedIn {
+                    opencodeAvailable = false
+                    opencodeBuckets = []
+                    opencodeErrorMessage = nil
+                } catch OpenCodeUsageError.throttled {
+                    opencodeBackoff.recordThrottle()
+                    opencodeAvailable = true
+                    opencodeErrorMessage = OpenCodeUsageError.throttled.errorDescription
+                } catch {
+                    opencodeAvailable = true
+                    opencodeErrorMessage = error.localizedDescription
+                }
+            }
+
             isLoading = false
             if succeeded {
                 let now = Date()
@@ -360,6 +432,12 @@ final class UsageModel: ObservableObject {
         cursorBuckets = CursorLimits.buckets(from: usage)
     }
 
+    private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
+        opencodeAvailable = true
+        opencodePlan = "Go"
+        opencodeBuckets = OpenCodeLimits.buckets(from: usage)
+    }
+
     func sectionMessage(for provider: LimitBucket.Provider) -> String? {
         switch provider {
         case .codex:
@@ -378,6 +456,13 @@ final class UsageModel: ObservableObject {
             }
             if !cursorAvailable {
                 return "No Cursor session. Open Cursor and sign in."
+            }
+            return nil
+        case .opencode:
+            if let opencodeErrorMessage { return opencodeErrorMessage }
+            if isLoading { return nil }
+            if opencodeAvailable && opencodeBuckets.isEmpty {
+                return "OpenCode Go returned no limits."
             }
             return nil
         }

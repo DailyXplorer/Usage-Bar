@@ -213,7 +213,7 @@ Clarity at the point of use first.
 | --- | --- | --- |
 | Types, protocols | UpperCamelCase | `UsageModel`, `LimitBucket` |
 | Everything else | lowerCamelCase | `usedPercent`, `startAutomaticChecks()` |
-| Enum cases | lowerCamelCase | `.codex`, `.claude`, `.cursor` |
+| Enum cases | lowerCamelCase | `.codex`, `.claude`, `.cursor`, `.opencode` |
 | Constants / statics | lowerCamelCase | `AppDistribution.assetName` |
 
 - No Objective-C style prefixes (`UBUsageModel`). The module name is
