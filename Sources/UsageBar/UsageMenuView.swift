@@ -73,6 +73,7 @@ struct UsageMenuView: View {
                 if model.isVisibleInMenuBar(.codex) {
                     ProviderSection(
                         title: "Codex",
+                        provider: .codex,
                         plan: model.planType,
                         buckets: model.buckets,
                         message: model.sectionMessage(for: .codex)
@@ -82,6 +83,7 @@ struct UsageMenuView: View {
                 if model.isVisibleInMenuBar(.claude) {
                     ProviderSection(
                         title: "Claude Code",
+                        provider: .claude,
                         plan: model.claudePlan,
                         buckets: model.claudeBuckets,
                         message: model.sectionMessage(for: .claude)
@@ -91,6 +93,7 @@ struct UsageMenuView: View {
                 if model.isVisibleInMenuBar(.cursor) {
                     ProviderSection(
                         title: "Cursor",
+                        provider: .cursor,
                         plan: model.cursorPlan,
                         buckets: model.cursorBuckets,
                         message: model.sectionMessage(for: .cursor)
@@ -100,6 +103,7 @@ struct UsageMenuView: View {
                 if model.showsOpenCode {
                     ProviderSection(
                         title: LimitBucket.Provider.opencode.title,
+                        provider: .opencode,
                         plan: model.opencodePlan,
                         buckets: model.opencodeBuckets,
                         message: model.sectionMessage(for: .opencode)
@@ -153,6 +157,7 @@ struct UsageMenuView: View {
 
 private struct ProviderSection: View {
     let title: String
+    let provider: LimitBucket.Provider
     let plan: String?
     let buckets: [LimitBucket]
     let message: String?
@@ -167,7 +172,7 @@ private struct ProviderSection: View {
                 Spacer()
 
                 if let plan {
-                    PlanBadge(plan: plan)
+                    PlanBadge(plan: plan, provider: provider)
                 }
             }
             .padding(.horizontal, 2)
@@ -185,19 +190,10 @@ private struct ProviderSection: View {
 
 private struct PlanBadge: View {
     let plan: String
+    let provider: LimitBucket.Provider
 
     private var displayName: String {
-        switch plan.lowercased() {
-        case "prolite", "pro": return "Pro"
-        case "pro_plus", "proplus", "pro+": return "Pro+"
-        case "plus": return "Plus"
-        case "team": return "Team"
-        case "business": return "Business"
-        case "enterprise": return "Enterprise"
-        case "ultra": return "Ultra"
-        case "max": return "Max"
-        default: return plan.capitalized
-        }
+        PlanBadgeLabel.text(for: plan, provider: provider)
     }
 
     var body: some View {
