@@ -27,6 +27,11 @@ final class PlanBadgeLabelTests: XCTestCase {
         XCTAssertEqual(PlanBadgeLabel.text(for: "pro", provider: .claude), "Pro")
     }
 
+    func testOpenCodeMapsGo() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "go", provider: .opencode), "Go")
+        XCTAssertEqual(PlanBadgeLabel.text(for: OpenCodeLimits.planName, provider: .opencode), "Go")
+    }
+
     func testSharedLabelsStayUnchanged() {
         XCTAssertEqual(PlanBadgeLabel.text(for: "plus", provider: .codex), "Plus")
         XCTAssertEqual(PlanBadgeLabel.text(for: "team", provider: .codex), "Team")

@@ -57,7 +57,7 @@ struct UsageSnapshot: Codable {
         copy.claudeBuckets = claudeBuckets.map { ClaudeLimits.relabeled($0).recountingReset(from: now) }
         copy.cursorBuckets = cursorBuckets.map { $0.recountingReset(from: now) }
         copy.opencodeBuckets = opencodeBuckets.map { OpenCodeLimits.relabeled($0).recountingReset(from: now) }
-        copy.opencodePlan = nil
+        copy.opencodePlan = copy.opencodeBuckets.isEmpty ? nil : OpenCodeLimits.planName
         return copy
     }
 }

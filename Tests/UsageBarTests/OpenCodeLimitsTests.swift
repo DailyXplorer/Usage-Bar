@@ -22,6 +22,7 @@ final class OpenCodeLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.rolling, .weekly, .monthly])
         XCTAssertEqual(LimitBucket.Provider.opencode.title, "OpenCode")
+        XCTAssertEqual(OpenCodeLimits.planName, "Go")
         XCTAssertEqual(buckets.map(\.displayName), [
             OpenCodeLimits.rollingDisplayName,
             OpenCodeLimits.weeklyDisplayName,

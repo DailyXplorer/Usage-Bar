@@ -17,6 +17,7 @@ struct OpenCodeWindow: Decodable {
 }
 
 enum OpenCodeLimits {
+    static let planName = "Go"
     static let rateLimitedStatus = "rate-limited"
     static let rollingDisplayName = "Current session"
     static let weeklyDisplayName = "Weekly"
