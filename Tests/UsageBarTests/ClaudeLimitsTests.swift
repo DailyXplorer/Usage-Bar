@@ -135,7 +135,7 @@ final class ClaudeLimitsTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuBarShowsCodexAndClaudeAllModels() throws {
+    func testMenuBarShowsCodexAndClaudeCurrentSession() throws {
         let model = UsageModel(
             previewBuckets: [
                 LimitBucket(
@@ -155,8 +155,48 @@ final class ClaudeLimitsTests: XCTestCase {
         )
 
         XCTAssertEqual(model.menuBarText, "58%")
-        XCTAssertEqual(model.menuBarClaudeText, "60%")
-        XCTAssertEqual(model.claudeAllModels?.kind, .weeklyAll)
+        XCTAssertEqual(model.menuBarClaudeText, "88%")
+        XCTAssertEqual(model.claudeSession?.kind, .session)
+        XCTAssertEqual(
+            model.menuBarClaudeAccessibilityText,
+            "Claude Code current session, 88 percent left"
+        )
+    }
+
+    @MainActor
+    func testMenuBarIgnoresClaudeWeeklyAllWithoutSession() {
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "weekly",
+                    usedPercent: 42,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "prolite",
+            lastUpdated: Date(),
+            claudeBuckets: [
+                LimitBucket(
+                    provider: .claude,
+                    kind: .weeklyAll,
+                    name: "All models",
+                    usedPercent: 40,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            claudePlan: "max"
+        )
+
+        XCTAssertNil(model.menuBarClaudeText)
+        XCTAssertEqual(model.menuBarClaudeDisplay, "–")
+        XCTAssertNil(model.menuBarClaudeAccessibilityText)
     }
 
     @MainActor
