@@ -77,7 +77,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 ),
             ],
             cursorPlan: "pro",
-            menuBarProviders: [.codex, .cursor]
+            menuBarProviders: [.codex, .claude, .cursor]
         )
 
         let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
