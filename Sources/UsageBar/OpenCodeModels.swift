@@ -17,6 +17,7 @@ struct OpenCodeWindow: Decodable {
 }
 
 enum OpenCodeLimits {
+    static let planName = "Go"
     static let rateLimitedStatus = "rate-limited"
     static let rollingDisplayName = "Current session"
     static let weeklyDisplayName = "Weekly"
@@ -24,6 +25,10 @@ enum OpenCodeLimits {
     static let rollingWindowSeconds = 5 * 60 * 60
     static let weeklyWindowSeconds = 7 * 24 * 60 * 60
     static let monthlyWindowSeconds = 30 * 24 * 60 * 60
+
+    static func plan(for buckets: [LimitBucket]) -> String? {
+        buckets.isEmpty ? nil : planName
+    }
 
     static func buckets(from response: OpenCodeUsageResponse, now: Date = Date()) -> [LimitBucket] {
         let windows: [(LimitBucket.Kind, String, Int, OpenCodeWindow?)] = [
