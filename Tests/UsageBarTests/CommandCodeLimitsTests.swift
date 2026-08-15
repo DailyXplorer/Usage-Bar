@@ -528,4 +528,129 @@ final class CommandCodeLimitsTests: XCTestCase {
 
         XCTAssertEqual(model.sectionMessage(for: .commandcode), "Command Code returned no limits.")
     }
+
+    func testSummaryThrottleKeepsCreditsWindows() async throws {
+        try await assertSummaryFailureKeepsCreditsWindows(status: 429)
+    }
+
+    func testSummaryInvalidKeyKeepsCreditsWindows() async throws {
+        try await assertSummaryFailureKeepsCreditsWindows(status: 401)
+    }
+
+    private func assertSummaryFailureKeepsCreditsWindows(status: Int) async throws {
+        defer { CommandCodeStubURLProtocol.responses = [:] }
+        CommandCodeStubURLProtocol.responses = [
+            "/alpha/whoami": .ok(#"{ "org": { "id": null } }"#),
+            "/alpha/billing/subscriptions": .ok("""
+            {
+              "data": {
+                "planId": "individual-go",
+                "status": "active",
+                "currentPeriodStart": "2026-08-13T06:06:01Z",
+                "currentPeriodEnd": "2026-09-13T06:06:01Z"
+              }
+            }
+            """),
+            "/alpha/billing/credits": .ok("""
+            {
+              "credits": { "monthlyCredits": 8.5, "purchasedCredits": 2, "freeCredits": 0 },
+              "windowLimits": {
+                "limited": true,
+                "fiveHour": {"used": 0.4, "cap": 3, "exceeded": false, "resetAt": 1786638458000},
+                "weekly": {"used": 1.2, "cap": 6, "exceeded": false, "resetAt": 1786800000000}
+              }
+            }
+            """),
+            "/alpha/usage/summary": .status(status),
+        ]
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CommandCodeStubURLProtocol.self]
+        let service = CommandCodeUsageService(
+            baseURL: URL(string: "https://commandcode.test")!,
+            session: URLSession(configuration: configuration)
+        )
+        let (usage, credentials) = try await service.fetchUsage(
+            from: [],
+            environment: ["COMMAND_CODE_API_KEY": "sk-test"]
+        )
+
+        XCTAssertEqual(credentials.apiKey, "sk-test")
+        XCTAssertNil(usage.monthlyUsed)
+        XCTAssertEqual(
+            CommandCodeLimits.buckets(from: usage).map(\.kind),
+            [.rolling, .weekly, .monthly]
+        )
+        XCTAssertEqual(
+            CommandCodeLimits.buckets(from: usage).map(\.usedPercent),
+            [13, 20, 15]
+        )
+    }
+}
+
+private struct CommandCodeStubBody {
+    let status: Int
+    let data: Data
+
+    static func ok(_ json: String) -> CommandCodeStubBody {
+        CommandCodeStubBody(status: 200, data: Data(json.utf8))
+    }
+
+    static func status(_ code: Int) -> CommandCodeStubBody {
+        CommandCodeStubBody(status: code, data: Data())
+    }
+}
+
+private final class CommandCodeStubURLProtocol: URLProtocol {
+    private static let store = CommandCodeStubStore()
+
+    static var responses: [String: CommandCodeStubBody] {
+        get { store.value }
+        set { store.value = newValue }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url != nil
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url,
+              let stub = Self.responses[url.path],
+              let response = HTTPURLResponse(
+                url: url,
+                statusCode: stub.status,
+                httpVersion: nil,
+                headerFields: nil
+              ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: stub.data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class CommandCodeStubStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: CommandCodeStubBody] = [:]
+
+    var value: [String: CommandCodeStubBody] {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+        set {
+            lock.lock()
+            storage = newValue
+            lock.unlock()
+        }
+    }
 }
