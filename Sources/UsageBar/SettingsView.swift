@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var model: UsageModel
     @EnvironmentObject private var updater: AppUpdater
+    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var launchAtLogin: LaunchAtLoginModel
 
@@ -103,6 +104,31 @@ struct SettingsView: View {
                 .toggleStyle(.switch)
             } header: {
                 Text("Updates")
+            }
+
+            Section {
+                HStack(alignment: .center, spacing: 10) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("GitHub")
+                                .font(AppTheme.font(size: 13, weight: .medium))
+                            Text("\(AppDistribution.githubOwner)/\(AppDistribution.githubRepo)")
+                                .font(AppTheme.font(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        SettingsSymbolIcon(systemName: "link")
+                    }
+
+                    Spacer(minLength: 8)
+
+                    AppBorderedButton(title: "Open") {
+                        openURL(AppDistribution.repositoryURL)
+                    }
+                    .accessibilityLabel("Open GitHub repository")
+                }
+            } header: {
+                Text("About")
             }
         }
         .formStyle(.grouped)
