@@ -105,7 +105,7 @@ release are in [AGENTS.md](AGENTS.md).
   backend returns, same heuristic as the CLI) and the secondary window when
   present. When ChatGPT returns a Spark extra limit, the popover adds a
   **Spark** bar after those windows. Spark stays out of the menu bar, and the
-  bar is hidden when `additional_rate_limits` is empty.
+  bar is hidden when the response has no matching Spark entry.
 
 ### Claude Code
 
