@@ -59,7 +59,7 @@ final class UsageModel: ObservableObject {
         cursorPlan = snapshot.cursorPlan
         cursorAvailable = !snapshot.cursorBuckets.isEmpty
         opencodeBuckets = snapshot.opencodeBuckets
-        opencodePlan = nil
+        opencodePlan = snapshot.opencodePlan
         opencodeAvailable = !snapshot.opencodeBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
         persistSnapshot(fetchedAt: snapshot.fetchedAt)
@@ -434,7 +434,7 @@ final class UsageModel: ObservableObject {
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
         opencodeAvailable = true
-        opencodePlan = nil
+        opencodePlan = OpenCodeLimits.planName
         opencodeBuckets = OpenCodeLimits.buckets(from: usage)
     }
 

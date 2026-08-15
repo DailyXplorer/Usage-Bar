@@ -8,8 +8,10 @@ enum PlanBadgeLabel {
             return codexText(for: key, original: plan)
         case .claude:
             return claudeText(for: key, original: plan)
-        case .cursor, .opencode:
+        case .cursor:
             return sharedText(for: key, original: plan)
+        case .opencode:
+            return opencodeText(for: key, original: plan)
         }
     }
 
@@ -30,6 +32,15 @@ enum PlanBadgeLabel {
             return "Max 5x"
         case "max20x":
             return "Max 20x"
+        default:
+            return sharedText(for: key, original: original)
+        }
+    }
+
+    private static func opencodeText(for key: String, original: String) -> String {
+        switch key {
+        case "go":
+            return "Go"
         default:
             return sharedText(for: key, original: original)
         }
