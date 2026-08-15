@@ -97,7 +97,7 @@ struct UsageMenuView: View {
                     )
                 }
 
-                if model.isVisibleInMenuBar(.opencode) {
+                if model.showsOpenCode {
                     ProviderSection(
                         title: "OpenCode Go",
                         plan: model.opencodePlan,

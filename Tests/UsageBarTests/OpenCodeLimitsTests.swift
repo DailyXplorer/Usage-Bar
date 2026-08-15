@@ -153,20 +153,63 @@ final class OpenCodeLimitsTests: XCTestCase {
     }
 
     @MainActor
-    func testEmptyStateIgnoresHiddenCodexError() {
+    func testMissingKeyOmitsOpenCodeFromTheMenu() {
         let model = UsageModel(
-            previewBuckets: [],
+            previewBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "weekly",
+                    usedPercent: 1,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
             planType: "pro",
             lastUpdated: Date(),
-            menuBarProviders: [.opencode],
+            menuBarProviders: [.codex, .opencode],
             errorMessage: "ChatGPT is unreachable.",
             opencodeAvailable: false
         )
 
-        XCTAssertEqual(
-            model.visibleEmptyStateMessage,
-            "No OpenCode Go key. Run `/connect` in OpenCode and select OpenCode Go."
+        XCTAssertFalse(model.showsOpenCode)
+        XCTAssertNil(model.sectionMessage(for: .opencode))
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%"])
+        XCTAssertFalse(model.menuBarAccessibilityLabel.contains("OpenCode"))
+    }
+
+    @MainActor
+    func testMenuBarDoesNotUseWeeklyOrMonthlyAsRolling() throws {
+        let partial = """
+        {"usage":{"weekly":{"status":"ok","percent":30,"resetsAt":"2026-08-17T00:00:00Z"},
+         "monthly":{"status":"ok","percent":12,"resetsAt":"2026-09-13T06:06:01Z"}}}
+        """
+        let response = try JSONDecoder().decode(OpenCodeUsageResponse.self, from: Data(partial.utf8))
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "weekly",
+                    usedPercent: 1,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "prolite",
+            lastUpdated: Date(),
+            opencodeBuckets: OpenCodeLimits.buckets(from: response),
+            opencodePlan: "Go",
+            menuBarProviders: [.codex, .opencode]
         )
+
+        XCTAssertNil(model.opencodeRolling)
+        XCTAssertNil(model.menuBarOpenCodeText)
+        XCTAssertEqual(model.menuBarOpenCodeDisplay, "–")
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "–"])
+        XCTAssertTrue(model.showsOpenCode)
     }
 
     @MainActor

@@ -178,7 +178,7 @@ final class UsageModel: ObservableObject {
     }
 
     var opencodeRolling: LimitBucket? {
-        opencodeBuckets.first { $0.kind == .rolling } ?? opencodeBuckets.first
+        opencodeBuckets.first { $0.kind == .rolling }
     }
 
     var menuBarOpenCodeText: String? {
@@ -195,6 +195,10 @@ final class UsageModel: ObservableObject {
         return "OpenCode Go rolling 5 hours, \(bucket.remainingPercent) percent left"
     }
 
+    var showsOpenCode: Bool {
+        isVisibleInMenuBar(.opencode) && (opencodeAvailable || opencodeErrorMessage != nil)
+    }
+
     var menuBarSegments: [MenuBarSegment] {
         LimitBucket.Provider.allCases.compactMap { provider in
             guard menuBarProviders.contains(provider) else { return nil }
@@ -206,6 +210,7 @@ final class UsageModel: ObservableObject {
             case .cursor:
                 return MenuBarSegment(logo: AppTheme.cursorLogo, value: menuBarCursorDisplay)
             case .opencode:
+                guard showsOpenCode else { return nil }
                 return MenuBarSegment(logo: AppTheme.opencodeLogo, value: menuBarOpenCodeDisplay)
             }
         }
@@ -226,9 +231,9 @@ final class UsageModel: ObservableObject {
         } else if menuBarProviders.contains(.cursor) {
             parts.append("Cursor unavailable")
         }
-        if menuBarProviders.contains(.opencode), let opencode = menuBarOpenCodeAccessibilityText {
+        if showsOpenCode, let opencode = menuBarOpenCodeAccessibilityText {
             parts.append(opencode)
-        } else if menuBarProviders.contains(.opencode) {
+        } else if showsOpenCode {
             parts.append("OpenCode Go unavailable")
         }
         return parts.joined(separator: ". ")
@@ -458,9 +463,6 @@ final class UsageModel: ObservableObject {
             if isLoading { return nil }
             if opencodeAvailable && opencodeBuckets.isEmpty {
                 return "OpenCode Go returned no limits."
-            }
-            if !opencodeAvailable {
-                return "No OpenCode Go key. Run `/connect` in OpenCode and select OpenCode Go."
             }
             return nil
         }
