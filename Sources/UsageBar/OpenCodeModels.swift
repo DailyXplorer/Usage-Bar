@@ -18,15 +18,18 @@ struct OpenCodeWindow: Decodable {
 
 enum OpenCodeLimits {
     static let rateLimitedStatus = "rate-limited"
+    static let rollingDisplayName = "Current session"
+    static let weeklyDisplayName = "Weekly"
+    static let monthlyDisplayName = "Monthly"
     static let rollingWindowSeconds = 5 * 60 * 60
     static let weeklyWindowSeconds = 7 * 24 * 60 * 60
     static let monthlyWindowSeconds = 30 * 24 * 60 * 60
 
     static func buckets(from response: OpenCodeUsageResponse, now: Date = Date()) -> [LimitBucket] {
         let windows: [(LimitBucket.Kind, String, Int, OpenCodeWindow?)] = [
-            (.rolling, "Rolling 5h", rollingWindowSeconds, response.usage.rolling),
-            (.weekly, "Weekly", weeklyWindowSeconds, response.usage.weekly),
-            (.monthly, "Monthly", monthlyWindowSeconds, response.usage.monthly),
+            (.rolling, rollingDisplayName, rollingWindowSeconds, response.usage.rolling),
+            (.weekly, weeklyDisplayName, weeklyWindowSeconds, response.usage.weekly),
+            (.monthly, monthlyDisplayName, monthlyWindowSeconds, response.usage.monthly),
         ]
         return windows.compactMap { kind, name, windowSeconds, window in
             bucket(kind: kind, name: name, windowSeconds: windowSeconds, window: window, now: now)
@@ -53,6 +56,33 @@ enum OpenCodeLimits {
             resetAfterSeconds: secondsUntil(resetAt, from: now),
             limitWindowSeconds: windowSeconds,
             reached: reached
+        )
+    }
+
+    static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
+        guard bucket.provider == .opencode else { return bucket }
+        let nextName: String
+        switch bucket.kind {
+        case .rolling:
+            nextName = rollingDisplayName
+        case .weekly:
+            nextName = weeklyDisplayName
+        case .monthly:
+            nextName = monthlyDisplayName
+        default:
+            return bucket
+        }
+        guard nextName != bucket.name else { return bucket }
+        return LimitBucket(
+            provider: bucket.provider,
+            kind: bucket.kind,
+            name: nextName,
+            usedPercent: bucket.usedPercent,
+            resetAt: bucket.resetAt,
+            resetAfterSeconds: bucket.resetAfterSeconds,
+            limitWindowSeconds: bucket.limitWindowSeconds,
+            reached: bucket.reached,
+            detail: bucket.detail
         )
     }
 

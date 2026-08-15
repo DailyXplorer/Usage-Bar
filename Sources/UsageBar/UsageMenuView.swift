@@ -99,7 +99,7 @@ struct UsageMenuView: View {
 
                 if model.showsOpenCode {
                     ProviderSection(
-                        title: "OpenCode Go",
+                        title: LimitBucket.Provider.opencode.title,
                         plan: model.opencodePlan,
                         buckets: model.opencodeBuckets,
                         message: model.sectionMessage(for: .opencode)
@@ -196,7 +196,6 @@ private struct PlanBadge: View {
         case "enterprise": return "Enterprise"
         case "ultra": return "Ultra"
         case "max": return "Max"
-        case "go": return "Go"
         default: return plan.capitalized
         }
     }
