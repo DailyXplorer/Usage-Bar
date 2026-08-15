@@ -10,8 +10,8 @@ Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex primary window, Claude Code's **All models** bar (the weekly all-models
-limit), then Cursor's **Cursor Models** pool (Grok and Composer). OpenCode Go's
-**Rolling 5h** window can be turned on in Settings. Settings let you pick which
+limit), then Cursor's **Cursor Models** pool (Grok and Composer). OpenCode's
+**Current session** window can be turned on in Settings. Settings let you pick which
 plans appear. The popover breaks down every window on each side.
 
 The whole label is **composed off-screen into a single template image**
@@ -138,9 +138,9 @@ release are in [AGENTS.md](AGENTS.md).
   rewritten.
 - Queries `https://opencode.ai/zen/go/v1/usage`, the official Go quota endpoint,
   with the same Bearer key the TUI already uses.
-- Mirrors the three Go windows: **Rolling 5h** ($12), **Weekly** ($30) and
-  **Monthly** ($60), each with its reset time. The menu bar shows the rolling
-  5-hour window.
+- Mirrors the three Go windows: **Current session** ($12), **Weekly** ($30) and
+  **Monthly** ($60), each with its reset time. The menu bar shows the current
+  session window.
 - If there is no OpenCode Go key, the section is simply hidden.
 
 All accounts are queried in parallel: a slow backend does not block the others,

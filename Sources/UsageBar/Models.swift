@@ -63,7 +63,7 @@ struct LimitBucket: Identifiable, Codable {
             case .codex: return "Codex"
             case .claude: return "Claude"
             case .cursor: return "Cursor"
-            case .opencode: return "OpenCode Go"
+            case .opencode: return "OpenCode"
             }
         }
     }

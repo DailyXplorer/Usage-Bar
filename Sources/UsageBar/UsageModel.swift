@@ -59,7 +59,7 @@ final class UsageModel: ObservableObject {
         cursorPlan = snapshot.cursorPlan
         cursorAvailable = !snapshot.cursorBuckets.isEmpty
         opencodeBuckets = snapshot.opencodeBuckets
-        opencodePlan = snapshot.opencodePlan
+        opencodePlan = nil
         opencodeAvailable = !snapshot.opencodeBuckets.isEmpty
         lastUpdated = snapshot.fetchedAt
         persistSnapshot(fetchedAt: snapshot.fetchedAt)
@@ -192,7 +192,7 @@ final class UsageModel: ObservableObject {
 
     var menuBarOpenCodeAccessibilityText: String? {
         guard let bucket = opencodeRolling else { return nil }
-        return "OpenCode Go rolling 5 hours, \(bucket.remainingPercent) percent left"
+        return "OpenCode current session, \(bucket.remainingPercent) percent left"
     }
 
     var showsOpenCode: Bool {
@@ -234,7 +234,7 @@ final class UsageModel: ObservableObject {
         if showsOpenCode, let opencode = menuBarOpenCodeAccessibilityText {
             parts.append(opencode)
         } else if showsOpenCode {
-            parts.append("OpenCode Go unavailable")
+            parts.append("OpenCode unavailable")
         }
         return parts.joined(separator: ". ")
     }
@@ -434,7 +434,7 @@ final class UsageModel: ObservableObject {
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
         opencodeAvailable = true
-        opencodePlan = "Go"
+        opencodePlan = nil
         opencodeBuckets = OpenCodeLimits.buckets(from: usage)
     }
 
@@ -462,7 +462,7 @@ final class UsageModel: ObservableObject {
             if let opencodeErrorMessage { return opencodeErrorMessage }
             if isLoading { return nil }
             if opencodeAvailable && opencodeBuckets.isEmpty {
-                return "OpenCode Go returned no limits."
+                return "OpenCode returned no limits."
             }
             return nil
         }
