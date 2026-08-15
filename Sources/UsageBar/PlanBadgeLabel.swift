@@ -38,12 +38,10 @@ enum PlanBadgeLabel {
     }
 
     private static func opencodeText(for key: String, original: String) -> String {
-        switch key {
-        case "go":
-            return "Go"
-        default:
-            return sharedText(for: key, original: original)
+        if key == normalized(OpenCodeLimits.planName) {
+            return OpenCodeLimits.planName
         }
+        return sharedText(for: key, original: original)
     }
 
     private static func sharedText(for key: String, original: String) -> String {
