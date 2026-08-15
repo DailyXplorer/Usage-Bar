@@ -9,8 +9,8 @@ usage limits: **percentage remaining** and time until reset.
 </p>
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
-Codex primary window, Claude Code's **All models** bar (the weekly all-models
-limit), then Cursor's **Cursor Models** pool (Grok and Composer). OpenCode's
+Codex primary window, Claude Code's **Current session** bar, then Cursor's
+**Cursor Models** pool (Grok and Composer). OpenCode's
 **Current session** and Command Code's **Current session** windows can be turned
 on in Settings. Settings let you pick which plans appear. The popover breaks
 down every window on each side.
@@ -115,7 +115,7 @@ release are in [AGENTS.md](AGENTS.md).
   uses for its `/usage` command.
 - Mirrors Claude Code's three built-in bars: **Current session**,
   **All models** and **‹model›** (the pinned per-model limit, e.g. Fable),
-  each with its reset time.
+  each with its reset time. The menu bar shows **Current session**.
 - If there is no Claude Code session, the section is simply hidden.
 
 ### Cursor
