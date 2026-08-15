@@ -21,7 +21,13 @@ final class OpenCodeLimitsTests: XCTestCase {
         let buckets = OpenCodeLimits.buckets(from: try decode(), now: now)
 
         XCTAssertEqual(buckets.map(\.kind), [.rolling, .weekly, .monthly])
-        XCTAssertEqual(buckets.map(\.displayName), ["Rolling 5h", "Weekly", "Monthly"])
+        XCTAssertEqual(LimitBucket.Provider.opencode.title, "OpenCode")
+        XCTAssertEqual(buckets.map(\.displayName), [
+            OpenCodeLimits.rollingDisplayName,
+            OpenCodeLimits.weeklyDisplayName,
+            OpenCodeLimits.monthlyDisplayName,
+        ])
+        XCTAssertEqual(OpenCodeLimits.rollingDisplayName, "Current session")
         XCTAssertEqual(buckets.map(\.usedPercent), [4, 3, 1])
         XCTAssertEqual(buckets.map(\.remainingPercent), [96, 97, 99])
         XCTAssertEqual(buckets.map(\.limitWindowSeconds), [
@@ -32,6 +38,36 @@ final class OpenCodeLimitsTests: XCTestCase {
         XCTAssertTrue(buckets.allSatisfy { $0.provider == .opencode })
         XCTAssertTrue(buckets.allSatisfy { $0.reached == false })
         XCTAssertTrue(buckets.allSatisfy { $0.detail == nil })
+    }
+
+    func testRelabeledRewritesCachedRollingTitle() {
+        let cached = LimitBucket(
+            provider: .opencode,
+            kind: .rolling,
+            name: "Rolling 5h",
+            usedPercent: 4,
+            resetAt: nil,
+            resetAfterSeconds: nil,
+            limitWindowSeconds: OpenCodeLimits.rollingWindowSeconds,
+            reached: false
+        )
+
+        XCTAssertEqual(OpenCodeLimits.relabeled(cached).name, OpenCodeLimits.rollingDisplayName)
+        XCTAssertEqual(
+            OpenCodeLimits.relabeled(
+                LimitBucket(
+                    provider: .opencode,
+                    kind: .weekly,
+                    name: "Weekly",
+                    usedPercent: 3,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: OpenCodeLimits.weeklyWindowSeconds,
+                    reached: false
+                )
+            ).name,
+            OpenCodeLimits.weeklyDisplayName
+        )
     }
 
     func testRateLimitedWindowIsMarkedReached() throws {
@@ -142,7 +178,6 @@ final class OpenCodeLimitsTests: XCTestCase {
             planType: "prolite",
             lastUpdated: Date(),
             opencodeBuckets: OpenCodeLimits.buckets(from: try decode()),
-            opencodePlan: "Go",
             menuBarProviders: [.codex, .opencode]
         )
 
@@ -201,7 +236,6 @@ final class OpenCodeLimitsTests: XCTestCase {
             planType: "prolite",
             lastUpdated: Date(),
             opencodeBuckets: OpenCodeLimits.buckets(from: response),
-            opencodePlan: "Go",
             menuBarProviders: [.codex, .opencode]
         )
 
@@ -222,6 +256,6 @@ final class OpenCodeLimitsTests: XCTestCase {
             opencodeAvailable: true
         )
 
-        XCTAssertEqual(model.sectionMessage(for: .opencode), "OpenCode Go returned no limits.")
+        XCTAssertEqual(model.sectionMessage(for: .opencode), "OpenCode returned no limits.")
     }
 }

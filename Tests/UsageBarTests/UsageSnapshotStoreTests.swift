@@ -39,7 +39,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 LimitBucket(
                     provider: .opencode,
                     kind: .rolling,
-                    name: "Rolling 5h",
+                    name: "Current session",
                     usedPercent: 4,
                     resetAt: Date(timeIntervalSince1970: 1_786_634_858),
                     resetAfterSeconds: 600,
@@ -143,6 +143,30 @@ final class UsageSnapshotStoreTests: XCTestCase {
         ])
     }
 
+    func testRefreshRewritesLegacyOpenCodeRollingTitle() {
+        let snapshot = UsageSnapshot(
+            opencodeBuckets: [
+                LimitBucket(
+                    provider: .opencode,
+                    kind: .rolling,
+                    name: "Rolling 5h",
+                    usedPercent: 4,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: OpenCodeLimits.rollingWindowSeconds,
+                    reached: false
+                )
+            ],
+            opencodePlan: "Go",
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.opencodeBuckets.map(\.name), [OpenCodeLimits.rollingDisplayName])
+        XCTAssertNil(refreshed.opencodePlan)
+    }
+
     @MainActor
     func testRestorePersistsCanonicalClaudeTitles() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
@@ -205,6 +229,43 @@ final class UsageSnapshotStoreTests: XCTestCase {
         ])
         XCTAssertEqual(persisted.fetchedAt, fetchedAt)
         XCTAssertEqual(persisted.claudePlan, "max")
+    }
+
+    @MainActor
+    func testRestoreDropsOpenCodeGoBadgeAndRelabelsRolling() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+
+        let fetchedAt = Date(timeIntervalSince1970: 1_786_400_000)
+        UsageSnapshotStore.save(
+            UsageSnapshot(
+                opencodeBuckets: [
+                    LimitBucket(
+                        provider: .opencode,
+                        kind: .rolling,
+                        name: "Rolling 5h",
+                        usedPercent: 4,
+                        resetAt: Date(timeIntervalSince1970: 1_786_634_858),
+                        resetAfterSeconds: 600,
+                        limitWindowSeconds: OpenCodeLimits.rollingWindowSeconds,
+                        reached: false
+                    )
+                ],
+                opencodePlan: "Go",
+                fetchedAt: fetchedAt
+            ),
+            to: defaults
+        )
+
+        let model = UsageModel(defaults: defaults)
+        XCTAssertNil(model.opencodePlan)
+        XCTAssertEqual(model.opencodeBuckets.map(\.name), [OpenCodeLimits.rollingDisplayName])
+
+        let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
+        XCTAssertNil(persisted.opencodePlan)
+        XCTAssertEqual(persisted.opencodeBuckets.map(\.name), [OpenCodeLimits.rollingDisplayName])
+        XCTAssertEqual(persisted.fetchedAt, fetchedAt)
     }
 
     func testCountdownIsRecomputedOnLoad() {
