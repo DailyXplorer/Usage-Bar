@@ -26,6 +26,10 @@ enum OpenCodeLimits {
     static let weeklyWindowSeconds = 7 * 24 * 60 * 60
     static let monthlyWindowSeconds = 30 * 24 * 60 * 60
 
+    static func plan(for buckets: [LimitBucket]) -> String? {
+        buckets.isEmpty ? nil : planName
+    }
+
     static func buckets(from response: OpenCodeUsageResponse, now: Date = Date()) -> [LimitBucket] {
         let windows: [(LimitBucket.Kind, String, Int, OpenCodeWindow?)] = [
             (.rolling, rollingDisplayName, rollingWindowSeconds, response.usage.rolling),

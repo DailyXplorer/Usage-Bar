@@ -434,8 +434,8 @@ final class UsageModel: ObservableObject {
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
         opencodeAvailable = true
-        opencodePlan = OpenCodeLimits.planName
         opencodeBuckets = OpenCodeLimits.buckets(from: usage)
+        opencodePlan = OpenCodeLimits.plan(for: opencodeBuckets)
     }
 
     func sectionMessage(for provider: LimitBucket.Provider) -> String? {
