@@ -9,6 +9,10 @@ enum AppDistribution {
     static let executableName = "UsageBar"
     static let installURL = URL(fileURLWithPath: "/Applications/UsageBar.app")
 
+    static var repositoryURL: URL {
+        URL(string: "https://github.com/\(githubOwner)/\(githubRepo)")!
+    }
+
     static var latestReleaseURL: URL {
         URL(string: "https://api.github.com/repos/\(githubOwner)/\(githubRepo)/releases/latest")!
     }
