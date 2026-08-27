@@ -395,8 +395,8 @@ final class UsageModel: ObservableObject {
 
             if let cursorFetch {
                 do {
-                    let (usage, credentials) = try await cursorFetch.value
-                    applyCursor(usage, credentials: credentials)
+                    let (usage, grokBot, credentials) = try await cursorFetch.value
+                    applyCursor(usage, grokBot: grokBot, credentials: credentials)
                     cursorErrorMessage = nil
                     cursorBackoff.reset()
                     succeeded = true
@@ -482,10 +482,14 @@ final class UsageModel: ObservableObject {
         claudeBuckets = ClaudeLimits.buckets(from: usage)
     }
 
-    private func applyCursor(_ usage: CursorUsageResponse, credentials: CursorCredentials) {
+    private func applyCursor(
+        _ usage: CursorUsageResponse,
+        grokBot: CursorSandUsageStatus?,
+        credentials: CursorCredentials
+    ) {
         cursorAvailable = true
         cursorPlan = credentials.membershipType
-        cursorBuckets = CursorLimits.buckets(from: usage)
+        cursorBuckets = CursorLimits.buckets(from: usage, grokBot: grokBot)
     }
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {

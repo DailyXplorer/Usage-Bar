@@ -131,4 +131,120 @@ final class CursorLimitsTests: XCTestCase {
 
         XCTAssertEqual(model.sectionMessage(for: .cursor), "Cursor returned no limits.")
     }
+
+    func testGrokBotBarMapsSandUsagePercent() throws {
+        let now = Date(timeIntervalSince1970: 1_786_838_400)
+        let grokBot = try decodeGrokBot("""
+        {
+          "currentPeriodStart": "2026-08-10T00:00:00.000Z",
+          "nextResetTimestampUtc": "2026-08-17T00:00:00.000Z",
+          "usagePercent": 18.5,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true
+        }
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot, now: now)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels, .grokBot])
+        XCTAssertEqual(buckets.map(\.displayName), ["Cursor Models", "Other Models", "Grok bot"])
+        XCTAssertEqual(buckets.map(\.usedPercent), [42, 11, 19])
+        XCTAssertEqual(buckets.map(\.remainingPercent), [58, 89, 81])
+        XCTAssertEqual(buckets[2].resetAfterSeconds, 86_400)
+        XCTAssertEqual(buckets[2].limitWindowSeconds, 604_800)
+        XCTAssertEqual(buckets[0].limitWindowSeconds, 2_678_400)
+    }
+
+    func testGrokBotIntegerUsagePercentDecodes() throws {
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":4,"hasNonZeroIncludedLimit":true,"includedLimitZero":false}
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+
+        XCTAssertEqual(buckets.last?.kind, .grokBot)
+        XCTAssertEqual(buckets.last?.usedPercent, 4)
+        XCTAssertEqual(buckets.last?.limitWindowSeconds, CursorLimits.grokBotWindowSeconds)
+    }
+
+    func testGrokBotHiddenWithoutIncludedLimit() throws {
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":40,"hasNonZeroIncludedLimit":false}
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testGrokBotHiddenForPooledEnterprise() throws {
+        let grokBot = try decodeGrokBot("""
+        {
+          "usagePercent": 12,
+          "hasNonZeroIncludedLimit": true,
+          "usesPooledEnterpriseAllowance": true
+        }
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testGrokBotHiddenWhenIncludedLimitIsZero() throws {
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":8,"hasNonZeroIncludedLimit":true,"includedLimitZero":true}
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testMissingGrokBotLeavesMonthlyPoolsIntact() throws {
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: nil)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testGrokBotHiddenWhenUsagePercentIsMissing() throws {
+        let grokBot = try decodeGrokBot("""
+        {"hasNonZeroIncludedLimit":true,"nextResetTimestampUtc":"2026-08-17T00:00:00.000Z"}
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testDisabledPeriodUsageCanStillShowGrokBot() throws {
+        let disabled = """
+        {"planUsage":{"autoPercentUsed":12,"apiPercentUsed":8},"enabled":false}
+        """
+        let response = try JSONDecoder().decode(CursorUsageResponse.self, from: Data(disabled.utf8))
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":10,"hasNonZeroIncludedLimit":true}
+        """)
+        let buckets = CursorLimits.buckets(from: response, grokBot: grokBot)
+
+        XCTAssertEqual(buckets.map(\.kind), [.grokBot])
+        XCTAssertEqual(buckets.map(\.displayName), ["Grok bot"])
+    }
+
+    @MainActor
+    func testMenuBarStillUsesCursorModelsWhenGrokBotIsPresent() throws {
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":90,"hasNonZeroIncludedLimit":true}
+        """)
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            cursorBuckets: CursorLimits.buckets(from: try decode(), grokBot: grokBot),
+            cursorPlan: "pro",
+            menuBarProviders: [.cursor]
+        )
+
+        XCTAssertEqual(model.cursorModels?.kind, .cursorModels)
+        XCTAssertEqual(model.menuBarCursorText, "58%")
+        XCTAssertEqual(model.cursorBuckets.map(\.kind), [.cursorModels, .otherModels, .grokBot])
+    }
+
+    private func decodeGrokBot(_ json: String) throws -> CursorSandUsageStatus {
+        try JSONDecoder().decode(CursorSandUsageStatus.self, from: Data(json.utf8))
+    }
 }
