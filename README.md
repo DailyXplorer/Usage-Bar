@@ -10,7 +10,7 @@ usage limits: **percentage remaining** and time until reset.
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex primary window, Claude Code's **Current session** bar, then Cursor's
-**Cursor Models** pool (Grok and Composer). OpenCode's
+**Cursor Models** pool (Cursor Grok and Composer). OpenCode's
 **Current session** and Command Code's **Current session** windows can be turned
 on in Settings. Settings let you pick which plans appear. The popover breaks
 down every window on each side.
@@ -126,11 +126,17 @@ release are in [AGENTS.md](AGENTS.md).
   (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`):
   `cursorAuth/accessToken` and `cursorAuth/stripeMembershipType`. No token is
   ever copied or rewritten.
-- Queries `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
-  the same dashboard usage endpoint.
-- Mirrors Cursor's two plan pools: **Cursor Models** (Grok and Composer) and
-  **Other Models** (third-party models billed at API rates), each with the
-  billing-cycle reset. The menu bar shows the Cursor Models pool.
+- Queries `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`
+  for the monthly plan pools, and
+  `https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus` for
+  the weekly Grok Bot allowance. Both use the same Cursor session token.
+- Mirrors Cursor's two monthly plan pools: **Cursor Models** (Cursor Grok and
+  Composer) and **Other Models** (third-party models billed at API rates), each
+  with the billing-cycle reset. When the account has a personal Grok Bot
+  weekly allowance, the popover adds a **Grok bot** bar under Other Models.
+  That bar is hidden for pooled Enterprise seats and accounts without an
+  included Bot limit. A Grok Bot fetch failure leaves the monthly bars intact.
+  The menu bar shows the Cursor Models pool.
 - If there is no Cursor session, the section is simply hidden.
 
 ### OpenCode
