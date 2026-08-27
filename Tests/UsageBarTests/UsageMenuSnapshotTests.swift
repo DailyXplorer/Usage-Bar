@@ -75,6 +75,16 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     limitWindowSeconds: 2_678_400,
                     reached: false
                 ),
+                LimitBucket(
+                    provider: .cursor,
+                    kind: .grokBot,
+                    name: CursorLimits.grokBotDisplayName,
+                    usedPercent: 19,
+                    resetAt: Date(timeIntervalSince1970: 1_786_363_200),
+                    resetAfterSeconds: 86_400,
+                    limitWindowSeconds: CursorLimits.grokBotWindowSeconds,
+                    reached: false
+                ),
             ],
             cursorPlan: "pro",
             menuBarProviders: [.codex, .claude, .cursor]

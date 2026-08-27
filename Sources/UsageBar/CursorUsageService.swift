@@ -39,17 +39,69 @@ actor CursorUsageService {
     private static let endpoint = URL(
         string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
     )!
+    private static let grokBotEndpoint = URL(
+        string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
+    )!
     private static let stateDB = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
 
-    func fetchUsage() async throws -> (usage: CursorUsageResponse, credentials: CursorCredentials) {
+    func fetchUsage() async throws -> (
+        usage: CursorUsageResponse,
+        grokBot: CursorSandUsageStatus?,
+        credentials: CursorCredentials
+    ) {
         let credentials = try Self.loadCredentials()
+        async let periodData = postDashboard(url: Self.endpoint, token: credentials.accessToken)
+        async let sandData = postDashboardIfOK(url: Self.grokBotEndpoint, token: credentials.accessToken)
 
-        var request = URLRequest(url: Self.endpoint)
+        let usage: CursorUsageResponse
+        do {
+            usage = try JSONDecoder().decode(CursorUsageResponse.self, from: try await periodData)
+        } catch let error as CursorUsageError {
+            throw error
+        } catch {
+            throw CursorUsageError.decoding(error.localizedDescription)
+        }
+
+        let grokBot: CursorSandUsageStatus?
+        if let sandData = await sandData {
+            grokBot = try? JSONDecoder().decode(CursorSandUsageStatus.self, from: sandData)
+        } else {
+            grokBot = nil
+        }
+        return (usage, grokBot, credentials)
+    }
+
+    private func postDashboard(url: URL, token: String) async throws -> Data {
+        let (data, http) = try await sendDashboard(url: url, token: token)
+        guard http.statusCode == 200 else {
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw CursorUsageError.tokenExpired
+            }
+            if http.statusCode == 429 {
+                throw CursorUsageError.throttled
+            }
+            throw CursorUsageError.httpStatus(http.statusCode)
+        }
+        return data
+    }
+
+    private func postDashboardIfOK(url: URL, token: String) async -> Data? {
+        do {
+            let (data, http) = try await sendDashboard(url: url, token: token)
+            guard http.statusCode == 200 else { return nil }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
+    private func sendDashboard(url: URL, token: String) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 20
         request.httpBody = Data("{}".utf8)
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
 
@@ -63,21 +115,7 @@ actor CursorUsageService {
         guard let http = response as? HTTPURLResponse else {
             throw CursorUsageError.network("invalid response")
         }
-        guard http.statusCode == 200 else {
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw CursorUsageError.tokenExpired
-            }
-            if http.statusCode == 429 {
-                throw CursorUsageError.throttled
-            }
-            throw CursorUsageError.httpStatus(http.statusCode)
-        }
-
-        do {
-            return (try JSONDecoder().decode(CursorUsageResponse.self, from: data), credentials)
-        } catch {
-            throw CursorUsageError.decoding(error.localizedDescription)
-        }
+        return (data, http)
     }
 
     private static func loadCredentials() throws -> CursorCredentials {
