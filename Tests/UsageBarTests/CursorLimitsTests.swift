@@ -225,6 +225,31 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertEqual(buckets.map(\.displayName), ["Grok bot"])
     }
 
+    @MainActor
+    func testMenuBarOmitsCursorPercentWhenOnlyGrokBotIsPresent() throws {
+        let disabled = """
+        {"planUsage":{"autoPercentUsed":12,"apiPercentUsed":8},"enabled":false}
+        """
+        let response = try JSONDecoder().decode(CursorUsageResponse.self, from: Data(disabled.utf8))
+        let grokBot = try decodeGrokBot("""
+        {"usagePercent":10,"hasNonZeroIncludedLimit":true}
+        """)
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            cursorBuckets: CursorLimits.buckets(from: response, grokBot: grokBot),
+            cursorPlan: "pro",
+            menuBarProviders: [.cursor]
+        )
+
+        XCTAssertEqual(model.cursorBuckets.map(\.kind), [.grokBot])
+        XCTAssertNil(model.cursorModels)
+        XCTAssertNil(model.menuBarCursorText)
+        XCTAssertNotEqual(model.menuBarCursorText, "90%")
+        XCTAssertEqual(model.cursorBuckets.first?.remainingPercent, 90)
+    }
+
     func testLiveGetSandUsageStatusBodyFrom28AugDecodesAsGrokBot() throws {
         let grokBot = try decodeGrokBot("""
         {
