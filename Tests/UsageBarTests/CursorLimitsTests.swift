@@ -225,6 +225,43 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertEqual(buckets.map(\.displayName), ["Grok bot"])
     }
 
+    func testLiveGetSandUsageStatusBodyFrom28AugDecodesAsGrokBot() throws {
+        let grokBot = try decodeGrokBot("""
+        {
+          "currentPeriodStart": "2026-08-26T17:22:03.913Z",
+          "nextResetTimestampUtc": "2026-09-01T17:46:41.504Z",
+          "usagePercent": 49.290432,
+          "hasAvailableUsage": true,
+          "hasNonZeroIncludedLimit": true,
+          "upgradeRecommendation": {
+            "cta": {"label": "Upgrade to Ultra", "url": {"url": "https://cursor.com/api/auth/checkoutDeepControl?tier=ultra"}},
+            "supportingText": "Get $1,000 of Grok Bot usage each week with Ultra",
+            "kind": "upgrade-to-ultra-for-more-usage"
+          },
+          "onDemandSettings": {"visible": true, "eligible": true, "dashboardUrl": "https://cursor.com/dashboard/spending"},
+          "grokPlanLabel": "Grok Bot Plan"
+        }
+        """)
+        XCTAssertNil(grokBot.includedLimitZero)
+        XCTAssertNil(grokBot.usesPooledEnterpriseAllowance)
+        XCTAssertEqual(grokBot.hasNonZeroIncludedLimit, true)
+        XCTAssertEqual(grokBot.usagePercent ?? 0, 49.290432, accuracy: 0.000001)
+
+        let now = try XCTUnwrap(ISODate.parse("2026-08-28T12:00:00Z"))
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot, now: now)
+        let grok = try XCTUnwrap(buckets.first { $0.kind == .grokBot })
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels, .grokBot])
+        XCTAssertEqual(grok.usedPercent, 49)
+        XCTAssertEqual(grok.remainingPercent, 51)
+        let expectedReset = try XCTUnwrap(CursorTimestamp.parse("2026-09-01T17:46:41.504Z"))
+        XCTAssertEqual(grok.resetAt, expectedReset)
+        XCTAssertEqual(
+            grok.resetAfterSeconds,
+            max(0, Int(expectedReset.timeIntervalSince(now).rounded()))
+        )
+    }
+
     @MainActor
     func testMenuBarStillUsesCursorModelsWhenGrokBotIsPresent() throws {
         let grokBot = try decodeGrokBot("""
