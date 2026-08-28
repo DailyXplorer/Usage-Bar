@@ -178,7 +178,7 @@ final class UsageModel: ObservableObject {
     }
 
     var cursorModels: LimitBucket? {
-        cursorBuckets.first { $0.kind == .cursorModels } ?? cursorBuckets.first
+        cursorBuckets.first { $0.kind == .cursorModels }
     }
 
     var menuBarCursorText: String? {
