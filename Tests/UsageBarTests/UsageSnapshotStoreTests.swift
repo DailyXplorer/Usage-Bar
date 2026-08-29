@@ -6,7 +6,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
         LimitBucket(
             provider: .claude,
             kind: .weeklyAll,
-            name: "All models",
+            name: "All Models",
             usedPercent: 1,
             resetAt: resetAt,
             resetAfterSeconds: resetAfterSeconds,
@@ -39,7 +39,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 LimitBucket(
                     provider: .opencode,
                     kind: .rolling,
-                    name: "Current session",
+                    name: "Current Session",
                     usedPercent: 4,
                     resetAt: Date(timeIntervalSince1970: 1_786_634_858),
                     resetAfterSeconds: 600,
@@ -52,7 +52,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 LimitBucket(
                     provider: .commandcode,
                     kind: .rolling,
-                    name: "Current session",
+                    name: "Current Session",
                     usedPercent: 13,
                     resetAt: Date(timeIntervalSince1970: 1_786_638_458),
                     resetAfterSeconds: 600,
@@ -118,6 +118,36 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .cursor])
     }
 
+    func testRefreshRewritesLegacyCodexTitles() {
+        let snapshot = UsageSnapshot(
+            codexBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "5h",
+                    usedPercent: 12,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 18_000,
+                    reached: false
+                ),
+                LimitBucket(
+                    kind: .secondary,
+                    name: "weekly",
+                    usedPercent: 40,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                ),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.codexBuckets.map(\.name), ["Current Session", "Weekly Limit"])
+    }
+
     func testRefreshRewritesLegacyClaudeTitles() {
         let snapshot = UsageSnapshot(
             claudeBuckets: [
@@ -158,8 +188,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
 
         XCTAssertEqual(refreshed.claudeBuckets.map(\.name), [
-            "Current session",
-            "All models",
+            "Current Session",
+            "All Models",
             "Fable",
         ])
     }
@@ -194,7 +224,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                 LimitBucket(
                     provider: .opencode,
                     kind: .rolling,
-                    name: "Current session",
+                    name: "Current Session",
                     usedPercent: 4,
                     resetAt: nil,
                     resetAfterSeconds: nil,
@@ -284,15 +314,15 @@ final class UsageSnapshotStoreTests: XCTestCase {
 
         let model = UsageModel(defaults: defaults)
         XCTAssertEqual(model.claudeBuckets.map(\.name), [
-            "Current session",
-            "All models",
+            "Current Session",
+            "All Models",
             "Fable",
         ])
 
         let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertEqual(persisted.claudeBuckets.map(\.name), [
-            "Current session",
-            "All models",
+            "Current Session",
+            "All Models",
             "Fable",
         ])
         XCTAssertEqual(persisted.fetchedAt, fetchedAt)
