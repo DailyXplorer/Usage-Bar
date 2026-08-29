@@ -199,7 +199,7 @@ capture time, but countdowns are recomputed from the reset time when read back.
   including for the menu bar label. `AppTheme.nsFont` applies optical sizing
   through the `opsz` axis (clamped to the supported 9–40 range) and weights
   through the `wght` axis.
-- Provider logomarks (Codex command-prompt mark, Claude spark, Cursor cube,
+- Provider logomarks (ChatGPT logo for Codex, Claude spark, Cursor cube,
   OpenCode **O**, Command Code command symbol) are bundled as SVG and rendered
   as templates so they follow the menu bar theme. They are optically padded to
   read at the same size in the 12 px menu bar label and 16 px Settings row.
@@ -261,7 +261,7 @@ Bundled third-party assets keep their own:
 - **Hugeicons** (`Support/AppIcon.svg`) — `dashboard-speed-02` from the free
   set, MIT licensed, no attribution required.
 
-The Codex/OpenAI, Claude/Anthropic, Cursor, OpenCode and Command Code logos
-remain the property of their respective owners; they are used here to identify
+The ChatGPT, Claude, Cursor, OpenCode, and Command Code logos remain the
+property of their respective owners; they are used here to identify
 the services being queried, not to imply any affiliation. This project is
 affiliated with neither OpenAI, Anthropic, Cursor, OpenCode nor Command Code.
