@@ -245,17 +245,37 @@ final class UsageModel: ObservableObject {
             guard menuBarProviders.contains(provider) else { return nil }
             switch provider {
             case .codex:
-                return MenuBarSegment(logo: AppTheme.codexLogo, value: menuBarText)
+                return MenuBarSegment(
+                    provider: .codex,
+                    logo: AppTheme.codexLogo,
+                    value: menuBarText
+                )
             case .claude:
-                return MenuBarSegment(logo: AppTheme.claudeLogo, value: menuBarClaudeDisplay)
+                return MenuBarSegment(
+                    provider: .claude,
+                    logo: AppTheme.claudeLogo,
+                    value: menuBarClaudeDisplay
+                )
             case .cursor:
-                return MenuBarSegment(logo: AppTheme.cursorLogo, value: menuBarCursorDisplay)
+                return MenuBarSegment(
+                    provider: .cursor,
+                    logo: AppTheme.cursorLogo,
+                    value: menuBarCursorDisplay
+                )
             case .opencode:
                 guard showsOpenCode else { return nil }
-                return MenuBarSegment(logo: AppTheme.opencodeLogo, value: menuBarOpenCodeDisplay)
+                return MenuBarSegment(
+                    provider: .opencode,
+                    logo: AppTheme.opencodeLogo,
+                    value: menuBarOpenCodeDisplay
+                )
             case .commandcode:
                 guard showsCommandCode else { return nil }
-                return MenuBarSegment(logo: AppTheme.commandcodeLogo, value: menuBarCommandCodeDisplay)
+                return MenuBarSegment(
+                    provider: .commandcode,
+                    logo: AppTheme.commandcodeLogo,
+                    value: menuBarCommandCodeDisplay
+                )
             }
         }
     }

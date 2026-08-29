@@ -2,8 +2,13 @@ import AppKit
 import SwiftUI
 
 struct MenuBarSegment {
+    let provider: LimitBucket.Provider
     let logo: NSImage?
     let value: String
+
+    var identity: String {
+        "\(provider.rawValue):\(value)"
+    }
 }
 
 @MainActor
@@ -22,6 +27,7 @@ enum MenuBarLabelImage {
             }
         }
         .foregroundStyle(.black)
+        .fixedSize(horizontal: true, vertical: true)
 
         let renderer = ImageRenderer(content: content)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
@@ -34,8 +40,8 @@ enum MenuBarLabelImage {
 
     static func make(codex: String, claude: String) -> NSImage {
         make(segments: [
-            MenuBarSegment(logo: AppTheme.codexLogo, value: codex),
-            MenuBarSegment(logo: AppTheme.claudeLogo, value: claude),
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: codex),
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: claude),
         ])
     }
 
@@ -51,8 +57,13 @@ enum MenuBarLabelImage {
     }
 
     private static func value(_ text: String) -> some View {
-        Text(text)
-            .font(AppTheme.font(size: fontSize, weight: .semibold))
-            .monospacedDigit()
+        ZStack(alignment: .leading) {
+            Text("100%")
+                .hidden()
+            Text(text)
+        }
+        .font(AppTheme.font(size: fontSize, weight: .semibold))
+        .monospacedDigit()
+        .fixedSize(horizontal: true, vertical: true)
     }
 }
