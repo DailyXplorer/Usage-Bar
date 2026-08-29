@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct UsageMenuView: View {
@@ -70,10 +71,9 @@ struct UsageMenuView: View {
                 model.refreshNow(force: true)
             }
         } else {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
                 if model.isVisibleInMenuBar(.codex) {
                     ProviderSection(
-                        title: "Codex",
                         provider: .codex,
                         plan: model.planType,
                         buckets: model.buckets,
@@ -83,7 +83,6 @@ struct UsageMenuView: View {
 
                 if model.isVisibleInMenuBar(.claude) {
                     ProviderSection(
-                        title: "Claude Code",
                         provider: .claude,
                         plan: model.claudePlan,
                         buckets: model.claudeBuckets,
@@ -93,7 +92,6 @@ struct UsageMenuView: View {
 
                 if model.isVisibleInMenuBar(.cursor) {
                     ProviderSection(
-                        title: "Cursor",
                         provider: .cursor,
                         plan: model.cursorPlan,
                         buckets: model.cursorBuckets,
@@ -103,7 +101,6 @@ struct UsageMenuView: View {
 
                 if model.showsOpenCode {
                     ProviderSection(
-                        title: LimitBucket.Provider.opencode.title,
                         provider: .opencode,
                         plan: model.opencodePlan,
                         buckets: model.opencodeBuckets,
@@ -113,7 +110,6 @@ struct UsageMenuView: View {
 
                 if model.showsCommandCode {
                     ProviderSection(
-                        title: LimitBucket.Provider.commandcode.title,
                         provider: .commandcode,
                         plan: model.commandcodePlan,
                         buckets: model.commandcodeBuckets,
@@ -121,7 +117,8 @@ struct UsageMenuView: View {
                     )
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
     }
 
@@ -166,19 +163,38 @@ struct UsageMenuView: View {
     }
 }
 
+private struct ProviderMark: View {
+    let provider: LimitBucket.Provider
+
+    var body: some View {
+        Group {
+            if let image = AppTheme.logo(for: provider) {
+                Image(nsImage: image)
+                    .resizable()
+                    .renderingMode(.template)
+                    .interpolation(.high)
+                    .frame(width: 16, height: 16)
+                    .offset(y: 2)
+            } else {
+                Text(provider.title)
+                    .font(AppTheme.font(size: 11, weight: .medium))
+            }
+        }
+        .appSecondaryLabelStyle()
+        .accessibilityLabel(provider.title)
+    }
+}
+
 private struct ProviderSection: View {
-    let title: String
     let provider: LimitBucket.Provider
     let plan: String?
     let buckets: [LimitBucket]
     let message: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text(title)
-                    .font(AppTheme.font(size: 11, weight: .medium))
-                    .appSecondaryLabelStyle()
+                ProviderMark(provider: provider)
 
                 Spacer()
 
@@ -220,8 +236,6 @@ private struct PlanBadge: View {
 
 private struct LimitCard: View {
     let bucket: LimitBucket
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private var color: Color {
         if bucket.reached {
@@ -231,67 +245,64 @@ private struct LimitCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(bucket.displayName)
-                        .font(AppTheme.font(size: 12, weight: .semibold))
-                        .appSecondaryLabelStyle()
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(bucket.displayName)
+                    .font(AppTheme.font(size: 12, weight: .semibold))
+                    .lineLimit(1)
 
-                    if let detail = bucket.detail {
-                        Text(detail)
-                            .font(AppTheme.font(size: 10.5))
-                            .appSecondaryLabelStyle()
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                Spacer(minLength: 8)
 
-                Spacer()
-
-                Text("\(bucket.remainingPercent)%")
-                    .font(AppTheme.font(size: 20, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(color)
-                    .contentTransition(.numericText())
+                trailingCaption
             }
 
-            UsageProgressBar(value: bucket.remainingPercent, color: color)
+            UsageProgressBar(value: bucket.usedPercent, color: color)
 
-            if bucket.reached {
-                Text("Limit reached — no requests left")
-                    .font(AppTheme.font(size: 11))
-                    .foregroundStyle(.red)
-            } else if let resetText = resetText {
-                Text(resetText)
-                    .font(AppTheme.font(size: 11))
+            Text("\(bucket.usedPercent)% Used")
+                .font(AppTheme.font(size: 11, weight: .medium))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+
+            if let detail = bucket.detail {
+                Text(detail)
+                    .font(AppTheme.font(size: 10.5))
                     .appSecondaryLabelStyle()
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(
-                    AppTheme.cardFill(
-                        colorScheme: colorScheme,
-                        contrast: colorSchemeContrast
-                    )
-                )
-        }
-        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(bucket.displayName), \(bucket.remainingPercent) percent left")
+        .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var trailingCaption: some View {
+        if bucket.reached {
+            Text("Limit reached")
+                .font(AppTheme.font(size: 10.5))
+                .foregroundStyle(.red)
+                .lineLimit(1)
+        } else if let resetText {
+            Text(resetText)
+                .font(AppTheme.font(size: 10.5))
+                .appSecondaryLabelStyle()
+                .lineLimit(1)
+        }
     }
 
     private var resetText: String? {
         let duration = bucket.resetAfterSeconds ?? 0
         guard duration > 0 else { return nil }
-        let remaining = UsageModel.durationString(seconds: duration)
-        guard let resetAt = bucket.resetAt else {
-            return "Resets in \(remaining)"
+        return "Resets in \(UsageModel.durationString(seconds: duration))"
+    }
+
+    private var accessibilityText: String {
+        var parts = ["\(bucket.displayName), \(bucket.usedPercent) percent used"]
+        if bucket.reached {
+            parts.append("limit reached")
+        } else if let resetText {
+            parts.append(resetText)
         }
-        let time = resetAt.formatted(date: .omitted, time: .shortened)
-        return "Resets in \(remaining) · \(time)"
+        return parts.joined(separator: ", ")
     }
 }
 

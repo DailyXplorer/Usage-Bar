@@ -88,12 +88,13 @@ final class UsageMenuSnapshotTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let updater = stubUpdater(defaults: defaults)
 
+        let lightURL = buildDirectory.appendingPathComponent("UsageBar-light.png")
         try render(
             UsageMenuView()
                 .environmentObject(model)
                 .environmentObject(updater)
                 .environment(\.colorScheme, .light),
-            to: buildDirectory.appendingPathComponent("UsageBar-light.png")
+            to: lightURL
         )
         try render(
             UsageMenuView()
@@ -102,6 +103,11 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 .environment(\.colorScheme, .dark),
             to: buildDirectory.appendingPathComponent("UsageBar-dark.png")
         )
+
+        let light = try XCTUnwrap(NSImage(contentsOf: lightURL))
+        XCTAssertEqual(light.size.width, 304, accuracy: 0.5)
+        XCTAssertLessThan(light.size.height, 520)
+        XCTAssertGreaterThan(light.size.height, 360)
     }
 
     @MainActor
