@@ -4,7 +4,7 @@ import XCTest
 @testable import UsageBar
 
 final class SettingsSectionHeaderTests: XCTestCase {
-    func testLabelFontIsInstrumentSansMediumAtElevenPoints() throws {
+    func testLabelFontIsDMSansMediumAtElevenPoints() throws {
         AppTheme.loadFont()
         let font = try XCTUnwrap(
             AppTheme.nsFont(
@@ -18,7 +18,7 @@ final class SettingsSectionHeaderTests: XCTestCase {
 
         XCTAssertEqual(SettingsSectionHeader.fontSize, 11)
         XCTAssertEqual(SettingsSectionHeader.fontWeight, Font.Weight.medium)
-        XCTAssertEqual(font.familyName, "Instrument Sans")
+        XCTAssertEqual(font.familyName, "DM Sans")
         XCTAssertEqual(font.pointSize, 11)
         XCTAssertNotEqual(font.fontName, regular.fontName)
     }

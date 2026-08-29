@@ -16,12 +16,12 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
-    func testEveryWeightStaysInInstrumentSans() throws {
+    func testEveryWeightStaysInDMSans() throws {
         AppTheme.loadFont()
 
         for weight in [Font.Weight.regular, .medium, .semibold, .bold] {
             let font = try XCTUnwrap(AppTheme.nsFont(size: 13, weight: weight))
-            XCTAssertEqual(font.familyName, "Instrument Sans")
+            XCTAssertEqual(font.familyName, "DM Sans")
             XCTAssertEqual(font.pointSize, 13)
         }
     }
@@ -35,6 +35,25 @@ final class AppThemeTests: XCTestCase {
 
         XCTAssertNotEqual(regular, semibold)
         XCTAssertNotEqual(semibold, bold)
+    }
+
+    func testOpticalSizeTracksPointSizeWithinSupportedRange() throws {
+        AppTheme.loadFont()
+        let variationKey = NSFontDescriptor.AttributeName(kCTFontVariationAttribute as String)
+        let opticalSizeKey = NSNumber(value: 1_869_640_570)
+        let cases: [(size: CGFloat, expected: Double)] = [
+            (8, 9),
+            (13, 13),
+            (48, 40),
+        ]
+
+        for testCase in cases {
+            let font = try XCTUnwrap(AppTheme.nsFont(size: testCase.size))
+            let variations = font.fontDescriptor.object(forKey: variationKey)
+                as? [NSNumber: NSNumber]
+            let opticalSize = variations?[opticalSizeKey]?.doubleValue ?? 9
+            XCTAssertEqual(opticalSize, testCase.expected)
+        }
     }
 
     func testCardFillUsesAppearanceAwareInkAtExpectedOpacity() {
