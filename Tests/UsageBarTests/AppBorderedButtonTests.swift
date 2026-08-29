@@ -4,7 +4,7 @@ import XCTest
 @testable import UsageBar
 
 final class AppBorderedButtonTests: XCTestCase {
-    func testLabelFontIsInstrumentSansMediumAtElevenPoints() throws {
+    func testLabelFontIsDMSansMediumAtElevenPoints() throws {
         AppTheme.loadFont()
         let font = try XCTUnwrap(
             AppTheme.nsFont(
@@ -18,13 +18,13 @@ final class AppBorderedButtonTests: XCTestCase {
 
         XCTAssertEqual(AppBorderedButton.fontSize, 11)
         XCTAssertEqual(AppBorderedButton.fontWeight, Font.Weight.medium)
-        XCTAssertEqual(font.familyName, "Instrument Sans")
+        XCTAssertEqual(font.familyName, "DM Sans")
         XCTAssertEqual(font.pointSize, 11)
         XCTAssertNotEqual(font.fontName, regular.fontName)
     }
 
     @MainActor
-    func testRenderedLabelMatchesInstrumentSansMediumReference() throws {
+    func testRenderedLabelMatchesDMSansMediumReference() throws {
         AppTheme.loadFont()
         let title = "Check for Updates"
         let actual = try pngData(for: AppBorderedButton(title: title, action: {}))

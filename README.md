@@ -189,11 +189,10 @@ capture time, but countdowns are recomputed from the reset time when read back.
 ## Design
 
 - English interface.
-- **Instrument Sans** typeface (variable, bundled in the app), including for the
-  menu bar label. Careful: since the file is variable, only one face is
-  registered (`InstrumentSans-Regular`). Weights go through the `wght` axis
-  (`AppTheme.nsFont`); asking for "InstrumentSans-SemiBold" by name fails and
-  **silently** falls back to the system font.
+- **DM Sans** typeface from Google Fonts (variable, bundled in the app),
+  including for the menu bar label. `AppTheme.nsFont` applies optical sizing
+  through the `opsz` axis (clamped to the supported 9–40 range) and weights
+  through the `wght` axis.
 - Provider logomarks (Codex command-prompt mark, Claude spark, Cursor cube,
   OpenCode **O**, Command Code command symbol) are bundled as SVG and rendered
   as templates so they follow the menu bar theme. They are optically padded to
@@ -246,8 +245,8 @@ The code in this project is licensed under the **MIT** license — see
 
 Bundled third-party assets keep their own:
 
-- **Instrument Sans** (`Sources/UsageBar/Resources/Fonts/InstrumentSans.ttf`) —
-  © 2022 The Instrument Sans Project Authors, under the
+- **DM Sans** (`Sources/UsageBar/Resources/Fonts/DMSans.ttf`) — © 2014 The DM
+  Sans Project Authors, under the
   [SIL Open Font License 1.1](https://openfontlicense.org). The license ships
   alongside the font
   ([`Fonts/OFL.txt`](Sources/UsageBar/Resources/Fonts/OFL.txt)), as the OFL
