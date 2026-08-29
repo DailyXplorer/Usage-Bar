@@ -46,6 +46,7 @@ final class UsageModel: ObservableObject {
 
     private var claudeBackoff = ThrottleBackoff()
     private var cursorBackoff = ThrottleBackoff()
+    private var cursorGrokBotBackoff = CursorGrokBotBackoff()
     private var opencodeBackoff = ThrottleBackoff()
     private var commandcodeBackoff = ThrottleBackoff()
 
@@ -352,9 +353,10 @@ final class UsageModel: ObservableObject {
             let claudeFetch = claudeBackoff.isBlocked
                 ? nil
                 : Task { try await claudeService.fetchUsage() }
+            let includeGrokBot = !cursorGrokBotBackoff.isBlocked
             let cursorFetch = cursorBackoff.isBlocked
                 ? nil
-                : Task { try await cursorService.fetchUsage() }
+                : Task { try await cursorService.fetchUsage(includeGrokBot: includeGrokBot) }
             let opencodeFetch = opencodeBackoff.isBlocked
                 ? nil
                 : Task { try await opencodeService.fetchUsage() }
@@ -395,7 +397,9 @@ final class UsageModel: ObservableObject {
 
             if let cursorFetch {
                 do {
-                    let (usage, grokBot, credentials) = try await cursorFetch.value
+                    let (usageResult, grokBot, credentials) = try await cursorFetch.value
+                    cursorGrokBotBackoff.update(after: grokBot)
+                    let usage = try usageResult.get()
                     applyCursor(usage, grokBot: grokBot, credentials: credentials)
                     cursorErrorMessage = nil
                     cursorBackoff.reset()
@@ -484,12 +488,16 @@ final class UsageModel: ObservableObject {
 
     private func applyCursor(
         _ usage: CursorUsageResponse,
-        grokBot: CursorSandUsageStatus?,
+        grokBot: CursorGrokBotFetchResult,
         credentials: CursorCredentials
     ) {
         cursorAvailable = true
         cursorPlan = credentials.membershipType
-        cursorBuckets = CursorLimits.buckets(from: usage, grokBot: grokBot)
+        cursorBuckets = CursorLimits.buckets(
+            from: usage,
+            grokBot: grokBot,
+            preserving: cursorBuckets
+        )
     }
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {

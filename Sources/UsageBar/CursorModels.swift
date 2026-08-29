@@ -96,6 +96,24 @@ enum CursorLimits {
 
     static func buckets(
         from response: CursorUsageResponse,
+        grokBot result: CursorGrokBotFetchResult,
+        preserving previousBuckets: [LimitBucket],
+        now: Date = Date()
+    ) -> [LimitBucket] {
+        switch result {
+        case .refreshed(let status):
+            return buckets(from: response, grokBot: status, now: now)
+        case .unavailable, .throttled:
+            var result = buckets(from: response, now: now)
+            if let previousGrokBot = previousBuckets.first(where: { $0.kind == .grokBot }) {
+                result.append(previousGrokBot.recountingReset(from: now))
+            }
+            return result
+        }
+    }
+
+    static func buckets(
+        from response: CursorUsageResponse,
         grokBot: CursorSandUsageStatus? = nil,
         now: Date = Date()
     ) -> [LimitBucket] {
