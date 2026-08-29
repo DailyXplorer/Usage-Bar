@@ -353,10 +353,18 @@ final class UsageModel: ObservableObject {
             let claudeFetch = claudeBackoff.isBlocked
                 ? nil
                 : Task { try await claudeService.fetchUsage() }
-            let includeGrokBot = !cursorGrokBotBackoff.isBlocked
-            let cursorFetch = cursorBackoff.isBlocked
-                ? nil
-                : Task { try await cursorService.startFetch(includeGrokBot: includeGrokBot) }
+            let cursorRequestPlan = CursorUsageRequestPlan(
+                periodBlocked: cursorBackoff.isBlocked,
+                grokBotBlocked: cursorGrokBotBackoff.isBlocked
+            )
+            let cursorFetch = cursorRequestPlan.shouldStart
+                ? Task {
+                    try await cursorService.startFetch(
+                        includePeriod: cursorRequestPlan.includePeriod,
+                        includeGrokBot: cursorRequestPlan.includeGrokBot
+                    )
+                }
+                : nil
             let opencodeFetch = opencodeBackoff.isBlocked
                 ? nil
                 : Task { try await opencodeService.fetchUsage() }
@@ -401,13 +409,15 @@ final class UsageModel: ObservableObject {
                 do {
                     let requests = try await cursorFetch.value
                     cursorRequests = requests
-                    let usageResult = await requests.period.value
-                    let usage = try usageResult.get()
-                    applyCursor(usage, grokBot: .unavailable, credentials: requests.credentials)
-                    refreshedCursorUsage = usage
-                    cursorErrorMessage = nil
-                    cursorBackoff.reset()
-                    succeeded = true
+                    if let period = requests.period {
+                        let usageResult = await period.value
+                        let usage = try usageResult.get()
+                        applyCursor(usage, grokBot: .unavailable, credentials: requests.credentials)
+                        refreshedCursorUsage = usage
+                        cursorErrorMessage = nil
+                        cursorBackoff.reset()
+                        succeeded = true
+                    }
                 } catch CursorUsageError.notSignedIn {
                     cursorAvailable = false
                     cursorBuckets = []
