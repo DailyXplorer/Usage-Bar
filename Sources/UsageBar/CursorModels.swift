@@ -91,7 +91,7 @@ struct CursorSandUsageStatus: Decodable {
 }
 
 enum CursorLimits {
-    static let grokBotDisplayName = "Grok bot"
+    static let grokBotDisplayName = "Grok Bot"
     static let grokBotWindowSeconds = 7 * 24 * 60 * 60
 
     static func buckets(
