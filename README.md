@@ -133,7 +133,7 @@ release are in [AGENTS.md](AGENTS.md).
 - Mirrors Cursor's two monthly plan pools: **Cursor Models** (Cursor Grok and
   Composer) and **Other Models** (third-party models billed at API rates), each
   with the billing-cycle reset. When the account has a personal Grok Bot
-  weekly allowance, the popover adds a **Grok bot** bar under Other Models.
+  weekly allowance, the popover adds a **Grok Bot** bar under Other Models.
   That bar is hidden for pooled Enterprise seats and accounts without an
   included Bot limit. A Grok Bot fetch failure leaves the monthly bars intact.
   The menu bar shows the Cursor Models pool.

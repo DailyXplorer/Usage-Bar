@@ -146,7 +146,7 @@ final class CursorLimitsTests: XCTestCase {
         let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot, now: now)
 
         XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels, .grokBot])
-        XCTAssertEqual(buckets.map(\.displayName), ["Cursor Models", "Other Models", "Grok bot"])
+        XCTAssertEqual(buckets.map(\.displayName), ["Cursor Models", "Other Models", "Grok Bot"])
         XCTAssertEqual(buckets.map(\.usedPercent), [42, 11, 19])
         XCTAssertEqual(buckets.map(\.remainingPercent), [58, 89, 81])
         XCTAssertEqual(buckets[2].resetAfterSeconds, 86_400)
@@ -172,6 +172,23 @@ final class CursorLimitsTests: XCTestCase {
         let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
 
         XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testGrokBotRemainsVisibleWhenIncludedUsageIsExhausted() throws {
+        let grokBot = try decodeGrokBot("""
+        {
+          "usagePercent": 100,
+          "hasAvailableUsage": false,
+          "hasNonZeroIncludedLimit": true,
+          "includedLimitZero": false,
+          "usesPooledEnterpriseAllowance": false
+        }
+        """)
+        let buckets = CursorLimits.buckets(from: try decode(), grokBot: grokBot)
+        let bucket = try XCTUnwrap(buckets.first { $0.kind == .grokBot })
+
+        XCTAssertEqual(bucket.usedPercent, 100)
+        XCTAssertTrue(bucket.reached)
     }
 
     func testGrokBotHiddenForPooledEnterprise() throws {
@@ -222,7 +239,7 @@ final class CursorLimitsTests: XCTestCase {
         let buckets = CursorLimits.buckets(from: response, grokBot: grokBot)
 
         XCTAssertEqual(buckets.map(\.kind), [.grokBot])
-        XCTAssertEqual(buckets.map(\.displayName), ["Grok bot"])
+        XCTAssertEqual(buckets.map(\.displayName), ["Grok Bot"])
     }
 
     @MainActor
