@@ -86,7 +86,7 @@ struct LimitBucket: Identifiable, Codable {
     enum Kind: String, Codable {
         case primary, secondary, spark
         case session, weeklyAll, weeklyScoped
-        case cursorModels, otherModels
+        case cursorModels, otherModels, grokBot
         case rolling, weekly, monthly
         case other
     }
