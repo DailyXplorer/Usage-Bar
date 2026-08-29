@@ -219,7 +219,7 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
     }
 
-    func testFailedOrThrottledGrokBotRefreshPreservesCachedBucket() throws {
+    func testFailedOrThrottledGrokBotRefreshPreservesCachedBucketUntilReset() throws {
         let resetAt = Date(timeIntervalSince1970: 1_786_842_000)
         let now = resetAt.addingTimeInterval(-600)
         let previous = [
@@ -248,6 +248,69 @@ final class CursorLimitsTests: XCTestCase {
             XCTAssertEqual(grokBot.usedPercent, 73)
             XCTAssertEqual(grokBot.resetAfterSeconds, 600)
         }
+    }
+
+    func testFailedOrThrottledGrokBotRefreshDropsCachedBucketAfterReset() throws {
+        let resetAt = Date(timeIntervalSince1970: 1_786_842_000)
+        let previous = [
+            LimitBucket(
+                provider: .cursor,
+                kind: .grokBot,
+                name: CursorLimits.grokBotDisplayName,
+                usedPercent: 100,
+                resetAt: resetAt,
+                resetAfterSeconds: 0,
+                limitWindowSeconds: CursorLimits.grokBotWindowSeconds,
+                reached: true
+            )
+        ]
+
+        for result in [CursorGrokBotFetchResult.unavailable, .throttled] {
+            let buckets = CursorLimits.buckets(
+                from: try decode(),
+                grokBot: result,
+                preserving: previous,
+                now: resetAt
+            )
+
+            XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .otherModels])
+        }
+    }
+
+    func testValidGrokBotRefreshUpdatesCachedBucketsWithoutPeriodResponse() throws {
+        let previous = [
+            LimitBucket(
+                provider: .cursor,
+                kind: .cursorModels,
+                name: "Cursor Models",
+                usedPercent: 42,
+                resetAt: nil,
+                resetAfterSeconds: nil,
+                limitWindowSeconds: nil,
+                reached: false
+            ),
+            LimitBucket(
+                provider: .cursor,
+                kind: .grokBot,
+                name: CursorLimits.grokBotDisplayName,
+                usedPercent: 73,
+                resetAt: nil,
+                resetAfterSeconds: nil,
+                limitWindowSeconds: CursorLimits.grokBotWindowSeconds,
+                reached: false
+            )
+        ]
+        let refreshed = try decodeGrokBot("""
+        {"usagePercent":21,"hasNonZeroIncludedLimit":true}
+        """)
+        let buckets = CursorLimits.updatingGrokBot(
+            in: previous,
+            from: .refreshed(refreshed),
+            preserving: previous
+        )
+
+        XCTAssertEqual(buckets.map(\.kind), [.cursorModels, .grokBot])
+        XCTAssertEqual(buckets.map(\.usedPercent), [42, 21])
     }
 
     func testValidGrokBotRefreshCanRemoveCachedBucket() throws {

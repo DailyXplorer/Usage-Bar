@@ -100,16 +100,33 @@ enum CursorLimits {
         preserving previousBuckets: [LimitBucket],
         now: Date = Date()
     ) -> [LimitBucket] {
+        updatingGrokBot(
+            in: buckets(from: response, now: now),
+            from: result,
+            preserving: previousBuckets,
+            now: now
+        )
+    }
+
+    static func updatingGrokBot(
+        in baseBuckets: [LimitBucket],
+        from result: CursorGrokBotFetchResult,
+        preserving previousBuckets: [LimitBucket],
+        now: Date = Date()
+    ) -> [LimitBucket] {
+        var buckets = baseBuckets.filter { $0.kind != .grokBot }
         switch result {
         case .refreshed(let status):
-            return buckets(from: response, grokBot: status, now: now)
-        case .unavailable, .throttled:
-            var result = buckets(from: response, now: now)
-            if let previousGrokBot = previousBuckets.first(where: { $0.kind == .grokBot }) {
-                result.append(previousGrokBot.recountingReset(from: now))
+            if let grokBot = grokBotBucket(from: status, now: now) {
+                buckets.append(grokBot)
             }
-            return result
+        case .unavailable, .throttled:
+            if let previousGrokBot = previousBuckets.first(where: { $0.kind == .grokBot }),
+               previousGrokBot.resetAt.map({ $0 > now }) != false {
+                buckets.append(previousGrokBot.recountingReset(from: now))
+            }
         }
+        return buckets
     }
 
     static func buckets(

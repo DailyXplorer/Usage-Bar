@@ -474,6 +474,11 @@ final class UsageModel: ObservableObject {
                         grokBot: grokBot,
                         credentials: cursorRequests.credentials
                     )
+                } else {
+                    applyCursorGrokBot(grokBot, credentials: cursorRequests.credentials)
+                    if case .refreshed = grokBot {
+                        succeeded = true
+                    }
                 }
             }
 
@@ -514,6 +519,21 @@ final class UsageModel: ObservableObject {
             grokBot: grokBot,
             preserving: cursorBuckets
         )
+    }
+
+    private func applyCursorGrokBot(
+        _ grokBot: CursorGrokBotFetchResult,
+        credentials: CursorCredentials
+    ) {
+        cursorBuckets = CursorLimits.updatingGrokBot(
+            in: cursorBuckets,
+            from: grokBot,
+            preserving: cursorBuckets
+        )
+        if case .refreshed = grokBot {
+            cursorAvailable = true
+            cursorPlan = credentials.membershipType
+        }
     }
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
