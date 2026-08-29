@@ -46,6 +46,7 @@ final class UsageModel: ObservableObject {
 
     private var claudeBackoff = ThrottleBackoff()
     private var cursorBackoff = ThrottleBackoff()
+    private var cursorGrokBotBackoff = CursorGrokBotBackoff()
     private var opencodeBackoff = ThrottleBackoff()
     private var commandcodeBackoff = ThrottleBackoff()
 
@@ -178,7 +179,7 @@ final class UsageModel: ObservableObject {
     }
 
     var cursorModels: LimitBucket? {
-        cursorBuckets.first { $0.kind == .cursorModels } ?? cursorBuckets.first
+        cursorBuckets.first { $0.kind == .cursorModels }
     }
 
     var menuBarCursorText: String? {
@@ -352,9 +353,18 @@ final class UsageModel: ObservableObject {
             let claudeFetch = claudeBackoff.isBlocked
                 ? nil
                 : Task { try await claudeService.fetchUsage() }
-            let cursorFetch = cursorBackoff.isBlocked
-                ? nil
-                : Task { try await cursorService.fetchUsage() }
+            let cursorRequestPlan = CursorUsageRequestPlan(
+                periodBlocked: cursorBackoff.isBlocked,
+                grokBotBlocked: cursorGrokBotBackoff.isBlocked
+            )
+            let cursorFetch = cursorRequestPlan.shouldStart
+                ? Task {
+                    try await cursorService.startFetch(
+                        includePeriod: cursorRequestPlan.includePeriod,
+                        includeGrokBot: cursorRequestPlan.includeGrokBot
+                    )
+                }
+                : nil
             let opencodeFetch = opencodeBackoff.isBlocked
                 ? nil
                 : Task { try await opencodeService.fetchUsage() }
@@ -363,6 +373,8 @@ final class UsageModel: ObservableObject {
                 : Task { try await commandcodeService.fetchUsage() }
 
             var succeeded = false
+            var cursorRequests: CursorUsageRequests?
+            var refreshedCursorUsage: CursorUsageResponse?
 
             do {
                 apply(try await codexFetch.value)
@@ -395,11 +407,17 @@ final class UsageModel: ObservableObject {
 
             if let cursorFetch {
                 do {
-                    let (usage, credentials) = try await cursorFetch.value
-                    applyCursor(usage, credentials: credentials)
-                    cursorErrorMessage = nil
-                    cursorBackoff.reset()
-                    succeeded = true
+                    let requests = try await cursorFetch.value
+                    cursorRequests = requests
+                    if let period = requests.period {
+                        let usageResult = await period.value
+                        let usage = try usageResult.get()
+                        applyCursor(usage, grokBot: .unavailable, credentials: requests.credentials)
+                        refreshedCursorUsage = usage
+                        cursorErrorMessage = nil
+                        cursorBackoff.reset()
+                        succeeded = true
+                    }
                 } catch CursorUsageError.notSignedIn {
                     cursorAvailable = false
                     cursorBuckets = []
@@ -457,6 +475,23 @@ final class UsageModel: ObservableObject {
                 }
             }
 
+            if let cursorRequests {
+                let grokBot = await cursorRequests.grokBot.value
+                cursorGrokBotBackoff.update(after: grokBot)
+                if let refreshedCursorUsage {
+                    applyCursor(
+                        refreshedCursorUsage,
+                        grokBot: grokBot,
+                        credentials: cursorRequests.credentials
+                    )
+                } else {
+                    applyCursorGrokBot(grokBot, credentials: cursorRequests.credentials)
+                    if case .refreshed = grokBot {
+                        succeeded = true
+                    }
+                }
+            }
+
             isLoading = false
             if succeeded {
                 let now = Date()
@@ -482,10 +517,33 @@ final class UsageModel: ObservableObject {
         claudeBuckets = ClaudeLimits.buckets(from: usage)
     }
 
-    private func applyCursor(_ usage: CursorUsageResponse, credentials: CursorCredentials) {
+    private func applyCursor(
+        _ usage: CursorUsageResponse,
+        grokBot: CursorGrokBotFetchResult,
+        credentials: CursorCredentials
+    ) {
         cursorAvailable = true
         cursorPlan = credentials.membershipType
-        cursorBuckets = CursorLimits.buckets(from: usage)
+        cursorBuckets = CursorLimits.buckets(
+            from: usage,
+            grokBot: grokBot,
+            preserving: cursorBuckets
+        )
+    }
+
+    private func applyCursorGrokBot(
+        _ grokBot: CursorGrokBotFetchResult,
+        credentials: CursorCredentials
+    ) {
+        cursorBuckets = CursorLimits.updatingGrokBot(
+            in: cursorBuckets,
+            from: grokBot,
+            preserving: cursorBuckets
+        )
+        if case .refreshed = grokBot {
+            cursorAvailable = true
+            cursorPlan = credentials.membershipType
+        }
     }
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {

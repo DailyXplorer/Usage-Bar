@@ -35,34 +35,133 @@ enum CursorUsageError: LocalizedError {
     }
 }
 
+enum CursorGrokBotFetchResult {
+    case refreshed(CursorSandUsageStatus?)
+    case unavailable
+    case throttled
+}
+
+struct CursorGrokBotBackoff {
+    private var backoff = ThrottleBackoff()
+
+    var isBlocked: Bool {
+        backoff.isBlocked
+    }
+
+    var blockedUntil: Date? {
+        backoff.blockedUntil
+    }
+
+    mutating func update(after result: CursorGrokBotFetchResult, now: Date = Date()) {
+        switch result {
+        case .refreshed:
+            backoff.reset()
+        case .throttled:
+            backoff.recordThrottle(now: now)
+        case .unavailable:
+            break
+        }
+    }
+}
+
+struct CursorUsageRequests {
+    let credentials: CursorCredentials
+    let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>?
+    let grokBot: Task<CursorGrokBotFetchResult, Never>
+}
+
+struct CursorUsageRequestPlan: Equatable {
+    let includePeriod: Bool
+    let includeGrokBot: Bool
+
+    init(periodBlocked: Bool, grokBotBlocked: Bool) {
+        includePeriod = !periodBlocked
+        includeGrokBot = !grokBotBlocked
+    }
+
+    var shouldStart: Bool {
+        includePeriod || includeGrokBot
+    }
+}
+
 actor CursorUsageService {
-    private static let endpoint = URL(
+    static let defaultEndpoint = URL(
         string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+    )!
+    static let defaultGrokBotEndpoint = URL(
+        string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
     )!
     private static let stateDB = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
 
-    func fetchUsage() async throws -> (usage: CursorUsageResponse, credentials: CursorCredentials) {
+    private let endpoint: URL
+    private let grokBotEndpoint: URL
+    private let session: URLSession
+
+    init(
+        endpoint: URL = CursorUsageService.defaultEndpoint,
+        grokBotEndpoint: URL = CursorUsageService.defaultGrokBotEndpoint,
+        session: URLSession = .shared
+    ) {
+        self.endpoint = endpoint
+        self.grokBotEndpoint = grokBotEndpoint
+        self.session = session
+    }
+
+    func startFetch(
+        includePeriod: Bool = true,
+        includeGrokBot: Bool = true
+    ) throws -> CursorUsageRequests {
         let credentials = try Self.loadCredentials()
+        return startFetch(
+            credentials: credentials,
+            includePeriod: includePeriod,
+            includeGrokBot: includeGrokBot
+        )
+    }
 
-        var request = URLRequest(url: Self.endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.httpBody = Data("{}".utf8)
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+    func startFetch(
+        credentials: CursorCredentials,
+        includePeriod: Bool = true,
+        includeGrokBot: Bool = true
+    ) -> CursorUsageRequests {
+        let token = credentials.accessToken
+        let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>? = includePeriod
+            ? Task { await fetchPeriod(token: token) }
+            : nil
+        return CursorUsageRequests(
+            credentials: credentials,
+            period: period,
+            grokBot: Task { await fetchGrokBot(token: token, enabled: includeGrokBot) }
+        )
+    }
 
-        let (data, response): (Data, URLResponse)
+    private func fetchPeriod(token: String) async -> Result<CursorUsageResponse, CursorUsageError> {
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            let data = try await postDashboard(url: endpoint, token: token)
+            return .success(try JSONDecoder().decode(CursorUsageResponse.self, from: data))
+        } catch let error as CursorUsageError {
+            return .failure(error)
         } catch {
-            throw CursorUsageError.network(error.localizedDescription)
+            return .failure(.decoding(error.localizedDescription))
         }
+    }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw CursorUsageError.network("invalid response")
+    private func fetchGrokBot(token: String, enabled: Bool) async -> CursorGrokBotFetchResult {
+        guard enabled else { return .unavailable }
+        do {
+            let data = try await postDashboard(url: grokBotEndpoint, token: token)
+            let status = try JSONDecoder().decode(CursorSandUsageStatus?.self, from: data)
+            return .refreshed(status)
+        } catch CursorUsageError.throttled {
+            return .throttled
+        } catch {
+            return .unavailable
         }
+    }
+
+    private func postDashboard(url: URL, token: String) async throws -> Data {
+        let (data, http) = try await sendDashboard(url: url, token: token)
         guard http.statusCode == 200 else {
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw CursorUsageError.tokenExpired
@@ -72,12 +171,29 @@ actor CursorUsageService {
             }
             throw CursorUsageError.httpStatus(http.statusCode)
         }
+        return data
+    }
 
+    private func sendDashboard(url: URL, token: String) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.httpBody = Data("{}".utf8)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+
+        let (data, response): (Data, URLResponse)
         do {
-            return (try JSONDecoder().decode(CursorUsageResponse.self, from: data), credentials)
+            (data, response) = try await session.data(for: request)
         } catch {
-            throw CursorUsageError.decoding(error.localizedDescription)
+            throw CursorUsageError.network(error.localizedDescription)
         }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw CursorUsageError.network("invalid response")
+        }
+        return (data, http)
     }
 
     private static func loadCredentials() throws -> CursorCredentials {
