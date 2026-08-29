@@ -66,8 +66,22 @@ struct CursorGrokBotBackoff {
 
 struct CursorUsageRequests {
     let credentials: CursorCredentials
-    let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>
+    let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>?
     let grokBot: Task<CursorGrokBotFetchResult, Never>
+}
+
+struct CursorUsageRequestPlan: Equatable {
+    let includePeriod: Bool
+    let includeGrokBot: Bool
+
+    init(periodBlocked: Bool, grokBotBlocked: Bool) {
+        includePeriod = !periodBlocked
+        includeGrokBot = !grokBotBlocked
+    }
+
+    var shouldStart: Bool {
+        includePeriod || includeGrokBot
+    }
 }
 
 actor CursorUsageService {
@@ -94,19 +108,30 @@ actor CursorUsageService {
         self.session = session
     }
 
-    func startFetch(includeGrokBot: Bool = true) throws -> CursorUsageRequests {
+    func startFetch(
+        includePeriod: Bool = true,
+        includeGrokBot: Bool = true
+    ) throws -> CursorUsageRequests {
         let credentials = try Self.loadCredentials()
-        return startFetch(credentials: credentials, includeGrokBot: includeGrokBot)
+        return startFetch(
+            credentials: credentials,
+            includePeriod: includePeriod,
+            includeGrokBot: includeGrokBot
+        )
     }
 
     func startFetch(
         credentials: CursorCredentials,
+        includePeriod: Bool = true,
         includeGrokBot: Bool = true
     ) -> CursorUsageRequests {
         let token = credentials.accessToken
+        let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>? = includePeriod
+            ? Task { await fetchPeriod(token: token) }
+            : nil
         return CursorUsageRequests(
             credentials: credentials,
-            period: Task { await fetchPeriod(token: token) },
+            period: period,
             grokBot: Task { await fetchGrokBot(token: token, enabled: includeGrokBot) }
         )
     }

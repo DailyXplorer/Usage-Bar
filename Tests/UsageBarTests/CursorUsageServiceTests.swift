@@ -13,7 +13,8 @@ final class CursorUsageServiceTests: XCTestCase {
 
     func testSandThrottleIsReportedWithoutFailingPeriodUsage() async throws {
         let requests = try await fetch(sand: .status(429))
-        let usage = try await requests.period.value.get()
+        let period = try XCTUnwrap(requests.period)
+        let usage = try await period.value.get()
         let grokBot = await requests.grokBot.value
 
         XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
@@ -24,7 +25,8 @@ final class CursorUsageServiceTests: XCTestCase {
 
     func testSandThrottleIsReportedWhenPeriodAlsoFails() async throws {
         let requests = try await fetch(period: .status(500), sand: .status(429))
-        let usage = await requests.period.value
+        let period = try XCTUnwrap(requests.period)
+        let usage = await period.value
         let grokBot = await requests.grokBot.value
 
         guard case .failure(let error) = usage,
@@ -44,7 +46,8 @@ final class CursorUsageServiceTests: XCTestCase {
             CursorStubResponse.failure(.timedOut),
         ] {
             let requests = try await fetch(sand: response)
-            let usage = try await requests.period.value.get()
+            let period = try XCTUnwrap(requests.period)
+            let usage = try await period.value.get()
             let grokBot = await requests.grokBot.value
 
             XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
@@ -73,6 +76,39 @@ final class CursorUsageServiceTests: XCTestCase {
         }
     }
 
+    func testSandFetchCanRunWithoutPeriodUsage() async throws {
+        let requests = try await fetch(
+            period: .status(500),
+            sand: .ok("{}"),
+            includePeriod: false
+        )
+
+        XCTAssertNil(requests.period)
+        guard case .refreshed = await requests.grokBot.value else {
+            return XCTFail("Expected Sand to refresh while period usage is blocked")
+        }
+    }
+
+    func testRequestPlanKeepsProviderBackoffsIndependent() {
+        let cases = [
+            (periodBlocked: false, grokBotBlocked: false, period: true, grokBot: true, start: true),
+            (periodBlocked: true, grokBotBlocked: false, period: false, grokBot: true, start: true),
+            (periodBlocked: false, grokBotBlocked: true, period: true, grokBot: false, start: true),
+            (periodBlocked: true, grokBotBlocked: true, period: false, grokBot: false, start: false),
+        ]
+
+        for entry in cases {
+            let plan = CursorUsageRequestPlan(
+                periodBlocked: entry.periodBlocked,
+                grokBotBlocked: entry.grokBotBlocked
+            )
+
+            XCTAssertEqual(plan.includePeriod, entry.period)
+            XCTAssertEqual(plan.includeGrokBot, entry.grokBot)
+            XCTAssertEqual(plan.shouldStart, entry.start)
+        }
+    }
+
     func testPeriodUsageCompletesBeforeDelayedSand() async throws {
         let sandStarted = expectation(description: "Sand request started")
         let delay = CursorStubDelay(onHold: sandStarted.fulfill)
@@ -80,7 +116,8 @@ final class CursorUsageServiceTests: XCTestCase {
         let requests = try await fetch(sand: .delayedOK("{}", delay: delay))
 
         await fulfillment(of: [sandStarted], timeout: 1)
-        let usage = try await requests.period.value.get()
+        let period = try XCTUnwrap(requests.period)
+        let usage = try await period.value.get()
 
         XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
         XCTAssertTrue(delay.isHoldingResponse)
@@ -120,6 +157,7 @@ final class CursorUsageServiceTests: XCTestCase {
     private func fetch(
         period: CursorStubResponse? = nil,
         sand: CursorStubResponse,
+        includePeriod: Bool = true,
         includeGrokBot: Bool = true
     ) async throws -> CursorUsageRequests {
         CursorStubURLProtocol.responses = [
@@ -137,6 +175,7 @@ final class CursorUsageServiceTests: XCTestCase {
         )
         return await service.startFetch(
             credentials: CursorCredentials(accessToken: "test-token", membershipType: "pro"),
+            includePeriod: includePeriod,
             includeGrokBot: includeGrokBot
         )
     }
