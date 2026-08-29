@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 enum AppTheme {
-    private static let baseFontName = "InstrumentSans-Regular"
+    private static let baseFontName = "DMSans-9ptRegular"
+    private static let opticalSizeAxisIdentifier = 1_869_640_570
     private static let weightAxisIdentifier = 2_003_265_652
 
     static var resourceBundle: Bundle {
@@ -17,7 +18,7 @@ enum AppTheme {
 
     static func loadFont() {
         let bundle = resourceBundle
-        guard let url = bundle.url(forResource: "InstrumentSans", withExtension: "ttf") else {
+        guard let url = bundle.url(forResource: "DMSans", withExtension: "ttf") else {
             return
         }
         var error: Unmanaged<CFError>?
@@ -63,17 +64,16 @@ enum AppTheme {
 
     static func nsFont(size: CGFloat, weight: Font.Weight = .regular) -> NSFont? {
         guard let base = NSFont(name: baseFontName, size: size) else { return nil }
-        let axisValue = weightAxisValue(for: weight)
-        guard axisValue != 400 else { return base }
         let descriptor = base.fontDescriptor.addingAttributes([
             NSFontDescriptor.AttributeName(kCTFontVariationAttribute as String): [
-                weightAxisIdentifier: axisValue
+                opticalSizeAxisIdentifier: min(max(size, 9), 40),
+                weightAxisIdentifier: weightAxisValue(for: weight)
             ]
         ])
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
 
-    private static func weightAxisValue(for weight: Font.Weight) -> Int {
+    private static func weightAxisValue(for weight: Font.Weight) -> CGFloat {
         switch weight {
         case .medium:
             return 500

@@ -90,7 +90,7 @@ The popover was flush with the display edge on small screens, so the
 first row was easy to miss.
 
 Good:
-Apply Instrument Sans to native Settings buttons
+Apply DM Sans to native Settings buttons
 
 SwiftUI .font does not reach AppKit NSButton, so the update control
 was still using the system face.
@@ -194,7 +194,7 @@ The installed app is always `/Applications/UsageBar.app` (Finder:
 | Markdown / docs images | kebab-case | `docs/usage-bar-codex-opencode.png` |
 | This file | uppercase root doc | `CONVENTIONS.md`, `AGENTS.md`, `README.md` |
 | GitHub workflows | kebab-case | `.github/workflows/release.yml` |
-| Resources | descriptive, stable names | `InstrumentSans.ttf`, `AppIcon.svg` |
+| Resources | descriptive, stable names | `DMSans.ttf`, `AppIcon.svg` |
 
 Do not commit `.build/`. Do not add a new top-level folder without a
 reason that does not fit `Sources/`, `Tests/`, `scripts/`, `Support/`,
