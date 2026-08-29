@@ -33,6 +33,34 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuBarLabelWidthStaysStableWhenPercentagesLoad() {
+        AppTheme.loadFont()
+        let loading = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "--%"),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "–"),
+        ])
+        let loaded = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "22%"),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "89%"),
+        ])
+        let maximum = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "100%"),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "100%"),
+        ])
+
+        XCTAssertEqual(loading.size.width, loaded.size.width, accuracy: 0.5)
+        XCTAssertEqual(loaded.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertTrue(loaded.isTemplate)
+    }
+
+    func testMenuBarSegmentIdentityIncludesProvider() {
+        let codex = MenuBarSegment(provider: .codex, logo: nil, value: "50%")
+        let cursor = MenuBarSegment(provider: .cursor, logo: nil, value: "50%")
+
+        XCTAssertNotEqual(codex.identity, cursor.identity)
+    }
+
+    @MainActor
     func testClaudeSegmentKeepsItsPlaceWithoutData() {
         let model = UsageModel(
             previewBuckets: [codexBucket],
