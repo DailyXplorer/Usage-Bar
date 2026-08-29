@@ -83,7 +83,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
-        .id(model.menuBarSegments.map(\.value).joined(separator: "|"))
+        .id(model.menuBarSegments.map(\.identity).joined(separator: "|"))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.menuBarAccessibilityLabel)
         .onAppear {
