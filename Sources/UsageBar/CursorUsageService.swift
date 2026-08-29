@@ -64,6 +64,12 @@ struct CursorGrokBotBackoff {
     }
 }
 
+struct CursorUsageRequests {
+    let credentials: CursorCredentials
+    let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>
+    let grokBot: Task<CursorGrokBotFetchResult, Never>
+}
+
 actor CursorUsageService {
     static let defaultEndpoint = URL(
         string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
@@ -88,27 +94,21 @@ actor CursorUsageService {
         self.session = session
     }
 
-    func fetchUsage(includeGrokBot: Bool = true) async throws -> (
-        usage: Result<CursorUsageResponse, CursorUsageError>,
-        grokBot: CursorGrokBotFetchResult,
-        credentials: CursorCredentials
-    ) {
+    func startFetch(includeGrokBot: Bool = true) throws -> CursorUsageRequests {
         let credentials = try Self.loadCredentials()
-        return await fetchUsage(credentials: credentials, includeGrokBot: includeGrokBot)
+        return startFetch(credentials: credentials, includeGrokBot: includeGrokBot)
     }
 
-    func fetchUsage(
+    func startFetch(
         credentials: CursorCredentials,
         includeGrokBot: Bool = true
-    ) async -> (
-        usage: Result<CursorUsageResponse, CursorUsageError>,
-        grokBot: CursorGrokBotFetchResult,
-        credentials: CursorCredentials
-    ) {
-        async let usage = fetchPeriod(token: credentials.accessToken)
-        async let grokBot = fetchGrokBot(token: credentials.accessToken, enabled: includeGrokBot)
-        let (usageResult, grokBotResult) = await (usage, grokBot)
-        return (usageResult, grokBotResult, credentials)
+    ) -> CursorUsageRequests {
+        let token = credentials.accessToken
+        return CursorUsageRequests(
+            credentials: credentials,
+            period: Task { await fetchPeriod(token: token) },
+            grokBot: Task { await fetchGrokBot(token: token, enabled: includeGrokBot) }
+        )
     }
 
     private func fetchPeriod(token: String) async -> Result<CursorUsageResponse, CursorUsageError> {

@@ -12,24 +12,27 @@ final class CursorUsageServiceTests: XCTestCase {
     }
 
     func testSandThrottleIsReportedWithoutFailingPeriodUsage() async throws {
-        let result = try await fetch(sand: .status(429))
-        let usage = try result.usage.get()
+        let requests = try await fetch(sand: .status(429))
+        let usage = try await requests.period.value.get()
+        let grokBot = await requests.grokBot.value
 
         XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
-        guard case .throttled = result.grokBot else {
+        guard case .throttled = grokBot else {
             return XCTFail("Expected the Sand throttle to remain visible to the caller")
         }
     }
 
     func testSandThrottleIsReportedWhenPeriodAlsoFails() async throws {
-        let result = try await fetch(period: .status(500), sand: .status(429))
+        let requests = try await fetch(period: .status(500), sand: .status(429))
+        let usage = await requests.period.value
+        let grokBot = await requests.grokBot.value
 
-        guard case .failure(let error) = result.usage,
+        guard case .failure(let error) = usage,
               case .httpStatus(let code) = error else {
             return XCTFail("Expected the period failure")
         }
         XCTAssertEqual(code, 500)
-        guard case .throttled = result.grokBot else {
+        guard case .throttled = grokBot else {
             return XCTFail("Expected the concurrent Sand throttle")
         }
     }
@@ -40,30 +43,51 @@ final class CursorUsageServiceTests: XCTestCase {
             CursorStubResponse.ok("not-json"),
             CursorStubResponse.failure(.timedOut),
         ] {
-            let result = try await fetch(sand: response)
-            let usage = try result.usage.get()
+            let requests = try await fetch(sand: response)
+            let usage = try await requests.period.value.get()
+            let grokBot = await requests.grokBot.value
 
             XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
-            guard case .unavailable = result.grokBot else {
+            guard case .unavailable = grokBot else {
                 return XCTFail("Expected the failed Sand refresh to preserve cached usage")
             }
         }
     }
 
     func testValidSandResponseIsDistinguishedFromFailure() async throws {
-        let result = try await fetch(sand: .ok("{}"))
+        let requests = try await fetch(sand: .ok("{}"))
+        let grokBot = await requests.grokBot.value
 
-        guard case .refreshed(let status) = result.grokBot else {
+        guard case .refreshed(let status) = grokBot else {
             return XCTFail("Expected a decoded Sand response")
         }
         XCTAssertNotNil(status)
     }
 
     func testDisabledSandFetchDoesNotSurfaceItsThrottle() async throws {
-        let result = try await fetch(sand: .status(429), includeGrokBot: false)
+        let requests = try await fetch(sand: .status(429), includeGrokBot: false)
+        let grokBot = await requests.grokBot.value
 
-        guard case .unavailable = result.grokBot else {
+        guard case .unavailable = grokBot else {
             return XCTFail("Expected a blocked Sand refresh to preserve cached usage")
+        }
+    }
+
+    func testPeriodUsageCompletesBeforeDelayedSand() async throws {
+        let sandStarted = expectation(description: "Sand request started")
+        let delay = CursorStubDelay(onHold: sandStarted.fulfill)
+        defer { delay.release() }
+        let requests = try await fetch(sand: .delayedOK("{}", delay: delay))
+
+        await fulfillment(of: [sandStarted], timeout: 1)
+        let usage = try await requests.period.value.get()
+
+        XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
+        XCTAssertTrue(delay.isHoldingResponse)
+
+        delay.release()
+        guard case .refreshed = await requests.grokBot.value else {
+            return XCTFail("Expected Sand to finish after its response was released")
         }
     }
 
@@ -97,11 +121,7 @@ final class CursorUsageServiceTests: XCTestCase {
         period: CursorStubResponse? = nil,
         sand: CursorStubResponse,
         includeGrokBot: Bool = true
-    ) async throws -> (
-        usage: Result<CursorUsageResponse, CursorUsageError>,
-        grokBot: CursorGrokBotFetchResult,
-        credentials: CursorCredentials
-    ) {
+    ) async throws -> CursorUsageRequests {
         CursorStubURLProtocol.responses = [
             periodURL.path: period ?? .ok("""
                 {"planUsage":{"autoPercentUsed":12,"apiPercentUsed":3},"enabled":true}
@@ -115,7 +135,7 @@ final class CursorUsageServiceTests: XCTestCase {
             grokBotEndpoint: sandURL,
             session: URLSession(configuration: configuration)
         )
-        return await service.fetchUsage(
+        return await service.startFetch(
             credentials: CursorCredentials(accessToken: "test-token", membershipType: "pro"),
             includeGrokBot: includeGrokBot
         )
@@ -126,17 +146,22 @@ private struct CursorStubResponse {
     let status: Int?
     let data: Data
     let error: URLError.Code?
+    let delay: CursorStubDelay?
 
     static func ok(_ json: String) -> CursorStubResponse {
-        CursorStubResponse(status: 200, data: Data(json.utf8), error: nil)
+        CursorStubResponse(status: 200, data: Data(json.utf8), error: nil, delay: nil)
+    }
+
+    static func delayedOK(_ json: String, delay: CursorStubDelay) -> CursorStubResponse {
+        CursorStubResponse(status: 200, data: Data(json.utf8), error: nil, delay: delay)
     }
 
     static func status(_ code: Int) -> CursorStubResponse {
-        CursorStubResponse(status: code, data: Data(), error: nil)
+        CursorStubResponse(status: code, data: Data(), error: nil, delay: nil)
     }
 
     static func failure(_ error: URLError.Code) -> CursorStubResponse {
-        CursorStubResponse(status: nil, data: Data(), error: error)
+        CursorStubResponse(status: nil, data: Data(), error: error, delay: nil)
     }
 }
 
@@ -166,6 +191,14 @@ private final class CursorStubURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(error))
             return
         }
+        if let delay = stub.delay {
+            delay.hold { [self] in finishLoading(url: url, stub: stub) }
+            return
+        }
+        finishLoading(url: url, stub: stub)
+    }
+
+    private func finishLoading(url: URL, stub: CursorStubResponse) {
         guard let status = stub.status,
               let response = HTTPURLResponse(
                 url: url,
@@ -182,6 +215,44 @@ private final class CursorStubURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class CursorStubDelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private let onHold: () -> Void
+    private var completion: (() -> Void)?
+    private var isReleased = false
+
+    init(onHold: @escaping () -> Void) {
+        self.onHold = onHold
+    }
+
+    var isHoldingResponse: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return completion != nil
+    }
+
+    func hold(_ completion: @escaping () -> Void) {
+        lock.lock()
+        if isReleased {
+            lock.unlock()
+            completion()
+            return
+        }
+        self.completion = completion
+        lock.unlock()
+        onHold()
+    }
+
+    func release() {
+        lock.lock()
+        isReleased = true
+        let completion = completion
+        self.completion = nil
+        lock.unlock()
+        completion?()
+    }
 }
 
 private final class CursorStubStore: @unchecked Sendable {

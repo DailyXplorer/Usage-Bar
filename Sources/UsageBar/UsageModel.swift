@@ -356,7 +356,7 @@ final class UsageModel: ObservableObject {
             let includeGrokBot = !cursorGrokBotBackoff.isBlocked
             let cursorFetch = cursorBackoff.isBlocked
                 ? nil
-                : Task { try await cursorService.fetchUsage(includeGrokBot: includeGrokBot) }
+                : Task { try await cursorService.startFetch(includeGrokBot: includeGrokBot) }
             let opencodeFetch = opencodeBackoff.isBlocked
                 ? nil
                 : Task { try await opencodeService.fetchUsage() }
@@ -365,6 +365,8 @@ final class UsageModel: ObservableObject {
                 : Task { try await commandcodeService.fetchUsage() }
 
             var succeeded = false
+            var cursorRequests: CursorUsageRequests?
+            var refreshedCursorUsage: CursorUsageResponse?
 
             do {
                 apply(try await codexFetch.value)
@@ -397,10 +399,12 @@ final class UsageModel: ObservableObject {
 
             if let cursorFetch {
                 do {
-                    let (usageResult, grokBot, credentials) = try await cursorFetch.value
-                    cursorGrokBotBackoff.update(after: grokBot)
+                    let requests = try await cursorFetch.value
+                    cursorRequests = requests
+                    let usageResult = await requests.period.value
                     let usage = try usageResult.get()
-                    applyCursor(usage, grokBot: grokBot, credentials: credentials)
+                    applyCursor(usage, grokBot: .unavailable, credentials: requests.credentials)
+                    refreshedCursorUsage = usage
                     cursorErrorMessage = nil
                     cursorBackoff.reset()
                     succeeded = true
@@ -458,6 +462,18 @@ final class UsageModel: ObservableObject {
                 } catch {
                     commandcodeAvailable = true
                     commandcodeErrorMessage = error.localizedDescription
+                }
+            }
+
+            if let cursorRequests {
+                let grokBot = await cursorRequests.grokBot.value
+                cursorGrokBotBackoff.update(after: grokBot)
+                if let refreshedCursorUsage {
+                    applyCursor(
+                        refreshedCursorUsage,
+                        grokBot: grokBot,
+                        credentials: cursorRequests.credentials
+                    )
                 }
             }
 
