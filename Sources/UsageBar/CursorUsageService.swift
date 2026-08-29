@@ -35,41 +35,104 @@ enum CursorUsageError: LocalizedError {
     }
 }
 
+enum CursorGrokBotFetchResult {
+    case refreshed(CursorSandUsageStatus?)
+    case unavailable
+    case throttled
+}
+
+struct CursorGrokBotBackoff {
+    private var backoff = ThrottleBackoff()
+
+    var isBlocked: Bool {
+        backoff.isBlocked
+    }
+
+    var blockedUntil: Date? {
+        backoff.blockedUntil
+    }
+
+    mutating func update(after result: CursorGrokBotFetchResult, now: Date = Date()) {
+        switch result {
+        case .refreshed:
+            backoff.reset()
+        case .throttled:
+            backoff.recordThrottle(now: now)
+        case .unavailable:
+            break
+        }
+    }
+}
+
 actor CursorUsageService {
-    private static let endpoint = URL(
+    static let defaultEndpoint = URL(
         string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
     )!
-    private static let grokBotEndpoint = URL(
+    static let defaultGrokBotEndpoint = URL(
         string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
     )!
     private static let stateDB = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
 
-    func fetchUsage() async throws -> (
-        usage: CursorUsageResponse,
-        grokBot: CursorSandUsageStatus?,
+    private let endpoint: URL
+    private let grokBotEndpoint: URL
+    private let session: URLSession
+
+    init(
+        endpoint: URL = CursorUsageService.defaultEndpoint,
+        grokBotEndpoint: URL = CursorUsageService.defaultGrokBotEndpoint,
+        session: URLSession = .shared
+    ) {
+        self.endpoint = endpoint
+        self.grokBotEndpoint = grokBotEndpoint
+        self.session = session
+    }
+
+    func fetchUsage(includeGrokBot: Bool = true) async throws -> (
+        usage: Result<CursorUsageResponse, CursorUsageError>,
+        grokBot: CursorGrokBotFetchResult,
         credentials: CursorCredentials
     ) {
         let credentials = try Self.loadCredentials()
-        async let periodData = postDashboard(url: Self.endpoint, token: credentials.accessToken)
-        async let sandData = postDashboardIfOK(url: Self.grokBotEndpoint, token: credentials.accessToken)
+        return await fetchUsage(credentials: credentials, includeGrokBot: includeGrokBot)
+    }
 
-        let usage: CursorUsageResponse
+    func fetchUsage(
+        credentials: CursorCredentials,
+        includeGrokBot: Bool = true
+    ) async -> (
+        usage: Result<CursorUsageResponse, CursorUsageError>,
+        grokBot: CursorGrokBotFetchResult,
+        credentials: CursorCredentials
+    ) {
+        async let usage = fetchPeriod(token: credentials.accessToken)
+        async let grokBot = fetchGrokBot(token: credentials.accessToken, enabled: includeGrokBot)
+        let (usageResult, grokBotResult) = await (usage, grokBot)
+        return (usageResult, grokBotResult, credentials)
+    }
+
+    private func fetchPeriod(token: String) async -> Result<CursorUsageResponse, CursorUsageError> {
         do {
-            usage = try JSONDecoder().decode(CursorUsageResponse.self, from: try await periodData)
+            let data = try await postDashboard(url: endpoint, token: token)
+            return .success(try JSONDecoder().decode(CursorUsageResponse.self, from: data))
         } catch let error as CursorUsageError {
-            throw error
+            return .failure(error)
         } catch {
-            throw CursorUsageError.decoding(error.localizedDescription)
+            return .failure(.decoding(error.localizedDescription))
         }
+    }
 
-        let grokBot: CursorSandUsageStatus?
-        if let sandData = await sandData {
-            grokBot = try? JSONDecoder().decode(CursorSandUsageStatus.self, from: sandData)
-        } else {
-            grokBot = nil
+    private func fetchGrokBot(token: String, enabled: Bool) async -> CursorGrokBotFetchResult {
+        guard enabled else { return .unavailable }
+        do {
+            let data = try await postDashboard(url: grokBotEndpoint, token: token)
+            let status = try JSONDecoder().decode(CursorSandUsageStatus?.self, from: data)
+            return .refreshed(status)
+        } catch CursorUsageError.throttled {
+            return .throttled
+        } catch {
+            return .unavailable
         }
-        return (usage, grokBot, credentials)
     }
 
     private func postDashboard(url: URL, token: String) async throws -> Data {
@@ -86,16 +149,6 @@ actor CursorUsageService {
         return data
     }
 
-    private func postDashboardIfOK(url: URL, token: String) async -> Data? {
-        do {
-            let (data, http) = try await sendDashboard(url: url, token: token)
-            guard http.statusCode == 200 else { return nil }
-            return data
-        } catch {
-            return nil
-        }
-    }
-
     private func sendDashboard(url: URL, token: String) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -107,7 +160,7 @@ actor CursorUsageService {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw CursorUsageError.network(error.localizedDescription)
         }
