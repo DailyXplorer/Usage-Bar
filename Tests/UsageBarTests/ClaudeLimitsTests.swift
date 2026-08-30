@@ -14,7 +14,7 @@ final class ClaudeLimitsTests: XCTestCase {
          "resets_at": "2026-08-10T23:00:00.397687+00:00", "scope": null, "is_active": false},
         {"kind": "weekly_scoped", "group": "weekly", "percent": 100, "severity": "reached",
          "resets_at": "2026-08-10T23:00:00.397941+00:00",
-         "scope": {"model": {"id": null, "display_name": "Opus"}, "surface": null},
+         "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
          "is_active": false}
       ]
     }
@@ -25,20 +25,20 @@ final class ClaudeLimitsTests: XCTestCase {
     }
 
     func testLabelsDropWindowPrefixes() {
-        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.sessionKind, scopeModel: nil), "Current session")
-        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyAllKind, scopeModel: nil), "All models")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.sessionKind, scopeModel: nil), "Current Session")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyAllKind, scopeModel: nil), "All Models")
         XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: "Fable"), "Fable")
         XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: "Opus"), "Opus")
-        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: nil), "Pinned model")
-        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: ""), "Pinned model")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: nil), "Pinned Model")
+        XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyScopedKind, scopeModel: ""), "Pinned Model")
     }
 
     func testRelabeledRewritesCachedWindowPrefixes() {
-        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .session, name: "Session 5h")).name, "Current session")
-        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyAll, name: "Week · All models")).name, "All models")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .session, name: "Session 5h")).name, "Current Session")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyAll, name: "Week · All models")).name, "All Models")
         XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · Fable")).name, "Fable")
         XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · Opus")).name, "Opus")
-        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · pinned model")).name, "Pinned model")
+        XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Week · pinned model")).name, "Pinned Model")
         XCTAssertEqual(ClaudeLimits.relabeled(cachedClaude(kind: .weeklyScoped, name: "Fable")).name, "Fable")
     }
 
@@ -88,9 +88,9 @@ final class ClaudeLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
         XCTAssertEqual(buckets.map(\.displayName), [
-            "Current session",
-            "All models",
-            "Opus",
+            "Current Session",
+            "All Models",
+            "Fable",
         ])
         XCTAssertEqual(buckets.map(\.remainingPercent), [88, 60, 0])
         XCTAssertTrue(buckets.allSatisfy { $0.provider == .claude })
@@ -183,7 +183,7 @@ final class ClaudeLimitsTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .weeklyAll,
-                    name: "All models",
+                    name: "All Models",
                     usedPercent: 40,
                     resetAt: nil,
                     resetAfterSeconds: nil,

@@ -30,7 +30,9 @@ final class OpenCodeLimitsTests: XCTestCase {
             OpenCodeLimits.weeklyDisplayName,
             OpenCodeLimits.monthlyDisplayName,
         ])
-        XCTAssertEqual(OpenCodeLimits.rollingDisplayName, "Current session")
+        XCTAssertEqual(OpenCodeLimits.rollingDisplayName, "Current Session")
+        XCTAssertEqual(OpenCodeLimits.weeklyDisplayName, "Weekly Limit")
+        XCTAssertEqual(OpenCodeLimits.monthlyDisplayName, "Monthly Limit")
         XCTAssertEqual(buckets.map(\.usedPercent), [4, 3, 1])
         XCTAssertEqual(buckets.map(\.remainingPercent), [96, 97, 99])
         XCTAssertEqual(buckets.map(\.limitWindowSeconds), [

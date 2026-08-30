@@ -34,8 +34,18 @@ final class ModelsTests: XCTestCase {
     }
 
     func testKnownWindowLabels() {
-        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 5 * 60 * 60, isSecondary: false), "5h")
-        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 7 * 24 * 60 * 60, isSecondary: false), "weekly")
+        XCTAssertEqual(
+            WindowLabels.label(forWindowSeconds: 5 * 60 * 60, isSecondary: false),
+            "Current Session"
+        )
+        XCTAssertEqual(
+            WindowLabels.label(forWindowSeconds: 7 * 24 * 60 * 60, isSecondary: false),
+            "Weekly Limit"
+        )
+        XCTAssertEqual(
+            WindowLabels.label(forWindowSeconds: 30 * 24 * 60 * 60, isSecondary: false),
+            "Monthly Limit"
+        )
     }
 
     func testLongDurationUsesDays() async {
