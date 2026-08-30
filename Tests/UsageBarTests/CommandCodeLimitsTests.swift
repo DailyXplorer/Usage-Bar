@@ -513,8 +513,8 @@ final class CommandCodeLimitsTests: XCTestCase {
 
         XCTAssertNil(model.commandcodeRolling)
         XCTAssertNil(model.menuBarCommandCodeText)
-        XCTAssertEqual(model.menuBarCommandCodeDisplay, "–")
-        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "–"])
+        XCTAssertEqual(model.menuBarCommandCodeDisplay, MenuBarSegment.placeholder)
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", MenuBarSegment.placeholder])
         XCTAssertTrue(model.showsCommandCode)
     }
 

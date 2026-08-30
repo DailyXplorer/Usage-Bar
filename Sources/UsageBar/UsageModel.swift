@@ -170,7 +170,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarClaudeDisplay: String {
-        menuBarClaudeText ?? "–"
+        menuBarClaudeText ?? MenuBarSegment.placeholder
     }
 
     var menuBarClaudeAccessibilityText: String? {
@@ -188,7 +188,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarCursorDisplay: String {
-        menuBarCursorText ?? "–"
+        menuBarCursorText ?? MenuBarSegment.placeholder
     }
 
     var menuBarCursorAccessibilityText: String? {
@@ -206,7 +206,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarOpenCodeDisplay: String {
-        menuBarOpenCodeText ?? "–"
+        menuBarOpenCodeText ?? MenuBarSegment.placeholder
     }
 
     var menuBarOpenCodeAccessibilityText: String? {
@@ -228,7 +228,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarCommandCodeDisplay: String {
-        menuBarCommandCodeText ?? "–"
+        menuBarCommandCodeText ?? MenuBarSegment.placeholder
     }
 
     var menuBarCommandCodeAccessibilityText: String? {
@@ -310,12 +310,12 @@ final class UsageModel: ObservableObject {
 
     var menuBarText: String {
         if isLoading && buckets.isEmpty {
-            return "--%"
+            return MenuBarSegment.placeholder
         }
         if errorMessage != nil && buckets.isEmpty {
             return "!%"
         }
-        guard let bucket = codexMenuBarBucket else { return "--%" }
+        guard let bucket = codexMenuBarBucket else { return MenuBarSegment.placeholder }
         return "\(bucket.remainingPercent)%"
     }
 

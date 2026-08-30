@@ -36,8 +36,8 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
     func testMenuBarLabelWidthStaysStableWhenPercentagesLoad() {
         AppTheme.loadFont()
         let loading = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "--%"),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "–"),
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: MenuBarSegment.placeholder),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: MenuBarSegment.placeholder),
         ])
         let loaded = MenuBarLabelImage.make(segments: [
             MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "22%"),
@@ -51,6 +51,51 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         XCTAssertEqual(loading.size.width, loaded.size.width, accuracy: 0.5)
         XCTAssertEqual(loaded.size.width, maximum.size.width, accuracy: 0.5)
         XCTAssertTrue(loaded.isTemplate)
+    }
+
+    @MainActor
+    func testMenuBarPlaceholderDoesNotLeaveAWideGap() {
+        AppTheme.loadFont()
+        let dash = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "–")
+        ])
+        let placeholder = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.placeholder)
+        ])
+        let maximum = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.reservedValue)
+        ])
+
+        XCTAssertEqual(placeholder.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertLessThan(trailingClearPoints(in: placeholder), 10)
+        XCTAssertLessThan(trailingClearPoints(in: maximum), 10)
+        XCTAssertGreaterThan(trailingClearPoints(in: dash), 20)
+
+        let withPlaceholder = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.placeholder),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
+        ])
+        let withDash = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "–"),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
+        ])
+        let withMaximum = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.reservedValue),
+            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
+        ])
+        XCTAssertEqual(withPlaceholder.size.width, withMaximum.size.width, accuracy: 0.5)
+        XCTAssertEqual(
+            largestClearRunPoints(in: withPlaceholder),
+            largestClearRunPoints(in: withMaximum),
+            accuracy: 8
+        )
+        XCTAssertGreaterThan(
+            largestClearRunPoints(in: withDash) - largestClearRunPoints(in: withPlaceholder),
+            8
+        )
     }
 
     func testMenuBarSegmentIdentityIncludesProvider() {
@@ -69,8 +114,8 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         )
 
         XCTAssertNil(model.menuBarClaudeText)
-        XCTAssertEqual(model.menuBarClaudeDisplay, "–")
-        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "–"])
+        XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", MenuBarSegment.placeholder])
     }
 
     @MainActor
@@ -170,5 +215,52 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         let representation = try XCTUnwrap(NSBitmapImageRep(data: tiff))
         let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try png.write(to: url, options: .atomic)
+    }
+
+    private func trailingClearPoints(in image: NSImage) -> CGFloat {
+        let columns = inkColumns(in: image)
+        guard let lastInk = columns.lastIndex(of: true) else {
+            return image.size.width
+        }
+        let clearPixels = columns.count - lastInk - 1
+        return points(clearPixels, in: image, pixelCount: columns.count)
+    }
+
+    private func largestClearRunPoints(in image: NSImage) -> CGFloat {
+        let columns = inkColumns(in: image)
+        var largest = 0
+        var index = 0
+        while index < columns.count {
+            if columns[index] {
+                index += 1
+                continue
+            }
+            let start = index
+            index += 1
+            while index < columns.count, !columns[index] {
+                index += 1
+            }
+            largest = max(largest, index - start)
+        }
+        return points(largest, in: image, pixelCount: columns.count)
+    }
+
+    private func inkColumns(in image: NSImage) -> [Bool] {
+        guard let tiff = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiff) else {
+            return []
+        }
+        let width = representation.pixelsWide
+        let height = representation.pixelsHigh
+        return (0..<width).map { x in
+            (0..<height).contains { y in
+                (representation.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.08
+            }
+        }
+    }
+
+    private func points(_ pixels: Int, in image: NSImage, pixelCount: Int) -> CGFloat {
+        guard pixelCount > 0 else { return 0 }
+        return CGFloat(pixels) * image.size.width / CGFloat(pixelCount)
     }
 }

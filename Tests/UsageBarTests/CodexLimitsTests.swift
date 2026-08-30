@@ -215,7 +215,7 @@ final class CodexLimitsTests: XCTestCase {
             lastUpdated: now
         )
 
-        XCTAssertEqual(model.menuBarText, "--%")
+        XCTAssertEqual(model.menuBarText, MenuBarSegment.placeholder)
         XCTAssertEqual(model.menuBarAccessibilityText, "not loaded")
     }
 
