@@ -3,7 +3,6 @@ import SwiftUI
 
 struct MenuBarSegment {
     static let placeholder = "--%"
-    static let reservedValue = "100%"
 
     let provider: LimitBucket.Provider
     let logo: NSImage?
@@ -60,13 +59,9 @@ enum MenuBarLabelImage {
     }
 
     private static func value(_ text: String) -> some View {
-        ZStack(alignment: .leading) {
-            Text(MenuBarSegment.reservedValue)
-                .hidden()
-            Text(text)
-        }
-        .font(AppTheme.font(size: fontSize, weight: .semibold))
-        .monospacedDigit()
-        .fixedSize(horizontal: true, vertical: true)
+        Text(text)
+            .font(AppTheme.font(size: fontSize, weight: .semibold))
+            .monospacedDigit()
+            .fixedSize(horizontal: true, vertical: true)
     }
 }
