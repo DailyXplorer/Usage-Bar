@@ -89,9 +89,9 @@ swift test                                 # unit tests
 swift build && ./.build/debug/UsageBar     # debug binary, not the .app
 ```
 
-Agents and maintainers: naming for branches, commits, and PRs is in
-[CONVENTIONS.md](CONVENTIONS.md). Workflow, tests, and cutting a GitHub
-release are in [AGENTS.md](AGENTS.md).
+Contributors: start with [CONTRIBUTING.md](CONTRIBUTING.md). Naming for
+branches, commits, and pull requests is in [CONVENTIONS.md](CONVENTIONS.md).
+Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 
 ## How it works
 

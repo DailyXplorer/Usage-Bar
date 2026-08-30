@@ -3,9 +3,10 @@
 Instructions for coding agents working on **Usage Bar**
 (`https://github.com/DailyXplorer/Usage-Bar`).
 
-Humans install the app from [README.md](README.md). This file is how you change
-the code, open a pull request, and ship a GitHub release that existing installs
-can update.
+Humans install the app from [README.md](README.md) and contribute through
+[CONTRIBUTING.md](CONTRIBUTING.md). This file tells coding agents how to change
+the code, open a pull request, and ship a release that existing installs can
+update to.
 
 ## What this repo is
 
@@ -130,6 +131,7 @@ broken. If you must, generate both files together and keep the exact
 
 | Path | Role |
 | --- | --- |
+| `CONTRIBUTING.md` | Human setup, validation, and pull request workflow |
 | `CONVENTIONS.md` | Branch, commit, PR, file, and Swift naming |
 | `Sources/UsageBar/` | App sources |
 | `Support/Info.plist` | Bundle id `com.usagebar.app`; default version `1.0` |
