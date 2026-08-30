@@ -4,29 +4,16 @@ import SwiftUI
 @main
 struct UsageBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var usageModel = UsageModel()
-    @StateObject private var appUpdater = AppUpdater()
 
     init() {
         AppTheme.loadFont()
     }
 
     var body: some Scene {
-        MenuBarExtra {
-            UsageMenuView()
-                .environmentObject(usageModel)
-                .environmentObject(appUpdater)
-        } label: {
-            MenuBarLabel(model: usageModel) {
-                appUpdater.startAutomaticChecks()
-            }
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             SettingsView()
-                .environmentObject(usageModel)
-                .environmentObject(appUpdater)
+                .environmentObject(appDelegate.usageModel)
+                .environmentObject(appDelegate.appUpdater)
                 .onDisappear {
                     NSApp.setActivationPolicy(.accessory)
                 }
@@ -36,8 +23,16 @@ struct UsageBarApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let usageModel = UsageModel()
+    let appUpdater = AppUpdater()
+
+    private var menuBarController: MenuBarController?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        menuBarController = MenuBarController(model: usageModel, updater: appUpdater)
+        usageModel.start()
+        appUpdater.startAutomaticChecks()
         DispatchQueue.global(qos: .utility).async {
             let completed = SMAppServiceLaunchAtLogin.pendingEnableCompleted()
             guard completed else { return }
@@ -51,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWindow.willCloseNotification,
             object: nil
         )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        menuBarController?.stop()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -73,22 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !hasSettingsWindow {
             NSApp.setActivationPolicy(.accessory)
-        }
-    }
-}
-
-struct MenuBarLabel: View {
-    @ObservedObject var model: UsageModel
-    var startAutomaticChecks: () -> Void = {}
-
-    var body: some View {
-        Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
-        .id(model.menuBarSegments.map(\.identity).joined(separator: "|"))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(model.menuBarAccessibilityLabel)
-        .onAppear {
-            model.start()
-            startAutomaticChecks()
         }
     }
 }

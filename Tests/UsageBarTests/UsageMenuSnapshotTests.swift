@@ -206,6 +206,42 @@ final class UsageMenuSnapshotTests: XCTestCase {
         XCTAssertLessThan(image.size.height, 520)
     }
 
+    @MainActor
+    func testConstrainedBoundaryMenuUsesScrollView() throws {
+        AppTheme.loadFont()
+        let model = UsageModel(
+            previewBuckets: [
+                bucket(kind: .primary, name: "Current Session"),
+                bucket(kind: .secondary, name: "Weekly Limit"),
+                bucket(kind: .spark, name: CodexLimits.sparkDisplayName),
+                bucket(kind: .lunaReserve, name: CodexLimits.lunaReserveDisplayName),
+            ],
+            planType: "prolite",
+            lastUpdated: Date(),
+            cursorBuckets: [
+                bucket(provider: .cursor, kind: .cursorModels, name: "Cursor Models"),
+                bucket(provider: .cursor, kind: .otherModels, name: "Other Models"),
+                bucket(provider: .cursor, kind: .grokBot, name: CursorLimits.grokBotDisplayName),
+            ],
+            cursorPlan: "pro",
+            menuBarProviders: [.codex, .cursor]
+        )
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let content = UsageMenuView()
+            .environmentObject(model)
+            .environmentObject(stubUpdater(defaults: defaults))
+            .environment(\.colorScheme, .light)
+            .frame(width: UsageMenuView.width, height: 360)
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.frame = NSRect(x: 0, y: 0, width: UsageMenuView.width, height: 360)
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(containsScrollView(in: hostingView))
+    }
+
     private func bucket(
         provider: LimitBucket.Provider = .codex,
         kind: LimitBucket.Kind,
@@ -234,6 +270,10 @@ final class UsageMenuSnapshotTests: XCTestCase {
         hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         let pngData = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try pngData.write(to: url, options: .atomic)
+    }
+
+    private func containsScrollView(in view: NSView) -> Bool {
+        view is NSScrollView || view.subviews.contains(where: containsScrollView)
     }
 }
 

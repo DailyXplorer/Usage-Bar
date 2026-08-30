@@ -27,48 +27,46 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         XCTAssertNotEqual(label.tiffRepresentation, other.tiffRepresentation)
 
         try render(
-            MenuBarLabel(model: model),
+            Image(nsImage: label)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(model.menuBarAccessibilityLabel),
             to: buildDirectory.appendingPathComponent("UsageBar-menubar.png")
         )
     }
 
     @MainActor
-    func testMenuBarLabelKeepsMaximumFrameWhileContentFollowsDigitCount() {
+    func testMenuBarLabelWidthFollowsDigitCount() {
         AppTheme.loadFont()
         let oneDigit = labelImage(values: ["8%", "8%"])
         let twoDigit = labelImage(values: ["81%", "86%"])
         let threeDigit = labelImage(values: ["100%", "100%"])
 
-        XCTAssertEqual(oneDigit.size.width, threeDigit.size.width, accuracy: 0.5)
-        XCTAssertEqual(twoDigit.size.width, threeDigit.size.width, accuracy: 0.5)
-        XCTAssertGreaterThan(trailingClearPoints(in: oneDigit), trailingClearPoints(in: twoDigit))
-        XCTAssertGreaterThan(trailingClearPoints(in: twoDigit), trailingClearPoints(in: threeDigit))
+        XCTAssertLessThan(oneDigit.size.width, twoDigit.size.width)
+        XCTAssertLessThan(twoDigit.size.width, threeDigit.size.width)
+        for image in [oneDigit, twoDigit, threeDigit] {
+            XCTAssertLessThanOrEqual(trailingClearPoints(in: image), 2)
+        }
         XCTAssertTrue(twoDigit.isTemplate)
     }
 
     @MainActor
-    func testMenuBarLabelKeepsEvenGapsWhenPercentagesShrink() {
+    func testMenuBarLabelKeepsEvenGapsAsPercentagesChange() {
         AppTheme.loadFont()
         let compact = labelImage(values: ["8%", "8%", "8%", "8%"])
         let maximum = labelImage(values: ["100%", "100%", "100%", "100%"])
-        let singleCompact = labelImage(values: ["8%"])
-        let singleMaximum = labelImage(values: ["100%"])
 
-        XCTAssertEqual(compact.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertLessThan(compact.size.width, maximum.size.width)
         XCTAssertEqual(
             largestInternalClearRunPoints(in: compact),
             largestInternalClearRunPoints(in: maximum),
             accuracy: 2
         )
-        XCTAssertEqual(
-            trailingClearPoints(in: compact) - trailingClearPoints(in: maximum),
-            4 * (trailingClearPoints(in: singleCompact) - trailingClearPoints(in: singleMaximum)),
-            accuracy: 2
-        )
+        XCTAssertLessThanOrEqual(trailingClearPoints(in: compact), 2)
+        XCTAssertLessThanOrEqual(trailingClearPoints(in: maximum), 2)
     }
 
     @MainActor
-    func testMenuBarPlaceholderHugsLikeTwoDigits() {
+    func testMenuBarPlaceholderHasCompactFrame() {
         AppTheme.loadFont()
         let placeholder = MenuBarLabelImage.make(segments: [
             MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.placeholder)
@@ -80,14 +78,11 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
             MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "100%")
         ])
 
-        XCTAssertEqual(placeholder.size.width, maximum.size.width, accuracy: 0.5)
-        XCTAssertEqual(twoDigit.size.width, maximum.size.width, accuracy: 0.5)
-        XCTAssertEqual(
-            trailingClearPoints(in: placeholder),
-            trailingClearPoints(in: twoDigit),
-            accuracy: 2
-        )
-        XCTAssertGreaterThan(trailingClearPoints(in: placeholder), trailingClearPoints(in: maximum))
+        XCTAssertLessThan(placeholder.size.width, maximum.size.width)
+        XCTAssertLessThan(twoDigit.size.width, maximum.size.width)
+        for image in [placeholder, twoDigit, maximum] {
+            XCTAssertLessThanOrEqual(trailingClearPoints(in: image), 2)
+        }
     }
 
     func testMenuBarSegmentIdentityIncludesProvider() {

@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 
 struct UsageMenuView: View {
+    static let width: CGFloat = 304
+
+    var onBeforeOpenSettings: () -> Void = {}
+
     @EnvironmentObject private var model: UsageModel
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
@@ -15,21 +19,14 @@ struct UsageMenuView: View {
 
             footer
         }
-        .frame(width: 304)
+        .frame(width: Self.width)
         .background(
             AppTheme.menuBackground(
                 colorScheme: colorScheme,
                 contrast: colorSchemeContrast
             )
         )
-        .background(
-            MenuWindowEdgeInset(onShown: updater.checkWhenMenuAppears)
-        )
         .environment(\.font, AppTheme.font(size: 13))
-        .onAppear {
-            model.refreshNow()
-            updater.checkWhenMenuAppears()
-        }
     }
 
     private var header: some View {
@@ -70,39 +67,18 @@ struct UsageMenuView: View {
             ErrorView(message: model.visibleEmptyStateMessage) {
                 model.refreshNow(force: true)
             }
-        } else if contentNeedsScrolling {
-            ScrollView(.vertical) {
-                providerContent
-            }
-            .frame(height: 434)
-            .scrollIndicators(.visible)
         } else {
-            providerContent
+            ViewThatFits(in: .vertical) {
+                providerContent
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ScrollView(.vertical) {
+                    providerContent
+                }
+                .scrollIndicators(.visible)
+            }
+            .frame(maxHeight: 434)
         }
-    }
-
-    private var contentNeedsScrolling: Bool {
-        visibleBucketCount + visibleProviderCount >= 10
-    }
-
-    private var visibleBucketCount: Int {
-        var count = 0
-        if model.isVisibleInMenuBar(.codex) { count += model.buckets.count }
-        if model.isVisibleInMenuBar(.claude) { count += model.claudeBuckets.count }
-        if model.isVisibleInMenuBar(.cursor) { count += model.cursorBuckets.count }
-        if model.showsOpenCode { count += model.opencodeBuckets.count }
-        if model.showsCommandCode { count += model.commandcodeBuckets.count }
-        return count
-    }
-
-    private var visibleProviderCount: Int {
-        var count = 0
-        if model.isVisibleInMenuBar(.codex) { count += 1 }
-        if model.isVisibleInMenuBar(.claude) { count += 1 }
-        if model.isVisibleInMenuBar(.cursor) { count += 1 }
-        if model.showsOpenCode { count += 1 }
-        if model.showsCommandCode { count += 1 }
-        return count
     }
 
     private var providerContent: some View {
@@ -183,7 +159,7 @@ struct UsageMenuView: View {
                     .disabled(updater.isBusy)
                 }
 
-                SettingsFooterButton()
+                SettingsFooterButton(onBeforeOpen: onBeforeOpenSettings)
 
                 FooterIconButton(systemImage: "power", accessibilityLabel: "Quit") {
                     NSApp.terminate(nil)
@@ -423,10 +399,13 @@ private struct InlineWarning: View {
 }
 
 private struct SettingsFooterButton: View {
+    let onBeforeOpen: () -> Void
+
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         FooterIconButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
+            onBeforeOpen()
             SettingsWindowPresenter.present {
                 openSettings()
             }
