@@ -82,7 +82,7 @@ struct UsageMenuView: View {
     }
 
     private var contentNeedsScrolling: Bool {
-        visibleBucketCount + visibleProviderCount > 10
+        visibleBucketCount + visibleProviderCount >= 10
     }
 
     private var visibleBucketCount: Int {
