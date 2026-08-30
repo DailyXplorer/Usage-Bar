@@ -1,4 +1,4 @@
-# UsageBar
+# Usage  Bar
 
 Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
 **Claude Code** (Anthropic plan), **Cursor**, **OpenCode** and **Command Code**
