@@ -82,13 +82,25 @@ struct MenuBarLabel: View {
     var startAutomaticChecks: () -> Void = {}
 
     var body: some View {
-        Image(nsImage: MenuBarLabelImage.make(segments: model.menuBarSegments))
-        .id(model.menuBarSegments.map(\.identity).joined(separator: "|"))
+        let image = MenuBarLabelImage.make(segments: model.menuBarSegments)
+        let identity = model.menuBarSegments.map(\.identity).joined(separator: "|")
+        Image(nsImage: image)
+        .id(identity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.menuBarAccessibilityLabel)
         .onAppear {
             model.start()
             startAutomaticChecks()
+            let width = image.size.width
+            DispatchQueue.main.async {
+                MenuBarStatusItem.syncLength(to: width)
+            }
+        }
+        .onChange(of: identity) { _, _ in
+            let width = MenuBarLabelImage.make(segments: model.menuBarSegments).size.width
+            DispatchQueue.main.async {
+                MenuBarStatusItem.syncLength(to: width)
+            }
         }
     }
 }
