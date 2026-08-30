@@ -105,7 +105,11 @@ release are in [AGENTS.md](AGENTS.md).
   backend returns, same heuristic as the CLI) and the secondary window when
   present. When ChatGPT returns a Spark extra limit, the popover adds a
   **Spark** bar after those windows. Spark stays out of the menu bar, and the
-  bar is hidden when the response has no matching Spark entry.
+  bar is hidden when the response has no matching Spark entry. Selected Plus
+  and Pro accounts may also receive **Luna Reserve**, a separate GPT-5.6 Luna
+  allowance available after regular usage is exhausted. Usage Bar adds its
+  bar only when ChatGPT returns that allowance, and keeps it out of the menu
+  bar percentage.
 
 ### Claude Code
 

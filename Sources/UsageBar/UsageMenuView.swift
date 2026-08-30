@@ -70,56 +70,91 @@ struct UsageMenuView: View {
             ErrorView(message: model.visibleEmptyStateMessage) {
                 model.refreshNow(force: true)
             }
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                if model.isVisibleInMenuBar(.codex) {
-                    ProviderSection(
-                        provider: .codex,
-                        plan: model.planType,
-                        buckets: model.buckets,
-                        message: model.sectionMessage(for: .codex)
-                    )
-                }
-
-                if model.isVisibleInMenuBar(.claude) {
-                    ProviderSection(
-                        provider: .claude,
-                        plan: model.claudePlan,
-                        buckets: model.claudeBuckets,
-                        message: model.sectionMessage(for: .claude)
-                    )
-                }
-
-                if model.isVisibleInMenuBar(.cursor) {
-                    ProviderSection(
-                        provider: .cursor,
-                        plan: model.cursorPlan,
-                        buckets: model.cursorBuckets,
-                        message: model.sectionMessage(for: .cursor)
-                    )
-                }
-
-                if model.showsOpenCode {
-                    ProviderSection(
-                        provider: .opencode,
-                        plan: model.opencodePlan,
-                        buckets: model.opencodeBuckets,
-                        message: model.sectionMessage(for: .opencode)
-                    )
-                }
-
-                if model.showsCommandCode {
-                    ProviderSection(
-                        provider: .commandcode,
-                        plan: model.commandcodePlan,
-                        buckets: model.commandcodeBuckets,
-                        message: model.sectionMessage(for: .commandcode)
-                    )
-                }
+        } else if contentNeedsScrolling {
+            ScrollView(.vertical) {
+                providerContent
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .frame(height: 434)
+            .scrollIndicators(.visible)
+        } else {
+            providerContent
         }
+    }
+
+    private var contentNeedsScrolling: Bool {
+        visibleBucketCount + visibleProviderCount >= 10
+    }
+
+    private var visibleBucketCount: Int {
+        var count = 0
+        if model.isVisibleInMenuBar(.codex) { count += model.buckets.count }
+        if model.isVisibleInMenuBar(.claude) { count += model.claudeBuckets.count }
+        if model.isVisibleInMenuBar(.cursor) { count += model.cursorBuckets.count }
+        if model.showsOpenCode { count += model.opencodeBuckets.count }
+        if model.showsCommandCode { count += model.commandcodeBuckets.count }
+        return count
+    }
+
+    private var visibleProviderCount: Int {
+        var count = 0
+        if model.isVisibleInMenuBar(.codex) { count += 1 }
+        if model.isVisibleInMenuBar(.claude) { count += 1 }
+        if model.isVisibleInMenuBar(.cursor) { count += 1 }
+        if model.showsOpenCode { count += 1 }
+        if model.showsCommandCode { count += 1 }
+        return count
+    }
+
+    private var providerContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.isVisibleInMenuBar(.codex) {
+                ProviderSection(
+                    provider: .codex,
+                    plan: model.planType,
+                    buckets: model.buckets,
+                    message: model.sectionMessage(for: .codex)
+                )
+            }
+
+            if model.isVisibleInMenuBar(.claude) {
+                ProviderSection(
+                    provider: .claude,
+                    plan: model.claudePlan,
+                    buckets: model.claudeBuckets,
+                    message: model.sectionMessage(for: .claude)
+                )
+            }
+
+            if model.isVisibleInMenuBar(.cursor) {
+                ProviderSection(
+                    provider: .cursor,
+                    plan: model.cursorPlan,
+                    buckets: model.cursorBuckets,
+                    message: model.sectionMessage(for: .cursor)
+                )
+            }
+
+            if model.showsOpenCode {
+                ProviderSection(
+                    provider: .opencode,
+                    plan: model.opencodePlan,
+                    buckets: model.opencodeBuckets,
+                    message: model.sectionMessage(for: .opencode)
+                )
+            }
+
+            if model.showsCommandCode {
+                ProviderSection(
+                    provider: .commandcode,
+                    plan: model.commandcodePlan,
+                    buckets: model.commandcodeBuckets,
+                    message: model.sectionMessage(for: .commandcode)
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var footer: some View {

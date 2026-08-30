@@ -315,12 +315,12 @@ final class UsageModel: ObservableObject {
         if errorMessage != nil && buckets.isEmpty {
             return "!%"
         }
-        guard let bucket = buckets.first else { return "--%" }
+        guard let bucket = codexMenuBarBucket else { return "--%" }
         return "\(bucket.remainingPercent)%"
     }
 
     var menuBarAccessibilityText: String {
-        guard let bucket = buckets.first else {
+        guard let bucket = codexMenuBarBucket else {
             if isLoading { return "loading" }
             if errorMessage != nil { return "unavailable" }
             return "not loaded"
@@ -329,8 +329,13 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarColor: Color {
-        guard let bucket = buckets.first else { return .primary }
+        guard let bucket = codexMenuBarBucket else { return .primary }
         return Self.color(forPercentUsed: bucket.usedPercent)
+    }
+
+    private var codexMenuBarBucket: LimitBucket? {
+        buckets.first { $0.kind == .primary }
+            ?? buckets.first { $0.kind == .secondary }
     }
 
     static func color(forPercentUsed used: Int) -> Color {
@@ -344,7 +349,7 @@ final class UsageModel: ObservableObject {
     }
 
     var primaryLimitReached: Bool {
-        buckets.first?.reached ?? false
+        codexMenuBarBucket?.reached ?? false
     }
 
     func start() {
