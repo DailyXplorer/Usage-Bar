@@ -84,7 +84,7 @@ struct LimitBucket: Identifiable, Codable {
     }
 
     enum Kind: String, Codable {
-        case primary, secondary, spark
+        case primary, secondary, spark, lunaReserve
         case session, weeklyAll, weeklyScoped
         case cursorModels, otherModels, grokBot
         case rolling, weekly, monthly
@@ -221,6 +221,8 @@ enum WindowLabels {
 enum CodexLimits {
     static let sparkMeteredFeature = "codex_bengalfox"
     static let sparkDisplayName = "Spark"
+    static let lunaReserveLimitName = "gpt-reserve"
+    static let lunaReserveDisplayName = "Luna Reserve"
 
     static func buckets(from usage: UsageResponse, now: Date = Date()) -> [LimitBucket] {
         var result: [LimitBucket] = []
@@ -252,6 +254,15 @@ enum CodexLimits {
                 now: now
             ))
         }
+        if let reserve = lunaReserveWindow(from: usage) {
+            result.append(makeBucket(
+                kind: .lunaReserve,
+                name: lunaReserveDisplayName,
+                window: reserve.window,
+                reached: reserve.reached,
+                now: now
+            ))
+        }
         return result
     }
 
@@ -267,6 +278,18 @@ enum CodexLimits {
         if item.meteredFeature == sparkMeteredFeature { return true }
         guard let name = item.limitName else { return false }
         return name.range(of: "spark", options: .caseInsensitive) != nil
+    }
+
+    private static func lunaReserveWindow(
+        from usage: UsageResponse
+    ) -> (window: RateLimitWindow, reached: Bool)? {
+        guard let match = usage.additionalRateLimits?.first(where: isLunaReserve) else { return nil }
+        guard let window = match.rateLimit?.primaryWindow else { return nil }
+        return (window, match.rateLimit?.limitReached ?? false)
+    }
+
+    private static func isLunaReserve(_ item: AdditionalRateLimit) -> Bool {
+        item.limitName == lunaReserveLimitName
     }
 
     static func relabeled(_ bucket: LimitBucket) -> LimitBucket {

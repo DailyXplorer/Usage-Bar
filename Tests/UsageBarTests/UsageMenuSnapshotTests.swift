@@ -17,6 +17,15 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     resetAfterSeconds: 231_321,
                     limitWindowSeconds: 604_800,
                     reached: false
+                ),
+                LimitBucket(
+                    kind: .lunaReserve,
+                    name: CodexLimits.lunaReserveDisplayName,
+                    usedPercent: 0,
+                    resetAt: Date(timeIntervalSince1970: 1_786_402_800),
+                    resetAfterSeconds: 177_600,
+                    limitWindowSeconds: 604_800,
+                    reached: false
                 )
             ],
             planType: "prolite",
@@ -121,13 +130,108 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    private func render<Content: View>(_ content: Content, to url: URL) throws {
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 2
+    func testShortMenuKeepsItsIntrinsicHeight() throws {
+        AppTheme.loadFont()
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "Weekly Limit",
+                    usedPercent: 42,
+                    resetAt: Date(timeIntervalSince1970: 1_786_189_759),
+                    resetAfterSeconds: 231_321,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "prolite",
+            lastUpdated: Date(),
+            menuBarProviders: [.codex]
+        )
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/UsageBar-short.png")
 
-        let image = try XCTUnwrap(renderer.nsImage)
-        let tiffData = try XCTUnwrap(image.tiffRepresentation)
-        let representation = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        try render(
+            UsageMenuView()
+                .environmentObject(model)
+                .environmentObject(stubUpdater(defaults: defaults))
+                .environment(\.colorScheme, .light),
+            to: url
+        )
+
+        let image = try XCTUnwrap(NSImage(contentsOf: url))
+        XCTAssertLessThan(image.size.height, 250)
+    }
+
+    @MainActor
+    func testBoundaryMenuStaysBelowHeightLimit() throws {
+        AppTheme.loadFont()
+        let model = UsageModel(
+            previewBuckets: [
+                bucket(kind: .primary, name: "Current Session"),
+                bucket(kind: .secondary, name: "Weekly Limit"),
+                bucket(kind: .spark, name: CodexLimits.sparkDisplayName),
+                bucket(kind: .lunaReserve, name: CodexLimits.lunaReserveDisplayName),
+            ],
+            planType: "prolite",
+            lastUpdated: Date(),
+            cursorBuckets: [
+                bucket(provider: .cursor, kind: .cursorModels, name: "Cursor Models"),
+                bucket(provider: .cursor, kind: .otherModels, name: "Other Models"),
+                bucket(provider: .cursor, kind: .grokBot, name: CursorLimits.grokBotDisplayName),
+            ],
+            cursorPlan: "pro",
+            menuBarProviders: [.codex, .claude, .cursor]
+        )
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/UsageBar-boundary.png")
+
+        try render(
+            UsageMenuView()
+                .environmentObject(model)
+                .environmentObject(stubUpdater(defaults: defaults))
+                .environment(\.colorScheme, .light),
+            to: url
+        )
+
+        let image = try XCTUnwrap(NSImage(contentsOf: url))
+        XCTAssertLessThan(image.size.height, 520)
+    }
+
+    private func bucket(
+        provider: LimitBucket.Provider = .codex,
+        kind: LimitBucket.Kind,
+        name: String
+    ) -> LimitBucket {
+        LimitBucket(
+            provider: provider,
+            kind: kind,
+            name: name,
+            usedPercent: 0,
+            resetAt: Date(timeIntervalSince1970: 1_786_402_800),
+            resetAfterSeconds: 177_600,
+            limitWindowSeconds: 604_800,
+            reached: false
+        )
+    }
+
+    @MainActor
+    private func render<Content: View>(_ content: Content, to url: URL) throws {
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.frame = NSRect(origin: .zero, size: hostingView.fittingSize)
+        hostingView.layoutSubtreeIfNeeded()
+        let representation = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
+        )
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         let pngData = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
         try pngData.write(to: url, options: .atomic)
     }

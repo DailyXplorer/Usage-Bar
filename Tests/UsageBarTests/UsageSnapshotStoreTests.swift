@@ -20,6 +20,18 @@ final class UsageSnapshotStoreTests: XCTestCase {
         defaults.removePersistentDomain(forName: #function)
 
         let snapshot = UsageSnapshot(
+            codexBuckets: [
+                LimitBucket(
+                    kind: .lunaReserve,
+                    name: CodexLimits.lunaReserveDisplayName,
+                    usedPercent: 0,
+                    resetAt: Date(timeIntervalSince1970: 1_786_402_800),
+                    resetAfterSeconds: 600,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            codexPlan: "prolite",
             claudeBuckets: [bucket(resetAt: Date(timeIntervalSince1970: 1_786_402_800), resetAfterSeconds: 600)],
             claudePlan: "max",
             cursorBuckets: [
@@ -66,6 +78,9 @@ final class UsageSnapshotStoreTests: XCTestCase {
         UsageSnapshotStore.save(snapshot, to: defaults)
 
         let loaded = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
+        XCTAssertEqual(loaded.codexPlan, "prolite")
+        XCTAssertEqual(loaded.codexBuckets.map(\.kind), [.lunaReserve])
+        XCTAssertEqual(loaded.codexBuckets.map(\.name), [CodexLimits.lunaReserveDisplayName])
         XCTAssertEqual(loaded.claudePlan, "max")
         XCTAssertEqual(loaded.claudeBuckets.count, 1)
         XCTAssertEqual(loaded.claudeBuckets[0].remainingPercent, 99)
