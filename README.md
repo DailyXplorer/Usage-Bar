@@ -5,7 +5,7 @@ Small macOS menu bar app (SwiftUI) that shows your **Codex** (ChatGPT plan),
 usage limits: **percentage remaining** and time until reset.
 
 <p align="center">
-  <img src="docs/usage-bar-codex-opencode.png" alt="Usage Bar dashboard showing Codex and OpenCode usage windows" width="300">
+  <img src="docs/usage-bar-codex-cursor.jpg" alt="Usage Bar dashboard showing Codex, Cursor, and Grok Bot usage windows" width="300">
 </p>
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
