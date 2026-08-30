@@ -13,6 +13,7 @@ final class MenuBarController: NSObject {
     private var modelObservation: AnyCancellable?
     private var screenObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
+    private var statusItemClickMonitor: Any?
     private var localClickMonitor: Any?
     private var globalClickMonitor: Any?
     private var lastPresentationIdentity: String?
@@ -63,6 +64,10 @@ final class MenuBarController: NSObject {
         panel.contentViewController = nil
         panel.delegate = nil
         panel.onCancel = nil
+        if let statusItemClickMonitor {
+            NSEvent.removeMonitor(statusItemClickMonitor)
+            self.statusItemClickMonitor = nil
+        }
         statusItem.button?.target = nil
         statusItem.button?.action = nil
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -72,12 +77,37 @@ final class MenuBarController: NSObject {
         guard let button = statusItem.button else { return }
         button.target = self
         button.action = #selector(togglePanel(_:))
-        button.sendAction(on: [.leftMouseUp])
+        button.sendAction(on: [])
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleNone
         button.toolTip = "Usage Bar"
         button.setAccessibilityRole(.menuButton)
         button.setAccessibilityHelp("Open Usage Bar")
+        statusItemClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown]
+        ) { [weak self] event in
+            let location = NSEvent.mouseLocation
+            let isCommandModified = event.modifierFlags.contains(.command)
+            let handled = MainActor.assumeIsolated {
+                guard let self,
+                      let button = self.statusItem.button else {
+                    return false
+                }
+                guard self.screenFrame(for: button)?.contains(location) == true,
+                      !isCommandModified else {
+                    return false
+                }
+                self.togglePanel(button)
+                return true
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private func screenFrame(for button: NSStatusBarButton) -> NSRect? {
+        guard let window = button.window else { return nil }
+        let rectInWindow = button.convert(button.bounds, to: nil)
+        return window.convertToScreen(rectInWindow)
     }
 
     private func configurePanel() {
@@ -264,8 +294,14 @@ final class MenuBarController: NSObject {
             globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
                 matching: [.leftMouseDown, .rightMouseDown]
             ) { [weak self] _ in
-                Task { @MainActor in
-                    self?.hide()
+                let location = NSEvent.mouseLocation
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let button = self.activeButton ?? self.statusItem.button,
+                       self.screenFrame(for: button)?.contains(location) == true {
+                        return
+                    }
+                    self.hide()
                 }
             }
         }
@@ -299,6 +335,20 @@ final class MenuBarController: NSObject {
 }
 
 extension MenuBarController: NSWindowDelegate {
+    nonisolated func windowDidResignKey(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            guard (notification.object as? NSWindow) === panel else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.panel.isVisible,
+                      !self.panel.isKeyWindow else {
+                    return
+                }
+                self.hide()
+            }
+        }
+    }
+
     nonisolated func windowDidResize(_ notification: Notification) {
         MainActor.assumeIsolated {
             guard (notification.object as? NSWindow) === panel, panel.isVisible else {
