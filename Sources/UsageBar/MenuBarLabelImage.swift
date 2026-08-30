@@ -3,7 +3,6 @@ import SwiftUI
 
 struct MenuBarSegment {
     static let placeholder = "--%"
-    static let maximumValue = "100%"
 
     let provider: LimitBucket.Provider
     let logo: NSImage?
@@ -19,26 +18,19 @@ enum MenuBarLabelImage {
     static let iconSize: CGFloat = 12
     static let fontSize: CGFloat = 12
 
-    static func make(segments: [MenuBarSegment]) -> NSImage {
-        let maximumSegments = segments.map { segment in
-            MenuBarSegment(
-                provider: segment.provider,
-                logo: segment.logo,
-                value: MenuBarSegment.maximumValue
-            )
+    static func make(segments: [MenuBarSegment], scale: CGFloat? = nil) -> NSImage {
+        guard !segments.isEmpty else {
+            return fallbackImage()
         }
-        let content = ZStack(alignment: .leading) {
-            row(maximumSegments)
-                .hidden()
-            row(segments)
-        }
-        .foregroundStyle(.black)
-        .fixedSize(horizontal: true, vertical: true)
+
+        let content = row(segments)
+            .foregroundStyle(.black)
+            .fixedSize(horizontal: true, vertical: true)
 
         let renderer = ImageRenderer(content: content)
-        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        renderer.scale = scale ?? NSScreen.main?.backingScaleFactor ?? 2
         guard let image = renderer.nsImage else {
-            return NSImage(size: NSSize(width: 1, height: 1))
+            return fallbackImage()
         }
         image.isTemplate = true
         return image
@@ -79,5 +71,15 @@ enum MenuBarLabelImage {
             .font(AppTheme.font(size: fontSize, weight: .semibold))
             .monospacedDigit()
             .fixedSize(horizontal: true, vertical: true)
+    }
+
+    private static func fallbackImage() -> NSImage {
+        let image = NSImage(
+            systemSymbolName: "chart.bar.xaxis",
+            accessibilityDescription: nil
+        ) ?? NSImage(size: NSSize(width: 16, height: 16))
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = true
+        return image
     }
 }
