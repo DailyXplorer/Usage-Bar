@@ -246,8 +246,8 @@ final class OpenCodeLimitsTests: XCTestCase {
 
         XCTAssertNil(model.opencodeRolling)
         XCTAssertNil(model.menuBarOpenCodeText)
-        XCTAssertEqual(model.menuBarOpenCodeDisplay, "–")
-        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", "–"])
+        XCTAssertEqual(model.menuBarOpenCodeDisplay, MenuBarSegment.placeholder)
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["99%", MenuBarSegment.placeholder])
         XCTAssertTrue(model.showsOpenCode)
     }
 

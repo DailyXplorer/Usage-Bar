@@ -195,7 +195,7 @@ final class ClaudeLimitsTests: XCTestCase {
         )
 
         XCTAssertNil(model.menuBarClaudeText)
-        XCTAssertEqual(model.menuBarClaudeDisplay, "–")
+        XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
         XCTAssertNil(model.menuBarClaudeAccessibilityText)
     }
 
