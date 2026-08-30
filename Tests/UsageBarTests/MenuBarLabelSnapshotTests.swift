@@ -33,69 +33,51 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuBarLabelWidthStaysStableWhenPercentagesLoad() {
+    func testMenuBarLabelWidthFollowsDigitCount() {
         AppTheme.loadFont()
-        let loading = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: MenuBarSegment.placeholder),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: MenuBarSegment.placeholder),
-        ])
-        let loaded = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "22%"),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "89%"),
-        ])
-        let maximum = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "100%"),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "100%"),
-        ])
+        let oneDigit = labelImage(values: ["8%", "8%"])
+        let twoDigit = labelImage(values: ["81%", "86%"])
+        let threeDigit = labelImage(values: ["100%", "100%"])
 
-        XCTAssertEqual(loading.size.width, loaded.size.width, accuracy: 0.5)
-        XCTAssertEqual(loaded.size.width, maximum.size.width, accuracy: 0.5)
-        XCTAssertTrue(loaded.isTemplate)
+        XCTAssertLessThan(oneDigit.size.width, twoDigit.size.width)
+        XCTAssertLessThan(twoDigit.size.width, threeDigit.size.width)
+        XCTAssertTrue(twoDigit.isTemplate)
     }
 
     @MainActor
-    func testMenuBarPlaceholderDoesNotLeaveAWideGap() {
+    func testMenuBarLabelKeepsEvenGapsWhenPercentagesShrink() {
         AppTheme.loadFont()
-        let dash = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "–")
-        ])
+        let mixed = labelImage(values: ["81%", "86%", "100%", "100%"])
+        let maximum = labelImage(values: ["100%", "100%", "100%", "100%"])
+
+        XCTAssertLessThan(mixed.size.width, maximum.size.width)
+        XCTAssertEqual(
+            largestClearRunPoints(in: mixed),
+            largestClearRunPoints(in: maximum),
+            accuracy: 8
+        )
+        XCTAssertLessThan(trailingClearPoints(in: mixed), 10)
+        XCTAssertLessThan(trailingClearPoints(in: maximum), 10)
+    }
+
+    @MainActor
+    func testMenuBarPlaceholderHugsLikeTwoDigits() {
+        AppTheme.loadFont()
         let placeholder = MenuBarLabelImage.make(segments: [
             MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.placeholder)
         ])
+        let twoDigit = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "22%")
+        ])
         let maximum = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.reservedValue)
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "100%")
         ])
 
-        XCTAssertEqual(placeholder.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertEqual(placeholder.size.width, twoDigit.size.width, accuracy: 2)
+        XCTAssertLessThan(placeholder.size.width, maximum.size.width)
         XCTAssertLessThan(trailingClearPoints(in: placeholder), 10)
+        XCTAssertLessThan(trailingClearPoints(in: twoDigit), 10)
         XCTAssertLessThan(trailingClearPoints(in: maximum), 10)
-        XCTAssertGreaterThan(trailingClearPoints(in: dash), 20)
-
-        let withPlaceholder = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.placeholder),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
-        ])
-        let withDash = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "–"),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
-        ])
-        let withMaximum = MenuBarLabelImage.make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "99%"),
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: MenuBarSegment.reservedValue),
-            MenuBarSegment(provider: .cursor, logo: AppTheme.cursorLogo, value: "87%"),
-        ])
-        XCTAssertEqual(withPlaceholder.size.width, withMaximum.size.width, accuracy: 0.5)
-        XCTAssertEqual(
-            largestClearRunPoints(in: withPlaceholder),
-            largestClearRunPoints(in: withMaximum),
-            accuracy: 8
-        )
-        XCTAssertGreaterThan(
-            largestClearRunPoints(in: withDash) - largestClearRunPoints(in: withPlaceholder),
-            8
-        )
     }
 
     func testMenuBarSegmentIdentityIncludesProvider() {
@@ -198,6 +180,15 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
     private var buildDirectory: URL {
         URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build", isDirectory: true)
+    }
+
+    @MainActor
+    private func labelImage(values: [String]) -> NSImage {
+        let providers = Array(LimitBucket.Provider.allCases.prefix(values.count))
+        let segments = zip(providers, values).map { provider, value in
+            MenuBarSegment(provider: provider, logo: AppTheme.logo(for: provider), value: value)
+        }
+        return MenuBarLabelImage.make(segments: segments)
     }
 
     @MainActor
