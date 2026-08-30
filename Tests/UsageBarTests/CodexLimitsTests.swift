@@ -94,7 +94,7 @@ final class CodexLimitsTests: XCTestCase {
           },
           "additional_rate_limits": [{
             "limit_name": "Something else",
-            "metered_feature": "codex_other",
+            "metered_feature": "base_model_inference",
             "rate_limit": {"primary_window": {"used_percent": 90}}
           }]
         }
@@ -123,6 +123,121 @@ final class CodexLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.primary, .spark])
         XCTAssertEqual(buckets[1].usedPercent, 8)
+    }
+
+    func testLunaReserveMatchesLiveAdditionalLimit() throws {
+        let payload = """
+        {
+          "plan_type": "prolite",
+          "rate_limit": {
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 7,
+              "limit_window_seconds": 604800,
+              "reset_after_seconds": 566118,
+              "reset_at": 1788643338
+            }
+          },
+          "additional_rate_limits": [
+            {
+              "limit_name": "GPT-5.3-Codex-Spark",
+              "metered_feature": "codex_bengalfox",
+              "rate_limit": {
+                "limit_reached": false,
+                "primary_window": {
+                  "used_percent": 0,
+                  "limit_window_seconds": 18000,
+                  "reset_at": 1788095221
+                }
+              }
+            },
+            {
+              "limit_name": "gpt-reserve",
+              "metered_feature": "base_model_inference",
+              "rate_limit": {
+                "limit_reached": false,
+                "primary_window": {
+                  "used_percent": 0,
+                  "limit_window_seconds": 604800,
+                  "reset_at": 1788682021
+                }
+              }
+            }
+          ]
+        }
+        """
+        let buckets = CodexLimits.buckets(from: try decode(payload), now: now)
+
+        XCTAssertEqual(buckets.map(\.name), ["Weekly Limit", "Spark", "Luna Reserve"])
+        XCTAssertEqual(buckets.map(\.kind), [.primary, .spark, .lunaReserve])
+        XCTAssertEqual(buckets.map(\.usedPercent), [7, 0, 0])
+        let reserve = try XCTUnwrap(buckets.first { $0.name == "Luna Reserve" })
+        XCTAssertEqual(reserve.remainingPercent, 100)
+        XCTAssertEqual(reserve.resetAt, Date(timeIntervalSince1970: 1_788_682_021))
+        XCTAssertFalse(reserve.reached)
+    }
+
+    func testLunaReserveUsesExactNameAndOwnReachedState() throws {
+        let payload = """
+        {
+          "additional_rate_limits": [{
+            "limit_name": "gpt-reserve",
+            "metered_feature": "future_meter_identifier",
+            "rate_limit": {
+              "limit_reached": true,
+              "primary_window": {"used_percent": 100}
+            }
+          }]
+        }
+        """
+        let buckets = CodexLimits.buckets(from: try decode(payload), now: now)
+
+        XCTAssertEqual(buckets.map(\.kind), [.lunaReserve])
+        XCTAssertEqual(buckets.map(\.name), [CodexLimits.lunaReserveDisplayName])
+        XCTAssertTrue(buckets[0].reached)
+    }
+
+    @MainActor
+    func testMenuBarIgnoresAdditionalLimitWithoutStandardWindow() {
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .lunaReserve,
+                    name: "Luna Reserve",
+                    usedPercent: 10,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "prolite",
+            lastUpdated: now
+        )
+
+        XCTAssertEqual(model.menuBarText, "--%")
+        XCTAssertEqual(model.menuBarAccessibilityText, "not loaded")
+    }
+
+    @MainActor
+    func testMenuBarFallsBackToSecondaryWindow() {
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .secondary,
+                    name: "Weekly Limit",
+                    usedPercent: 20,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "prolite",
+            lastUpdated: now
+        )
+
+        XCTAssertEqual(model.menuBarText, "80%")
     }
 
     @MainActor
