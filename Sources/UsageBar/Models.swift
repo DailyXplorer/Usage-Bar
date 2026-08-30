@@ -173,6 +173,10 @@ struct LimitBucket: Identifiable, Codable {
 }
 
 enum WindowLabels {
+    static let currentSession = "Current Session"
+    static let weeklyLimit = "Weekly Limit"
+    static let monthlyLimit = "Monthly Limit"
+
     static let minutesPerHour: Int = 60
     static let minutesPer5Hours: Int = 5 * minutesPerHour
     static let minutesPerDay: Int = 24 * minutesPerHour
@@ -186,16 +190,16 @@ enum WindowLabels {
         }
         let minutes = windowSeconds / 60
         if isApproximate(minutes, expected: minutesPer5Hours) {
-            return "5h"
+            return currentSession
         }
         if isApproximate(minutes, expected: minutesPerDay) {
             return "daily"
         }
         if isApproximate(minutes, expected: minutesPerWeek) {
-            return "weekly"
+            return weeklyLimit
         }
         if isApproximate(minutes, expected: minutesPerMonth) {
-            return "monthly"
+            return monthlyLimit
         }
         if isApproximate(minutes, expected: minutesPerYear) {
             return "annual"
@@ -263,6 +267,30 @@ enum CodexLimits {
         if item.meteredFeature == sparkMeteredFeature { return true }
         guard let name = item.limitName else { return false }
         return name.range(of: "spark", options: .caseInsensitive) != nil
+    }
+
+    static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
+        guard bucket.provider == .codex,
+              bucket.kind == .primary || bucket.kind == .secondary,
+              let windowSeconds = bucket.limitWindowSeconds else {
+            return bucket
+        }
+        let nextName = WindowLabels.label(
+            forWindowSeconds: windowSeconds,
+            isSecondary: bucket.kind == .secondary
+        )
+        guard nextName != bucket.name else { return bucket }
+        return LimitBucket(
+            provider: bucket.provider,
+            kind: bucket.kind,
+            name: nextName,
+            usedPercent: bucket.usedPercent,
+            resetAt: bucket.resetAt,
+            resetAfterSeconds: bucket.resetAfterSeconds,
+            limitWindowSeconds: bucket.limitWindowSeconds,
+            reached: bucket.reached,
+            detail: bucket.detail
+        )
     }
 
     private static func makeBucket(

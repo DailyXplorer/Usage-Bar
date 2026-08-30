@@ -56,7 +56,9 @@ final class CommandCodeLimitsTests: XCTestCase {
             CommandCodeLimits.weeklyDisplayName,
             CommandCodeLimits.monthlyDisplayName,
         ])
-        XCTAssertEqual(CommandCodeLimits.rollingDisplayName, "Current session")
+        XCTAssertEqual(CommandCodeLimits.rollingDisplayName, "Current Session")
+        XCTAssertEqual(CommandCodeLimits.weeklyDisplayName, "Weekly Limit")
+        XCTAssertEqual(CommandCodeLimits.monthlyDisplayName, "Monthly Limit")
         XCTAssertEqual(buckets.map(\.usedPercent), [13, 20, 15])
         XCTAssertEqual(buckets.map(\.remainingPercent), [87, 80, 85])
         XCTAssertEqual(buckets.map(\.limitWindowSeconds), [

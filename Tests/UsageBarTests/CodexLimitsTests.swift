@@ -9,7 +9,7 @@ final class CodexLimitsTests: XCTestCase {
         let buckets = CodexLimits.buckets(from: try decode(sparkPayload()), now: now)
 
         XCTAssertEqual(buckets.map(\.kind), [.primary, .spark])
-        XCTAssertEqual(buckets.map(\.name), ["weekly", CodexLimits.sparkDisplayName])
+        XCTAssertEqual(buckets.map(\.name), ["Weekly Limit", CodexLimits.sparkDisplayName])
         XCTAssertEqual(buckets.map(\.usedPercent), [42, 0])
         XCTAssertEqual(buckets.map(\.remainingPercent), [58, 100])
         XCTAssertEqual(buckets[1].resetAt, Date(timeIntervalSince1970: TimeInterval(sparkResetAt)))

@@ -11,7 +11,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
             previewBuckets: [
                 LimitBucket(
                     kind: .primary,
-                    name: "weekly",
+                    name: "Weekly Limit",
                     usedPercent: 42,
                     resetAt: Date(timeIntervalSince1970: 1_786_189_759),
                     resetAfterSeconds: 231_321,
@@ -25,7 +25,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .session,
-                    name: "Current session",
+                    name: "Current Session",
                     usedPercent: 12,
                     resetAt: Date(timeIntervalSince1970: 1_786_232_400),
                     resetAfterSeconds: 7_200,
@@ -35,7 +35,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .weeklyAll,
-                    name: "All models",
+                    name: "All Models",
                     usedPercent: 40,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 177_600,
@@ -45,7 +45,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .weeklyScoped,
-                    name: "Opus",
+                    name: "Fable",
                     usedPercent: 91,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 177_600,

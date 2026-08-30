@@ -111,11 +111,11 @@ enum ClaudeLimits {
     static func label(kind: String?, scopeModel: String?) -> String {
         switch kind {
         case sessionKind:
-            return "Current session"
+            return WindowLabels.currentSession
         case weeklyAllKind:
-            return "All models"
+            return "All Models"
         case weeklyScopedKind:
-            guard let scopeModel, !scopeModel.isEmpty else { return "Pinned model" }
+            guard let scopeModel, !scopeModel.isEmpty else { return "Pinned Model" }
             return scopeModel
         default:
             guard let kind, !kind.isEmpty else { return "Limit" }
