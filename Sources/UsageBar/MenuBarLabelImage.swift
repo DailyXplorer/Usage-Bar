@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarSegment {
     static let placeholder = "--%"
+    static let maximumValue = "100%"
 
     let provider: LimitBucket.Provider
     let logo: NSImage?
@@ -19,14 +20,17 @@ enum MenuBarLabelImage {
     static let fontSize: CGFloat = 12
 
     static func make(segments: [MenuBarSegment]) -> NSImage {
-        let content = HStack(spacing: 0) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                HStack(spacing: 4) {
-                    logo(segment.logo)
-                    value(segment.value)
-                }
-                .padding(.leading, index == 0 ? 0 : 7)
-            }
+        let maximumSegments = segments.map { segment in
+            MenuBarSegment(
+                provider: segment.provider,
+                logo: segment.logo,
+                value: MenuBarSegment.maximumValue
+            )
+        }
+        let content = ZStack(alignment: .leading) {
+            row(maximumSegments)
+                .hidden()
+            row(segments)
         }
         .foregroundStyle(.black)
         .fixedSize(horizontal: true, vertical: true)
@@ -38,6 +42,18 @@ enum MenuBarLabelImage {
         }
         image.isTemplate = true
         return image
+    }
+
+    private static func row(_ segments: [MenuBarSegment]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                HStack(spacing: 4) {
+                    logo(segment.logo)
+                    value(segment.value)
+                }
+                .padding(.leading, index == 0 ? 0 : 7)
+            }
+        }
     }
 
     static func make(codex: String, claude: String) -> NSImage {

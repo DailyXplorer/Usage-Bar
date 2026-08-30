@@ -33,31 +33,38 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuBarLabelWidthFollowsDigitCount() {
+    func testMenuBarLabelKeepsMaximumFrameWhileContentFollowsDigitCount() {
         AppTheme.loadFont()
         let oneDigit = labelImage(values: ["8%", "8%"])
         let twoDigit = labelImage(values: ["81%", "86%"])
         let threeDigit = labelImage(values: ["100%", "100%"])
 
-        XCTAssertLessThan(oneDigit.size.width, twoDigit.size.width)
-        XCTAssertLessThan(twoDigit.size.width, threeDigit.size.width)
+        XCTAssertEqual(oneDigit.size.width, threeDigit.size.width, accuracy: 0.5)
+        XCTAssertEqual(twoDigit.size.width, threeDigit.size.width, accuracy: 0.5)
+        XCTAssertGreaterThan(trailingClearPoints(in: oneDigit), trailingClearPoints(in: twoDigit))
+        XCTAssertGreaterThan(trailingClearPoints(in: twoDigit), trailingClearPoints(in: threeDigit))
         XCTAssertTrue(twoDigit.isTemplate)
     }
 
     @MainActor
     func testMenuBarLabelKeepsEvenGapsWhenPercentagesShrink() {
         AppTheme.loadFont()
-        let mixed = labelImage(values: ["81%", "86%", "100%", "100%"])
+        let compact = labelImage(values: ["8%", "8%", "8%", "8%"])
         let maximum = labelImage(values: ["100%", "100%", "100%", "100%"])
+        let singleCompact = labelImage(values: ["8%"])
+        let singleMaximum = labelImage(values: ["100%"])
 
-        XCTAssertLessThan(mixed.size.width, maximum.size.width)
+        XCTAssertEqual(compact.size.width, maximum.size.width, accuracy: 0.5)
         XCTAssertEqual(
-            largestClearRunPoints(in: mixed),
-            largestClearRunPoints(in: maximum),
-            accuracy: 8
+            largestInternalClearRunPoints(in: compact),
+            largestInternalClearRunPoints(in: maximum),
+            accuracy: 2
         )
-        XCTAssertLessThan(trailingClearPoints(in: mixed), 10)
-        XCTAssertLessThan(trailingClearPoints(in: maximum), 10)
+        XCTAssertEqual(
+            trailingClearPoints(in: compact) - trailingClearPoints(in: maximum),
+            4 * (trailingClearPoints(in: singleCompact) - trailingClearPoints(in: singleMaximum)),
+            accuracy: 2
+        )
     }
 
     @MainActor
@@ -73,11 +80,14 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
             MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "100%")
         ])
 
-        XCTAssertEqual(placeholder.size.width, twoDigit.size.width, accuracy: 2)
-        XCTAssertLessThan(placeholder.size.width, maximum.size.width)
-        XCTAssertLessThan(trailingClearPoints(in: placeholder), 10)
-        XCTAssertLessThan(trailingClearPoints(in: twoDigit), 10)
-        XCTAssertLessThan(trailingClearPoints(in: maximum), 10)
+        XCTAssertEqual(placeholder.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertEqual(twoDigit.size.width, maximum.size.width, accuracy: 0.5)
+        XCTAssertEqual(
+            trailingClearPoints(in: placeholder),
+            trailingClearPoints(in: twoDigit),
+            accuracy: 2
+        )
+        XCTAssertGreaterThan(trailingClearPoints(in: placeholder), trailingClearPoints(in: maximum))
     }
 
     func testMenuBarSegmentIdentityIncludesProvider() {
@@ -217,18 +227,22 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         return points(clearPixels, in: image, pixelCount: columns.count)
     }
 
-    private func largestClearRunPoints(in image: NSImage) -> CGFloat {
+    private func largestInternalClearRunPoints(in image: NSImage) -> CGFloat {
         let columns = inkColumns(in: image)
+        guard let firstInk = columns.firstIndex(of: true),
+              let lastInk = columns.lastIndex(of: true) else {
+            return 0
+        }
         var largest = 0
-        var index = 0
-        while index < columns.count {
+        var index = firstInk
+        while index <= lastInk {
             if columns[index] {
                 index += 1
                 continue
             }
             let start = index
             index += 1
-            while index < columns.count, !columns[index] {
+            while index <= lastInk, !columns[index] {
                 index += 1
             }
             largest = max(largest, index - start)
