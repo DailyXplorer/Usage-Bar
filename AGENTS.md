@@ -10,10 +10,10 @@ update to.
 
 ## What this repo is
 
-SwiftUI macOS 14+ **menu bar extra** (no Dock icon). It shows Codex, Claude
-Code, Cursor, OpenCode Go, and Command Code usage limits. The installed app is always
-`/Applications/UsageBar.app`. In-app updates download `UsageBar.app.zip` and
-`UsageBar.app.zip.sha256` from GitHub Releases.
+SwiftUI macOS 14+ **menu bar app** with an AppKit status item and no Dock icon.
+It shows Codex, Claude Code, Cursor, OpenCode Go, and Command Code usage limits.
+The installed app is always `/Applications/UsageBar.app`. In-app updates
+download `UsageBar.app.zip` and `UsageBar.app.zip.sha256` from GitHub Releases.
 
 English UI. No `//` comments in generated Swift. Do not commit `.build/`.
 
@@ -141,13 +141,17 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/AppDistribution.swift` | GitHub owner/repo/asset name |
 | `Sources/UsageBar/AppUpdater.swift` | In-app GitHub updater |
 | `Sources/UsageBar/LaunchAtLogin.swift` | Login item; copies to Applications if needed |
+| `Sources/UsageBar/MenuBarController.swift` | Variable status item, panel, and dismissal lifecycle |
+| `Sources/UsageBar/MenuBarPanelPlacement.swift` | Pure panel placement across screens |
 
 The `.notFound` login-item fallback writes a LaunchAgent for the next login but
 does not bootstrap it in the current session. Usage Bar is already running when
 the toggle is enabled, so bootstrapping would risk a duplicate menu bar process.
 
-Menu bar label: always a single `Image` from `MenuBarLabelImage`. Do not go
-back to sibling views in `MenuBarExtra`’s label.
+`MenuBarController` must own exactly one `NSStatusItem.variableLength`. Its
+button must receive one compact template image from `MenuBarLabelImage`. Do not
+reserve hidden percentage text, set a numeric status item length, or replace
+the AppKit status item with `MenuBarExtra`.
 
 ## Out of scope unless asked
 

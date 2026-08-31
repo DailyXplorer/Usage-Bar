@@ -15,12 +15,12 @@ Codex primary window, Claude Code's **Current session** bar, then Cursor's
 on in Settings. Settings let you pick which plans appear. The popover breaks
 down every window on each side.
 
-The whole label is **composed off-screen into a single template image**
-(`MenuBarLabelImage`), and that is deliberate: `MenuBarExtra` renders only one
-image and one text in its label, drops an image interpolated into a string, and
-freezes the view hierarchy on first render — a segment added later by an `if`
-would never appear. A single `Image` whose value alone changes works around all
-three constraints. Do not go back to sibling views: two tests lock this in.
+`MenuBarController` owns a variable-length `NSStatusItem` and a borderless
+`NSPanel` that hosts `UsageMenuView`. `MenuBarLabelImage` composes the selected
+segments off-screen into one compact template image. Each update replaces
+`button.image`, so AppKit grows and shrinks the status item with its content.
+Do not reserve hidden text or set a numeric status item length. Regression tests
+cover compact image bounds and bidirectional resizing on the same status item.
 
 ## Install
 
