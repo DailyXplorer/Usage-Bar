@@ -31,6 +31,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController(model: usageModel, updater: appUpdater)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceWillSleep(_:)),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidWake(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
         usageModel.start()
         appUpdater.startAutomaticChecks()
         DispatchQueue.global(qos: .utility).async {
@@ -49,6 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        usageModel.stop()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
         menuBarController?.stop()
     }
 
@@ -58,6 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidResignActive(_ notification: Notification) {
         hideDockIconIfNoSettingsWindow()
+    }
+
+    @objc private func workspaceWillSleep(_ notification: Notification) {
+        usageModel.setSleeping(true)
+    }
+
+    @objc private func workspaceDidWake(_ notification: Notification) {
+        usageModel.setSleeping(false)
     }
 
     @objc private func windowWillClose(_ notification: Notification) {

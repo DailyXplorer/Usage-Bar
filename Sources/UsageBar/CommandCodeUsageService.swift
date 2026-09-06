@@ -7,7 +7,7 @@ struct CommandCodeCredentials {
 enum CommandCodeUsageError: LocalizedError {
     case notSignedIn
     case invalidKey
-    case throttled
+    case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
     case decoding(String)
@@ -19,7 +19,7 @@ enum CommandCodeUsageError: LocalizedError {
         case .invalidKey:
             return "Command Code API key is invalid. Run `cmd login` again."
         case .throttled:
-            return "Command Code usage endpoint is rate limited. Retrying at the next refresh."
+            return "Command Code usage endpoint is rate limited. Waiting before retrying."
         case .network(let message):
             return "Network error: \(message)"
         case .httpStatus(let code):
@@ -32,60 +32,75 @@ enum CommandCodeUsageError: LocalizedError {
 
 actor CommandCodeUsageService {
     static let defaultBaseURL = URL(string: "https://api.commandcode.ai")!
+    private static let accountCacheLifetime: TimeInterval = 30 * 60
+    private static let summaryFailureCooldown: TimeInterval = 3 * 60
 
     private let baseURL: URL
     private let session: URLSession
+    private let now: () -> Date
+    private let accountCacheLifetime: TimeInterval
+    private var accountCache: CachedAccount?
+    private var summaryContext: AccountContext?
+    private var summaryBackoff = ThrottleBackoff()
+    private var summaryFailureUntil: Date?
+    private var fetchGeneration = 0
 
     init(
         baseURL: URL = CommandCodeUsageService.defaultBaseURL,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        now: @escaping () -> Date = Date.init,
+        accountCacheLifetime: TimeInterval = CommandCodeUsageService.accountCacheLifetime
     ) {
         self.baseURL = baseURL
         self.session = session
+        self.now = now
+        self.accountCacheLifetime = accountCacheLifetime
     }
 
     func fetchUsage(
         from files: [URL] = CommandCodeUsageService.authFileCandidates(),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) async throws -> (usage: CommandCodeUsageSnapshot, credentials: CommandCodeCredentials) {
-        let credentials = try Self.loadCredentials(from: files, environment: environment)
-        let whoami: CommandCodeWhoamiResponse = try await get(
-            path: "/alpha/whoami",
-            token: credentials.apiKey
-        )
-        let orgId = whoami.org?.id
-        async let subscriptionsResult: CommandCodeSubscriptionsResponse = get(
-            path: "/alpha/billing/subscriptions",
-            token: credentials.apiKey,
-            query: Self.query(orgId: orgId)
-        )
-        async let creditsResult: CommandCodeCreditsResponse = get(
-            path: "/alpha/billing/credits",
-            token: credentials.apiKey,
-            query: Self.query(orgId: orgId)
-        )
-        let subscriptions = try await subscriptionsResult
-        let credits = try await creditsResult
-        var monthlyUsed: Double?
+        let generation = beginFetch()
+        let credentials: CommandCodeCredentials
         do {
-            let summary: CommandCodeSummaryResponse = try await get(
-                path: "/alpha/usage/summary",
-                token: credentials.apiKey,
-                query: Self.query(orgId: orgId, since: subscriptions.data?.currentPeriodStart)
-            )
-            monthlyUsed = summary.totalMonthlyCredits
+            credentials = try Self.loadCredentials(from: files, environment: environment)
         } catch {
-            monthlyUsed = nil
+            clearCaches(ifCurrent: generation)
+            throw error
         }
-        let snapshot = CommandCodeUsageSnapshot(
-            planId: subscriptions.data?.planId,
-            subscriptionStatus: subscriptions.data?.status,
-            currentPeriodEnd: subscriptions.data?.currentPeriodEnd,
-            credits: credits.credits,
-            windowLimits: credits.windowLimits,
-            monthlyUsed: monthlyUsed
-        )
-        return (snapshot, credentials)
+        try Task.checkCancellation()
+        clearCachesForChangedCredentials(credentials, generation: generation)
+
+        do {
+            let account = try await account(for: credentials, generation: generation)
+            try Task.checkCancellation()
+            let credits: CommandCodeCreditsResponse = try await get(
+                path: "/alpha/billing/credits",
+                token: credentials.apiKey,
+                query: Self.query(orgId: account.context.orgId)
+            )
+            try Task.checkCancellation()
+            let monthlyUsed = try await fetchSummary(
+                for: account.context,
+                token: credentials.apiKey,
+                generation: generation
+            )
+            let snapshot = CommandCodeUsageSnapshot(
+                planId: account.subscriptions.data?.planId,
+                subscriptionStatus: account.subscriptions.data?.status,
+                currentPeriodEnd: account.subscriptions.data?.currentPeriodEnd,
+                credits: credits.credits,
+                windowLimits: credits.windowLimits,
+                monthlyUsed: monthlyUsed
+            )
+            return (snapshot, credentials)
+        } catch CommandCodeUsageError.invalidKey {
+            clearCaches(ifCurrent: generation)
+            throw CommandCodeUsageError.invalidKey
+        } catch {
+            throw error
+        }
     }
 
     nonisolated static func authFileCandidates(
@@ -122,6 +137,7 @@ actor CommandCodeUsageService {
         token: String,
         query: [URLQueryItem] = []
     ) async throws -> T {
+        try Task.checkCancellation()
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
         guard var components = URLComponents(
             url: baseURL.appending(path: trimmed),
@@ -145,9 +161,15 @@ actor CommandCodeUsageService {
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             throw CommandCodeUsageError.network(error.localizedDescription)
         }
+        try Task.checkCancellation()
 
         guard let http = response as? HTTPURLResponse else {
             throw CommandCodeUsageError.network("invalid response")
@@ -157,16 +179,171 @@ actor CommandCodeUsageService {
                 throw CommandCodeUsageError.invalidKey
             }
             if http.statusCode == 429 {
-                throw CommandCodeUsageError.throttled
+                throw CommandCodeUsageError.throttled(retryAfter: RetryAfter.date(from: http, now: now()))
             }
             throw CommandCodeUsageError.httpStatus(http.statusCode)
         }
 
         do {
+            try Task.checkCancellation()
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             throw CommandCodeUsageError.decoding(error.localizedDescription)
         }
+    }
+
+    private func account(
+        for credentials: CommandCodeCredentials,
+        generation: Int
+    ) async throws -> CachedAccount {
+        let currentTime = now()
+        if let accountCache,
+           accountCache.context.apiKey == credentials.apiKey,
+           accountCache.expiresAt > currentTime {
+            return accountCache
+        }
+
+        let whoami: CommandCodeWhoamiResponse = try await get(
+            path: "/alpha/whoami",
+            token: credentials.apiKey
+        )
+        try Task.checkCancellation()
+        let subscriptions: CommandCodeSubscriptionsResponse = try await get(
+            path: "/alpha/billing/subscriptions",
+            token: credentials.apiKey,
+            query: Self.query(orgId: whoami.org?.id)
+        )
+        try Task.checkCancellation()
+
+        let context = AccountContext(
+            apiKey: credentials.apiKey,
+            orgId: whoami.org?.id,
+            currentPeriodStart: subscriptions.data?.currentPeriodStart,
+            currentPeriodEnd: subscriptions.data?.currentPeriodEnd
+        )
+        let account = CachedAccount(
+            context: context,
+            subscriptions: subscriptions,
+            expiresAt: accountCacheExpiry(
+                currentPeriodEnd: subscriptions.data?.currentPeriodEnd,
+                currentTime: currentTime
+            )
+        )
+        guard generation == fetchGeneration else { return account }
+
+        let contextChanged = accountCache?.context != context
+        accountCache = account
+        if contextChanged {
+            summaryContext = context
+            summaryBackoff.reset()
+            summaryFailureUntil = nil
+        }
+        return account
+    }
+
+    private func fetchSummary(
+        for context: AccountContext,
+        token: String,
+        generation: Int
+    ) async throws -> Double? {
+        guard shouldFetchSummary(for: context, generation: generation) else { return nil }
+        do {
+            let summary: CommandCodeSummaryResponse = try await get(
+                path: "/alpha/usage/summary",
+                token: token,
+                query: Self.query(orgId: context.orgId, since: context.currentPeriodStart)
+            )
+            try Task.checkCancellation()
+            recordSummarySuccess(for: context, generation: generation)
+            return summary.totalMonthlyCredits
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch CommandCodeUsageError.throttled(let retryAfter) {
+            recordSummaryThrottle(retryAfter, for: context, generation: generation)
+            return nil
+        } catch {
+            recordSummaryFailure(for: context, generation: generation)
+            return nil
+        }
+    }
+
+    private func beginFetch() -> Int {
+        fetchGeneration &+= 1
+        return fetchGeneration
+    }
+
+    private func clearCachesForChangedCredentials(
+        _ credentials: CommandCodeCredentials,
+        generation: Int
+    ) {
+        guard generation == fetchGeneration else { return }
+        guard accountCache?.context.apiKey != credentials.apiKey else { return }
+        clearCaches()
+    }
+
+    private func clearCaches(ifCurrent generation: Int) {
+        guard generation == fetchGeneration else { return }
+        clearCaches()
+    }
+
+    private func clearCaches() {
+        accountCache = nil
+        summaryContext = nil
+        summaryBackoff.reset()
+        summaryFailureUntil = nil
+    }
+
+    private func accountCacheExpiry(
+        currentPeriodEnd: String?,
+        currentTime: Date
+    ) -> Date {
+        let ttlExpiry = currentTime.addingTimeInterval(accountCacheLifetime)
+        guard let currentPeriodEnd,
+              let periodEnd = ISODate.parse(currentPeriodEnd),
+              periodEnd > currentTime else {
+            return ttlExpiry
+        }
+        return min(ttlExpiry, periodEnd)
+    }
+
+    private func shouldFetchSummary(for context: AccountContext, generation: Int) -> Bool {
+        guard generation == fetchGeneration, summaryContext == context else { return false }
+        let currentTime = now()
+        if let summaryFailureUntil, summaryFailureUntil > currentTime {
+            return false
+        }
+        if let summaryBlockedUntil = summaryBackoff.blockedUntil,
+           summaryBlockedUntil > currentTime {
+            return false
+        }
+        return true
+    }
+
+    private func recordSummarySuccess(for context: AccountContext, generation: Int) {
+        guard generation == fetchGeneration, summaryContext == context else { return }
+        summaryBackoff.reset()
+        summaryFailureUntil = nil
+    }
+
+    private func recordSummaryThrottle(
+        _ retryAfter: Date?,
+        for context: AccountContext,
+        generation: Int
+    ) {
+        guard generation == fetchGeneration, summaryContext == context else { return }
+        summaryBackoff.recordThrottle(now: now(), retryAfter: retryAfter)
+    }
+
+    private func recordSummaryFailure(for context: AccountContext, generation: Int) {
+        guard generation == fetchGeneration, summaryContext == context else { return }
+        let currentTime = now()
+        summaryFailureUntil = max(
+            summaryFailureUntil ?? .distantPast,
+            currentTime.addingTimeInterval(Self.summaryFailureCooldown)
+        )
     }
 
     private static func query(orgId: String?, since: String? = nil) -> [URLQueryItem] {
@@ -179,6 +356,19 @@ actor CommandCodeUsageService {
         }
         return items
     }
+}
+
+private struct AccountContext: Equatable {
+    let apiKey: String
+    let orgId: String?
+    let currentPeriodStart: String?
+    let currentPeriodEnd: String?
+}
+
+private struct CachedAccount {
+    let context: AccountContext
+    let subscriptions: CommandCodeSubscriptionsResponse
+    let expiresAt: Date
 }
 
 private struct CommandCodeAuthFile: Decodable {

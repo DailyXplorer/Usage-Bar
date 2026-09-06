@@ -10,7 +10,7 @@ enum CursorUsageError: LocalizedError {
     case notSignedIn
     case unreadableLogin
     case tokenExpired
-    case throttled
+    case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
     case decoding(String)
@@ -24,7 +24,7 @@ enum CursorUsageError: LocalizedError {
         case .tokenExpired:
             return "Cursor token expired. Open Cursor to refresh it."
         case .throttled:
-            return "Cursor usage endpoint is rate limited. Retrying at the next refresh."
+            return "Cursor usage endpoint is rate limited. Waiting before retrying."
         case .network(let message):
             return "Network error: \(message)"
         case .httpStatus(let code):
@@ -38,50 +38,7 @@ enum CursorUsageError: LocalizedError {
 enum CursorGrokBotFetchResult {
     case refreshed(CursorSandUsageStatus?)
     case unavailable
-    case throttled
-}
-
-struct CursorGrokBotBackoff {
-    private var backoff = ThrottleBackoff()
-
-    var isBlocked: Bool {
-        backoff.isBlocked
-    }
-
-    var blockedUntil: Date? {
-        backoff.blockedUntil
-    }
-
-    mutating func update(after result: CursorGrokBotFetchResult, now: Date = Date()) {
-        switch result {
-        case .refreshed:
-            backoff.reset()
-        case .throttled:
-            backoff.recordThrottle(now: now)
-        case .unavailable:
-            break
-        }
-    }
-}
-
-struct CursorUsageRequests {
-    let credentials: CursorCredentials
-    let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>?
-    let grokBot: Task<CursorGrokBotFetchResult, Never>
-}
-
-struct CursorUsageRequestPlan: Equatable {
-    let includePeriod: Bool
-    let includeGrokBot: Bool
-
-    init(periodBlocked: Bool, grokBotBlocked: Bool) {
-        includePeriod = !periodBlocked
-        includeGrokBot = !grokBotBlocked
-    }
-
-    var shouldStart: Bool {
-        includePeriod || includeGrokBot
-    }
+    case throttled(retryAfter: Date?)
 }
 
 actor CursorUsageService {
@@ -108,53 +65,49 @@ actor CursorUsageService {
         self.session = session
     }
 
-    func startFetch(
-        includePeriod: Bool = true,
-        includeGrokBot: Bool = true
-    ) throws -> CursorUsageRequests {
-        let credentials = try Self.loadCredentials()
-        return startFetch(
-            credentials: credentials,
-            includePeriod: includePeriod,
-            includeGrokBot: includeGrokBot
-        )
+    func fetchPeriodUsage(
+        credentials: CursorCredentials? = nil
+    ) async throws -> (CursorUsageResponse, CursorCredentials) {
+        let resolvedCredentials: CursorCredentials
+        if let credentials {
+            resolvedCredentials = credentials
+        } else {
+            resolvedCredentials = try Self.loadCredentials()
+        }
+        let usage = try await fetchPeriod(token: resolvedCredentials.accessToken)
+        return (usage, resolvedCredentials)
     }
 
-    func startFetch(
-        credentials: CursorCredentials,
-        includePeriod: Bool = true,
-        includeGrokBot: Bool = true
-    ) -> CursorUsageRequests {
-        let token = credentials.accessToken
-        let period: Task<Result<CursorUsageResponse, CursorUsageError>, Never>? = includePeriod
-            ? Task { await fetchPeriod(token: token) }
-            : nil
-        return CursorUsageRequests(
-            credentials: credentials,
-            period: period,
-            grokBot: Task { await fetchGrokBot(token: token, enabled: includeGrokBot) }
-        )
+    func fetchGrokBotUsage(
+        credentials: CursorCredentials? = nil
+    ) async throws -> (CursorGrokBotFetchResult, CursorCredentials) {
+        let resolvedCredentials: CursorCredentials
+        if let credentials {
+            resolvedCredentials = credentials
+        } else {
+            resolvedCredentials = try Self.loadCredentials()
+        }
+        return (await fetchGrokBot(token: resolvedCredentials.accessToken), resolvedCredentials)
     }
 
-    private func fetchPeriod(token: String) async -> Result<CursorUsageResponse, CursorUsageError> {
+    private func fetchPeriod(token: String) async throws -> CursorUsageResponse {
         do {
             let data = try await postDashboard(url: endpoint, token: token)
-            return .success(try JSONDecoder().decode(CursorUsageResponse.self, from: data))
+            return try JSONDecoder().decode(CursorUsageResponse.self, from: data)
         } catch let error as CursorUsageError {
-            return .failure(error)
+            throw error
         } catch {
-            return .failure(.decoding(error.localizedDescription))
+            throw CursorUsageError.decoding(error.localizedDescription)
         }
     }
 
-    private func fetchGrokBot(token: String, enabled: Bool) async -> CursorGrokBotFetchResult {
-        guard enabled else { return .unavailable }
+    private func fetchGrokBot(token: String) async -> CursorGrokBotFetchResult {
         do {
             let data = try await postDashboard(url: grokBotEndpoint, token: token)
             let status = try JSONDecoder().decode(CursorSandUsageStatus?.self, from: data)
             return .refreshed(status)
-        } catch CursorUsageError.throttled {
-            return .throttled
+        } catch CursorUsageError.throttled(let retryAfter) {
+            return .throttled(retryAfter: retryAfter)
         } catch {
             return .unavailable
         }
@@ -167,7 +120,7 @@ actor CursorUsageService {
                 throw CursorUsageError.tokenExpired
             }
             if http.statusCode == 429 {
-                throw CursorUsageError.throttled
+                throw CursorUsageError.throttled(retryAfter: RetryAfter.date(from: http))
             }
             throw CursorUsageError.httpStatus(http.statusCode)
         }
