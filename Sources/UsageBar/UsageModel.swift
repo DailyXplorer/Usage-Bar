@@ -10,6 +10,7 @@ final class UsageModel: ObservableObject {
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isLoading = false
+    @Published var menuPresented = false
 
     @Published private(set) var claudeBuckets: [LimitBucket] = []
     @Published private(set) var claudePlan: String?
@@ -33,31 +34,40 @@ final class UsageModel: ObservableObject {
 
     @Published private(set) var menuBarProviders: Set<LimitBucket.Provider>
 
-    private let service = UsageService()
-    private let claudeService = ClaudeUsageService()
-    private let cursorService = CursorUsageService()
-    private let opencodeService = OpenCodeUsageService()
-    private let commandcodeService = CommandCodeUsageService()
+    @Published private(set) var refreshStates: [UsageEndpoint: UsageRefreshState] = [:]
+
+    private let fetcher: UsageFetcher
+    private let now: () -> Date
+    private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private var snapshotDate: Date?
+    private let automaticallySchedules: Bool
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
+    private var requests: [UsageEndpoint: Task<Void, Never>] = [:]
     private var started = false
+    private var sleeping = false
 
-    private static let refreshInterval: TimeInterval = 5 * 60
-
-    private var claudeBackoff = ThrottleBackoff()
-    private var cursorBackoff = ThrottleBackoff()
-    private var cursorGrokBotBackoff = CursorGrokBotBackoff()
-    private var opencodeBackoff = ThrottleBackoff()
-    private var commandcodeBackoff = ThrottleBackoff()
-
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        fetcher: UsageFetcher = .live,
+        now: @escaping () -> Date = Date.init,
+        automaticallySchedules: Bool = true,
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { delay in
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+    ) {
         self.defaults = defaults
+        self.fetcher = fetcher
+        self.now = now
+        self.sleep = sleep
+        self.automaticallySchedules = automaticallySchedules
         menuBarProviders = MenuBarPreferences.load(from: defaults)
         restoreSnapshot()
     }
 
     private func restoreSnapshot() {
-        guard let snapshot = UsageSnapshotStore.load(from: defaults)?.refreshed() else { return }
+        guard let snapshot = UsageSnapshotStore.load(from: defaults)?.refreshed(now: now()) else { return }
+        snapshotDate = snapshot.fetchedAt
         buckets = snapshot.codexBuckets
         planType = snapshot.codexPlan
         claudeBuckets = snapshot.claudeBuckets
@@ -72,11 +82,21 @@ final class UsageModel: ObservableObject {
         commandcodeBuckets = snapshot.commandcodeBuckets
         commandcodePlan = snapshot.commandcodePlan
         commandcodeAvailable = !snapshot.commandcodeBuckets.isEmpty
-        lastUpdated = snapshot.fetchedAt
-        persistSnapshot(fetchedAt: snapshot.fetchedAt)
+        refreshStates = Dictionary(uniqueKeysWithValues: snapshot.refreshStates.compactMap { key, value in
+            UsageEndpoint(rawValue: key).map { ($0, value) }
+        })
+        updateLastUpdated()
+        errorMessage = refreshStates[.codex]?.lastError
+        claudeErrorMessage = refreshStates[.claude]?.lastError
+        cursorErrorMessage = refreshStates[.cursor]?.lastError
+        opencodeErrorMessage = refreshStates[.opencode]?.lastError
+        commandcodeErrorMessage = refreshStates[.commandcode]?.lastError
+        UsageSnapshotStore.save(snapshot, to: defaults)
     }
 
-    private func persistSnapshot(fetchedAt: Date) {
+    private func persistSnapshot() {
+        let fetchedAt = refreshStates.values.compactMap(\.lastSuccess).max() ?? snapshotDate ?? .distantPast
+        snapshotDate = fetchedAt
         UsageSnapshotStore.save(
             UsageSnapshot(
                 codexBuckets: buckets,
@@ -89,7 +109,8 @@ final class UsageModel: ObservableObject {
                 opencodePlan: opencodePlan,
                 commandcodeBuckets: commandcodeBuckets,
                 commandcodePlan: commandcodePlan,
-                fetchedAt: fetchedAt
+                fetchedAt: fetchedAt,
+                refreshStates: Dictionary(uniqueKeysWithValues: refreshStates.map { ($0.key.rawValue, $0.value) })
             ),
             to: defaults
         )
@@ -114,9 +135,12 @@ final class UsageModel: ObservableObject {
         let changed = next != menuBarProviders
         menuBarProviders = next
         MenuBarPreferences.save(next, to: defaults)
-        if changed, visible, started {
-            refreshNow(force: true)
+        guard changed else { return }
+        updateLastUpdated()
+        if visible, started {
+            refresh(endpoints: UsageEndpoint.allCases.filter { $0.provider == provider }, force: true)
         }
+        scheduleNextRefresh()
     }
 
 #if DEBUG
@@ -140,6 +164,12 @@ final class UsageModel: ObservableObject {
         commandcodeAvailable: Bool? = nil
     ) {
         self.defaults = defaults
+        fetcher = .live
+        now = Date.init
+        sleep = { delay in
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        automaticallySchedules = true
         buckets = previewBuckets
         self.planType = planType
         self.lastUpdated = lastUpdated
@@ -157,6 +187,11 @@ final class UsageModel: ObservableObject {
         self.commandcodeAvailable = commandcodeAvailable ?? !commandcodeBuckets.isEmpty
         self.menuBarProviders = menuBarProviders
         self.errorMessage = errorMessage
+        for endpoint in UsageEndpoint.allCases {
+            var state = UsageRefreshState()
+            state.succeed(at: lastUpdated)
+            refreshStates[endpoint] = state
+        }
     }
 #endif
 
@@ -309,7 +344,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarText: String {
-        if isLoading && buckets.isEmpty {
+        if isLoading(for: .codex) && buckets.isEmpty {
             return MenuBarSegment.placeholder
         }
         if errorMessage != nil && buckets.isEmpty {
@@ -321,7 +356,7 @@ final class UsageModel: ObservableObject {
 
     var menuBarAccessibilityText: String {
         guard let bucket = codexMenuBarBucket else {
-            if isLoading { return "loading" }
+            if isLoading(for: .codex) { return "loading" }
             if errorMessage != nil { return "unavailable" }
             return "not loaded"
         }
@@ -355,175 +390,228 @@ final class UsageModel: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        refreshNow(force: true)
-        refreshTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(Self.refreshInterval * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                self?.refreshNow()
-            }
+        refreshNow()
+    }
+
+    func stop() {
+        started = false
+        refreshTask?.cancel()
+        refreshTask = nil
+        for request in requests.values { request.cancel() }
+    }
+
+    func setSleeping(_ sleeping: Bool) {
+        self.sleeping = sleeping
+        if sleeping {
+            refreshTask?.cancel()
+            refreshTask = nil
+        } else if started {
+            refreshNow()
         }
     }
 
     func refreshNow(force: Bool = false) {
-        guard !isLoading else { return }
-        if !force, let lastUpdated,
-           Date().timeIntervalSince(lastUpdated) < Self.refreshInterval {
-            return
-        }
+        refresh(endpoints: UsageEndpoint.allCases, force: force)
+    }
 
-        isLoading = true
-        Task {
-            let codexFetch = Task { try await service.fetchUsage() }
-            let claudeFetch = claudeBackoff.isBlocked
-                ? nil
-                : Task { try await claudeService.fetchUsage() }
-            let cursorRequestPlan = CursorUsageRequestPlan(
-                periodBlocked: cursorBackoff.isBlocked,
-                grokBotBlocked: cursorGrokBotBackoff.isBlocked
-            )
-            let cursorFetch = cursorRequestPlan.shouldStart
-                ? Task {
-                    try await cursorService.startFetch(
-                        includePeriod: cursorRequestPlan.includePeriod,
-                        includeGrokBot: cursorRequestPlan.includeGrokBot
-                    )
+    private func refresh(endpoints: [UsageEndpoint], force: Bool) {
+        guard !sleeping else { return }
+        let date = now()
+        for endpoint in endpoints {
+            guard menuBarProviders.contains(endpoint.provider), requests[endpoint] == nil,
+                  (refreshStates[endpoint] ?? UsageRefreshState()).canStart(at: date, force: force) else {
+                continue
+            }
+            let fetch = fetcher.fetch
+            requests[endpoint] = Task { [weak self] in
+                let result: Result<UsageFetchResult, Error>
+                do {
+                    result = .success(try await fetch(endpoint))
+                } catch {
+                    result = .failure(error)
                 }
-                : nil
-            let opencodeFetch = opencodeBackoff.isBlocked
-                ? nil
-                : Task { try await opencodeService.fetchUsage() }
-            let commandcodeFetch = commandcodeBackoff.isBlocked
-                ? nil
-                : Task { try await commandcodeService.fetchUsage() }
+                guard let self else { return }
+                self.requests[endpoint] = nil
+                if !Task.isCancelled {
+                    self.receive(result, from: endpoint)
+                }
+                self.isLoading = !self.requests.isEmpty
+                self.scheduleNextRefresh()
+            }
+        }
+        isLoading = !requests.isEmpty
+        scheduleNextRefresh()
+    }
 
-            var succeeded = false
-            var cursorRequests: CursorUsageRequests?
-            var refreshedCursorUsage: CursorUsageResponse?
-
+    private func scheduleNextRefresh() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        guard started, automaticallySchedules, !sleeping else { return }
+        let deadline = UsageEndpoint.allCases
+            .filter { menuBarProviders.contains($0.provider) && requests[$0] == nil }
+            .map { (refreshStates[$0] ?? UsageRefreshState()).nextEligible }
+            .min()
+        guard let deadline else { return }
+        let delay = max(0.01, min(3600, deadline.timeIntervalSince(now())))
+        let sleep = sleep
+        refreshTask = Task { [weak self] in
             do {
-                apply(try await codexFetch.value)
-                errorMessage = nil
-                succeeded = true
+                try await sleep(delay)
             } catch {
-                errorMessage = error.localizedDescription
+                return
             }
+            guard !Task.isCancelled else { return }
+            self?.refreshNow()
+        }
+    }
 
-            if let claudeFetch {
-                do {
-                    let (usage, credentials) = try await claudeFetch.value
-                    applyClaude(usage, credentials: credentials)
-                    claudeErrorMessage = nil
-                    claudeBackoff.reset()
-                    succeeded = true
-                } catch ClaudeUsageError.notSignedIn {
-                    claudeAvailable = false
-                    claudeBuckets = []
-                    claudeErrorMessage = nil
-                } catch ClaudeUsageError.throttled(let retryAfter) {
-                    claudeBackoff.recordThrottle(retryAfter: retryAfter)
-                    claudeAvailable = true
-                    claudeErrorMessage = ClaudeUsageError.throttled(retryAfter: retryAfter).errorDescription
-                } catch {
-                    claudeAvailable = true
-                    claudeErrorMessage = error.localizedDescription
+    private func receive(_ result: Result<UsageFetchResult, Error>, from endpoint: UsageEndpoint) {
+        let date = now()
+        var state = refreshStates[endpoint] ?? UsageRefreshState()
+        switch result {
+        case .success(let usage):
+            switch usage {
+            case .codex(let response):
+                apply(response)
+                errorMessage = nil
+                state.succeed(at: date)
+            case .claude(let response, let credentials):
+                applyClaude(response, credentials: credentials)
+                claudeErrorMessage = nil
+                state.succeed(at: date)
+            case .cursor(let response, let credentials):
+                applyCursor(response, grokBot: .unavailable, credentials: credentials)
+                cursorErrorMessage = nil
+                state.succeed(at: date)
+            case .cursorGrokBot(let response, let credentials):
+                applyCursorGrokBot(response, credentials: credentials)
+                switch response {
+                case .refreshed:
+                    state.succeed(at: date)
+                case .unavailable:
+                    state.fail("Grok Bot usage is temporarily unavailable.", at: date)
+                case .throttled(let retryAfter):
+                    state.throttle("Grok Bot usage is temporarily rate limited.", retryAfter: retryAfter, at: date)
                 }
+            case .opencode(let response):
+                applyOpenCode(response)
+                opencodeErrorMessage = nil
+                state.succeed(at: date)
+            case .commandcode(let response):
+                applyCommandCode(response)
+                commandcodeErrorMessage = nil
+                state.succeed(at: date)
             }
-
-            if let cursorFetch {
-                do {
-                    let requests = try await cursorFetch.value
-                    cursorRequests = requests
-                    if let period = requests.period {
-                        let usageResult = await period.value
-                        let usage = try usageResult.get()
-                        applyCursor(usage, grokBot: .unavailable, credentials: requests.credentials)
-                        refreshedCursorUsage = usage
-                        cursorErrorMessage = nil
-                        cursorBackoff.reset()
-                        succeeded = true
-                    }
-                } catch CursorUsageError.notSignedIn {
-                    cursorAvailable = false
-                    cursorBuckets = []
-                    cursorErrorMessage = nil
-                } catch CursorUsageError.throttled(let retryAfter) {
-                    cursorBackoff.recordThrottle(retryAfter: retryAfter)
-                    cursorAvailable = true
-                    cursorErrorMessage = CursorUsageError.throttled(retryAfter: retryAfter).errorDescription
-                } catch {
-                    cursorAvailable = true
-                    cursorErrorMessage = error.localizedDescription
-                }
+        case .failure(let error):
+            state.fail(error.localizedDescription, at: date)
+            switch error {
+            case UsageError.throttled(let retryAfter),
+                 ClaudeUsageError.throttled(let retryAfter),
+                 CursorUsageError.throttled(let retryAfter),
+                 OpenCodeUsageError.throttled(let retryAfter),
+                 CommandCodeUsageError.throttled(let retryAfter):
+                state.throttle(error.localizedDescription, retryAfter: retryAfter, at: date)
+            default:
+                break
             }
+            applyError(error, to: endpoint)
+        }
+        refreshStates[endpoint] = state
+        updateLastUpdated()
+        persistSnapshot()
+    }
 
-            if let opencodeFetch {
-                do {
-                    let (usage, _) = try await opencodeFetch.value
-                    applyOpenCode(usage)
-                    opencodeErrorMessage = nil
-                    opencodeBackoff.reset()
-                    succeeded = true
-                } catch OpenCodeUsageError.notSignedIn {
-                    opencodeAvailable = false
-                    opencodeBuckets = []
-                    opencodeErrorMessage = nil
-                } catch OpenCodeUsageError.throttled(let retryAfter) {
-                    opencodeBackoff.recordThrottle(retryAfter: retryAfter)
-                    opencodeAvailable = true
-                    opencodeErrorMessage = OpenCodeUsageError.throttled(retryAfter: retryAfter).errorDescription
-                } catch {
-                    opencodeAvailable = true
-                    opencodeErrorMessage = error.localizedDescription
-                }
+    private func applyError(_ error: Error, to endpoint: UsageEndpoint) {
+        switch endpoint {
+        case .codex:
+            errorMessage = error.localizedDescription
+            if case UsageError.missingAuthFile = error {
+                buckets = []
+                planType = nil
+                reached = false
+                resetCredits = 0
+            } else if case UsageError.missingTokens = error {
+                buckets = []
+                planType = nil
+                reached = false
+                resetCredits = 0
             }
-
-            if let commandcodeFetch {
-                do {
-                    let (usage, _) = try await commandcodeFetch.value
-                    applyCommandCode(usage)
-                    commandcodeErrorMessage = nil
-                    commandcodeBackoff.reset()
-                    succeeded = true
-                } catch CommandCodeUsageError.notSignedIn {
-                    commandcodeAvailable = false
-                    commandcodeBuckets = []
-                    commandcodePlan = nil
-                    commandcodeErrorMessage = nil
-                } catch CommandCodeUsageError.throttled {
-                    commandcodeBackoff.recordThrottle()
-                    commandcodeAvailable = true
-                    commandcodeErrorMessage = CommandCodeUsageError.throttled.errorDescription
-                } catch {
-                    commandcodeAvailable = true
-                    commandcodeErrorMessage = error.localizedDescription
-                }
+        case .claude:
+            if case ClaudeUsageError.notSignedIn = error {
+                claudeAvailable = false
+                claudeBuckets = []
+                claudePlan = nil
+                claudeErrorMessage = nil
+            } else {
+                claudeAvailable = true
+                claudeErrorMessage = error.localizedDescription
             }
-
-            if let cursorRequests {
-                let grokBot = await cursorRequests.grokBot.value
-                cursorGrokBotBackoff.update(after: grokBot)
-                if let refreshedCursorUsage {
-                    applyCursor(
-                        refreshedCursorUsage,
-                        grokBot: grokBot,
-                        credentials: cursorRequests.credentials
-                    )
-                } else {
-                    applyCursorGrokBot(grokBot, credentials: cursorRequests.credentials)
-                    if case .refreshed = grokBot {
-                        succeeded = true
-                    }
-                }
+        case .cursor:
+            if case CursorUsageError.notSignedIn = error {
+                cursorAvailable = false
+                cursorBuckets = []
+                cursorPlan = nil
+                cursorErrorMessage = nil
+            } else {
+                cursorAvailable = true
+                cursorErrorMessage = error.localizedDescription
             }
-
-            isLoading = false
-            if succeeded {
-                let now = Date()
-                lastUpdated = now
-                persistSnapshot(fetchedAt: now)
+        case .cursorGrokBot:
+            if case CursorUsageError.notSignedIn = error {
+                cursorBuckets.removeAll { $0.kind == .grokBot }
+            }
+        case .opencode:
+            if case OpenCodeUsageError.notSignedIn = error {
+                opencodeAvailable = false
+                opencodeBuckets = []
+                opencodePlan = nil
+                opencodeErrorMessage = nil
+            } else {
+                opencodeAvailable = true
+                opencodeErrorMessage = error.localizedDescription
+            }
+        case .commandcode:
+            if case CommandCodeUsageError.notSignedIn = error {
+                commandcodeAvailable = false
+                commandcodeBuckets = []
+                commandcodePlan = nil
+                commandcodeErrorMessage = nil
+            } else {
+                commandcodeAvailable = true
+                commandcodeErrorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func updateLastUpdated() {
+        let endpoints = UsageEndpoint.allCases.filter {
+            menuBarProviders.contains($0.provider)
+                && ($0 != .cursorGrokBot || cursorBuckets.contains { $0.kind == .grokBot })
+        }
+        let dates = endpoints.compactMap { refreshStates[$0]?.lastSuccess }
+        lastUpdated = dates.count == endpoints.count ? dates.min() : nil
+    }
+
+    func freshnessMessage(for provider: LimitBucket.Provider, at date: Date) -> String? {
+        guard let endpoint = UsageEndpoint(rawValue: provider.rawValue),
+              let state = refreshStates[endpoint], let lastSuccess = state.lastSuccess else {
+            return "Saved data — refresh pending"
+        }
+        let sameDay = Calendar.current.isDate(lastSuccess, inSameDayAs: date)
+        let time = lastSuccess.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened)
+        if state.lastError != nil || date.timeIntervalSince(lastSuccess) > UsageRefreshState.interval + 1 {
+            return "Saved data from \(time)"
+        }
+        return "Updated at \(time)"
+    }
+
+    func grokBotMessage(at date: Date) -> String? {
+        guard let state = refreshStates[.cursorGrokBot] else { return nil }
+        if let error = state.lastError { return error }
+        guard cursorBuckets.contains(where: { $0.kind == .grokBot }),
+              let success = state.lastSuccess,
+              date.timeIntervalSince(success) > UsageRefreshState.interval + 1 else { return nil }
+        return "Grok Bot data from \(success.formatted(date: .omitted, time: .shortened))"
     }
 
     private func apply(_ usage: UsageResponse) {
@@ -533,13 +621,13 @@ final class UsageModel: ObservableObject {
             ?? usage.rateLimitResetCredits?.availableCount
             ?? 0
 
-        buckets = CodexLimits.buckets(from: usage)
+        buckets = CodexLimits.buckets(from: usage, now: now())
     }
 
     private func applyClaude(_ usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
         claudeAvailable = true
         claudePlan = credentials.planToken
-        claudeBuckets = ClaudeLimits.buckets(from: usage)
+        claudeBuckets = ClaudeLimits.buckets(from: usage, now: now())
     }
 
     private func applyCursor(
@@ -552,7 +640,8 @@ final class UsageModel: ObservableObject {
         cursorBuckets = CursorLimits.buckets(
             from: usage,
             grokBot: grokBot,
-            preserving: cursorBuckets
+            preserving: cursorBuckets,
+            now: now()
         )
     }
 
@@ -563,7 +652,8 @@ final class UsageModel: ObservableObject {
         cursorBuckets = CursorLimits.updatingGrokBot(
             in: cursorBuckets,
             from: grokBot,
-            preserving: cursorBuckets
+            preserving: cursorBuckets,
+            now: now()
         )
         if case .refreshed = grokBot {
             cursorAvailable = true
@@ -573,7 +663,7 @@ final class UsageModel: ObservableObject {
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
         opencodeAvailable = true
-        opencodeBuckets = OpenCodeLimits.buckets(from: usage)
+        opencodeBuckets = OpenCodeLimits.buckets(from: usage, now: now())
         opencodePlan = OpenCodeLimits.plan(for: opencodeBuckets)
     }
 
@@ -586,10 +676,15 @@ final class UsageModel: ObservableObject {
         }
         commandcodeAvailable = true
         commandcodePlan = usage.planId
-        commandcodeBuckets = CommandCodeLimits.buckets(from: usage)
+        commandcodeBuckets = CommandCodeLimits.buckets(from: usage, now: now())
+    }
+
+    func isLoading(for provider: LimitBucket.Provider) -> Bool {
+        requests.keys.contains { $0.provider == provider }
     }
 
     func sectionMessage(for provider: LimitBucket.Provider) -> String? {
+        let isLoading = isLoading(for: provider)
         switch provider {
         case .codex:
             if let errorMessage { return errorMessage }
@@ -634,12 +729,11 @@ final class UsageModel: ObservableObject {
     }
 
     func formattedReset(_ bucket: LimitBucket) -> String {
-        if bucket.reached {
-            return "Resets in \(Self.durationString(seconds: bucket.resetAfterSeconds ?? 0))"
+        guard let seconds = bucket.remainingResetSeconds(at: now()), let resetAt = bucket.resetAt else {
+            return ""
         }
-        guard let resetAt = bucket.resetAt else { return "" }
-        return "Resets in \(Self.durationString(seconds: bucket.resetAfterSeconds ?? 0))"
-            + " · \(resetAt.formatted(date: .omitted, time: .shortened))"
+        let duration = "Resets in \(Self.durationString(seconds: seconds))"
+        return bucket.reached ? duration : duration + " · \(resetAt.formatted(date: .omitted, time: .shortened))"
     }
 
     static func durationString(seconds: Int) -> String {

@@ -11,12 +11,13 @@ struct UsageSnapshot: Codable {
     var opencodePlan: String?
     var commandcodeBuckets: [LimitBucket] = []
     var commandcodePlan: String?
+    var refreshStates: [String: UsageRefreshState] = [:]
     var fetchedAt: Date
 
     private enum CodingKeys: String, CodingKey {
         case codexBuckets, codexPlan, claudeBuckets, claudePlan
         case cursorBuckets, cursorPlan, opencodeBuckets, opencodePlan
-        case commandcodeBuckets, commandcodePlan, fetchedAt
+        case commandcodeBuckets, commandcodePlan, fetchedAt, refreshStates
     }
 
     init(
@@ -30,7 +31,8 @@ struct UsageSnapshot: Codable {
         opencodePlan: String? = nil,
         commandcodeBuckets: [LimitBucket] = [],
         commandcodePlan: String? = nil,
-        fetchedAt: Date
+        fetchedAt: Date,
+        refreshStates: [String: UsageRefreshState] = [:]
     ) {
         self.codexBuckets = codexBuckets
         self.codexPlan = codexPlan
@@ -43,6 +45,7 @@ struct UsageSnapshot: Codable {
         self.commandcodeBuckets = commandcodeBuckets
         self.commandcodePlan = commandcodePlan
         self.fetchedAt = fetchedAt
+        self.refreshStates = refreshStates
     }
 
     init(from decoder: Decoder) throws {
@@ -58,6 +61,7 @@ struct UsageSnapshot: Codable {
         commandcodeBuckets = try container.decodeIfPresent([LimitBucket].self, forKey: .commandcodeBuckets) ?? []
         commandcodePlan = try container.decodeIfPresent(String.self, forKey: .commandcodePlan)
         fetchedAt = try container.decode(Date.self, forKey: .fetchedAt)
+        refreshStates = try container.decodeIfPresent([String: UsageRefreshState].self, forKey: .refreshStates) ?? [:]
     }
 
     func refreshed(now: Date = Date()) -> UsageSnapshot {
@@ -109,7 +113,7 @@ enum UsageSnapshotStore {
     }
 }
 
-struct ThrottleBackoff {
+struct ThrottleBackoff: Codable {
     static let steps: [TimeInterval] = [5 * 60, 15 * 60, 30 * 60, 60 * 60]
 
     private(set) var attempt = 0
@@ -121,8 +125,9 @@ struct ThrottleBackoff {
     }
 
     mutating func recordThrottle(now: Date = Date(), retryAfter: Date? = nil) {
-        let delay = Self.steps[min(attempt, Self.steps.count - 1)]
-        attempt = min(attempt + 1, Self.steps.count)
+        let step = max(0, min(attempt, Self.steps.count - 1))
+        let delay = Self.steps[step]
+        attempt = step + 1
         blockedUntil = max(
             now.addingTimeInterval(delay),
             retryAfter ?? .distantPast,
