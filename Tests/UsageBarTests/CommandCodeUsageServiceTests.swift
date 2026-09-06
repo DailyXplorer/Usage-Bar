@@ -40,6 +40,42 @@ final class CommandCodeUsageServiceTests: XCTestCase {
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 3)
     }
 
+    func testAccountCacheUsesTTLWhenPeriodEndedInThePast() async throws {
+        try await assertAccountCacheUsesTTL(periodEnd: start.addingTimeInterval(-1))
+    }
+
+    func testAccountCacheUsesTTLWhenPeriodEndsNow() async throws {
+        try await assertAccountCacheUsesTTL(periodEnd: start)
+    }
+
+    private func assertAccountCacheUsesTTL(periodEnd: Date) async throws {
+        let clock = CommandCodeUsageServiceTestClock(start)
+        let periodEndString = ISO8601DateFormatter().string(from: periodEnd)
+        CommandCodeUsageServiceStubURLProtocol.configure { request in
+            self.standardResponse(
+                for: request,
+                periodStart: "2026-09-01T00:00:00Z",
+                periodEnd: periodEndString
+            )
+        }
+        let service = makeService(clock: clock)
+
+        _ = try await fetchUsage(service, key: "key-one")
+        clock.advance(by: 1_799)
+        _ = try await fetchUsage(service, key: "key-one")
+
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 1)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 1)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 2)
+
+        clock.advance(by: 1)
+        _ = try await fetchUsage(service, key: "key-one")
+
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 2)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 3)
+    }
+
     func testChangedKeyInvalidatesCachedIdentityAndUsesItsOrganization() async throws {
         let clock = CommandCodeUsageServiceTestClock(start)
         CommandCodeUsageServiceStubURLProtocol.configure { request in

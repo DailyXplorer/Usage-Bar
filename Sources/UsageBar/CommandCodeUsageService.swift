@@ -302,7 +302,8 @@ actor CommandCodeUsageService {
     ) -> Date {
         let ttlExpiry = currentTime.addingTimeInterval(accountCacheLifetime)
         guard let currentPeriodEnd,
-              let periodEnd = ISODate.parse(currentPeriodEnd) else {
+              let periodEnd = ISODate.parse(currentPeriodEnd),
+              periodEnd > currentTime else {
             return ttlExpiry
         }
         return min(ttlExpiry, periodEnd)
