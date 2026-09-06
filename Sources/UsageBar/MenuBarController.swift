@@ -195,6 +195,7 @@ final class MenuBarController: NSObject {
             activeButton = nil
             return
         }
+        model.menuPresented = true
         panel.orderFrontRegardless()
         panel.makeKey()
         installDismissMonitors()
@@ -205,6 +206,7 @@ final class MenuBarController: NSObject {
     }
 
     private func hide() {
+        model.menuPresented = false
         removeDismissMonitors()
         statusItem.button?.highlight(false)
         if panel.isVisible {

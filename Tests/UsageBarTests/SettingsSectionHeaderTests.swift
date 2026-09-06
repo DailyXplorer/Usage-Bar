@@ -26,7 +26,7 @@ final class SettingsSectionHeaderTests: XCTestCase {
     @MainActor
     func testRenderedHeaderMatchesMenuSectionTitleFace() throws {
         AppTheme.loadFont()
-        let title = "Visible plans"
+        let title = "Tracked plans"
         let actual = try pngData(for: SettingsSectionHeader(title: title))
         let expected = try pngData(
             for: Text(title)
@@ -49,7 +49,7 @@ final class SettingsSectionHeaderTests: XCTestCase {
     @MainActor
     func testEverySettingsSectionTitleRendersAtTheSameHeight() throws {
         AppTheme.loadFont()
-        let heights = try ["Visible plans", "General", "Updates", "About"].map { title in
+        let heights = try ["Tracked plans", "General", "Updates", "About"].map { title in
             try pngSize(for: SettingsSectionHeader(title: title)).height
         }
 
