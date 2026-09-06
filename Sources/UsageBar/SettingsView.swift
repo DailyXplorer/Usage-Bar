@@ -28,7 +28,9 @@ struct SettingsView: View {
                     .accessibilityHint(hint(for: provider))
                 }
             } header: {
-                SettingsSectionHeader(title: "Visible plans")
+                SettingsSectionHeader(title: "Tracked plans")
+            } footer: {
+                Text("Enabled plans appear in the menu bar and refresh every 3 minutes. Server retry delays may take longer.")
             }
 
             Section {
@@ -178,7 +180,7 @@ struct SettingsView: View {
         if isLastEnabled(provider) {
             return "At least one plan must stay in the menu bar"
         }
-        return "Show \(provider.title) in the menu bar"
+        return "Show and refresh \(provider.title)"
     }
 }
 

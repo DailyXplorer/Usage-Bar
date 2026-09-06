@@ -5,21 +5,25 @@ struct ClaudeUsageResponse: Decodable {
     let fiveHour: ClaudeWindow?
     let sevenDay: ClaudeWindow?
     let sevenDayOpus: ClaudeWindow?
+    let sevenDaySonnet: ClaudeWindow?
 
     enum CodingKeys: String, CodingKey {
         case limits
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDayOpus = "seven_day_opus"
+        case sevenDaySonnet = "seven_day_sonnet"
     }
 }
 
 struct ClaudeLimitEntry: Decodable {
     struct Scope: Decodable {
         struct Model: Decodable {
+            let id: String?
             let displayName: String?
 
             enum CodingKeys: String, CodingKey {
+                case id
                 case displayName = "display_name"
             }
         }
@@ -74,6 +78,7 @@ enum ClaudeLimits {
         return LimitBucket(
             provider: .claude,
             kind: kind,
+            scope: scope(for: entry),
             name: label(kind: entry.kind, scopeModel: entry.scope?.model?.displayName),
             usedPercent: clampPercent(percent),
             resetAt: resetAt,
@@ -84,20 +89,22 @@ enum ClaudeLimits {
     }
 
     private static func fallbackBuckets(from response: ClaudeUsageResponse, now: Date) -> [LimitBucket] {
-        let windows: [(String, ClaudeWindow?)] = [
-            (sessionKind, response.fiveHour),
-            (weeklyAllKind, response.sevenDay),
-            (weeklyScopedKind, response.sevenDayOpus),
+        let windows: [(kind: String, window: ClaudeWindow?, scopeModel: String?)] = [
+            (sessionKind, response.fiveHour, nil),
+            (weeklyAllKind, response.sevenDay, nil),
+            (weeklyScopedKind, response.sevenDayOpus, "Opus"),
+            (weeklyScopedKind, response.sevenDaySonnet, "Sonnet"),
         ]
-        return windows.compactMap { rawKind, window in
+        return windows.compactMap { rawKind, window, scopeModel in
             guard let window, let utilization = window.utilization else { return nil }
             let resetAt = ISODate.parse(window.resetsAt)
             return LimitBucket(
                 provider: .claude,
                 kind: kind(for: rawKind),
+                scope: scopeModel.map(legacyModelScope),
                 name: label(
                     kind: rawKind,
-                    scopeModel: rawKind == weeklyScopedKind ? "Opus" : nil
+                    scopeModel: scopeModel
                 ),
                 usedPercent: clampPercent(utilization),
                 resetAt: resetAt,
@@ -126,20 +133,26 @@ enum ClaudeLimits {
     static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
         guard bucket.provider == .claude else { return bucket }
         let nextName: String
+        let nextScope: String?
         switch bucket.kind {
         case .session:
             nextName = label(kind: sessionKind, scopeModel: nil)
+            nextScope = bucket.scope
         case .weeklyAll:
             nextName = label(kind: weeklyAllKind, scopeModel: nil)
+            nextScope = bucket.scope
         case .weeklyScoped:
-            nextName = label(kind: weeklyScopedKind, scopeModel: scopedModel(fromStoredName: bucket.name))
+            let model = scopedModel(fromStoredName: bucket.name)
+            nextName = label(kind: weeklyScopedKind, scopeModel: model)
+            nextScope = bucket.scope ?? model.map(legacyModelScope)
         default:
             return bucket
         }
-        guard nextName != bucket.name else { return bucket }
+        guard nextName != bucket.name || nextScope != bucket.scope else { return bucket }
         return LimitBucket(
             provider: bucket.provider,
             kind: bucket.kind,
+            scope: nextScope,
             name: nextName,
             usedPercent: bucket.usedPercent,
             resetAt: bucket.resetAt,
@@ -160,6 +173,26 @@ enum ClaudeLimits {
             return nil
         }
         return remainder
+    }
+
+    private static func scope(for entry: ClaudeLimitEntry) -> String? {
+        guard entry.kind == weeklyScopedKind else {
+            return kind(for: entry.kind) == .other ? nonEmpty(entry.kind) : nil
+        }
+        if let modelID = nonEmpty(entry.scope?.model?.id) {
+            return "model:\(modelID)"
+        }
+        guard let displayName = nonEmpty(entry.scope?.model?.displayName) else { return nil }
+        return legacyModelScope(displayName)
+    }
+
+    private static func legacyModelScope(_ displayName: String) -> String {
+        "model-name:\(displayName.lowercased())"
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 
     private static func kind(for rawKind: String?) -> LimitBucket.Kind {

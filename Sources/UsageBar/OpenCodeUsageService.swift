@@ -8,7 +8,7 @@ enum OpenCodeUsageError: LocalizedError {
     case notSignedIn
     case invalidKey
     case notSubscribed
-    case throttled
+    case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
     case decoding(String)
@@ -22,7 +22,7 @@ enum OpenCodeUsageError: LocalizedError {
         case .notSubscribed:
             return "OpenCode Go subscription required. Subscribe at opencode.ai, then try again."
         case .throttled:
-            return "OpenCode Go usage endpoint is rate limited. Retrying at the next refresh."
+            return "OpenCode Go usage endpoint is rate limited. Waiting before retrying."
         case .network(let message):
             return "Network error: \(message)"
         case .httpStatus(let code):
@@ -63,7 +63,7 @@ actor OpenCodeUsageService {
                 throw OpenCodeUsageError.notSubscribed
             }
             if http.statusCode == 429 {
-                throw OpenCodeUsageError.throttled
+                throw OpenCodeUsageError.throttled(retryAfter: RetryAfter.date(from: http))
             }
             throw OpenCodeUsageError.httpStatus(http.statusCode)
         }

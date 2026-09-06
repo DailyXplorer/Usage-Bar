@@ -177,24 +177,31 @@ and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Claude's, Cursor's, OpenCode's and Command Code's usage endpoints return **429** if you hit
-them too often. Three safeguards:
+Each enabled provider refreshes independently, three minutes after its previous
+request completes. Opening the menu fetches only data that is due. Disabling a
+plan in **Tracked plans** stops new usage requests for it; requests already in
+flight may finish. Normal polling pauses during sleep and resumes with one due
+request per endpoint after wake.
 
-- the last state is **persisted** (`UserDefaults`) and redisplayed before any
-  request, so restarting the app costs no network call and never shows "–" when
-  the value is already known;
-- a request is only issued when the data is more than 5 minutes old (so opening
-  the popover does not systematically trigger a call; the "Retry" button does
-  force one);
-- on 429, **progressive backoff** (5 → 15 → 30 → 60 min), during which the last
-  known values stay on screen.
+- The last values and each endpoint's successful fetch time are persisted in
+  `UserDefaults`, so the menu can show saved data while a refresh is pending.
+- **Refresh usage** can bypass the normal three-minute interval, but never an
+  active rate-limit delay. Requests to the same endpoint cannot overlap.
+- All providers respect HTTP 429 with progressive backoff (5 → 15 → 30 → 60 min)
+  and any longer `Retry-After` deadline. These delays survive an app restart.
+  Cursor's monthly usage and Grok Bot have independent schedules and delays.
+- Command Code caches account and subscription details for up to 30 minutes,
+  expiring sooner at the known billing-period end. Credits remain live; the
+  optional summary has its own retry delay and its amounts are never cached.
 
-`Updated at` timestamps the **data**, not the last attempt: a failed refresh
-never passes stale state off as fresh. Persisted percentages are frozen at
-capture time, but countdowns are recomputed from the reset time when read back.
+Each section's timestamp belongs to its own data. Failed or overdue reads show
+**Saved data** without making another provider appear fresh. Older saved data
+without a reliable per-provider timestamp stays marked as pending until its
+first successful refresh.
 
-- Shows the **% remaining** (e.g. 66% remaining = 34% used).
-- Refreshes automatically every 5 minutes and when the popover opens.
+The menu and menu bar both show **% remaining** (66% left means 34% used).
+Countdowns use absolute reset times and update once a minute while the menu is
+open. Missing reset times are omitted until a response supplies a reliable date.
 
 ## Design
 

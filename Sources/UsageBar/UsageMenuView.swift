@@ -6,6 +6,8 @@ struct UsageMenuView: View {
 
     var onBeforeOpenSettings: () -> Void = {}
 
+    @State private var displayDate = Date()
+
     @EnvironmentObject private var model: UsageModel
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
@@ -27,6 +29,18 @@ struct UsageMenuView: View {
             )
         )
         .environment(\.font, AppTheme.font(size: 13))
+        .task(id: model.menuPresented) {
+            displayDate = Date()
+            guard model.menuPresented else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                } catch {
+                    return
+                }
+                displayDate = Date()
+            }
+        }
     }
 
     private var header: some View {
@@ -36,6 +50,10 @@ struct UsageMenuView: View {
                 .textSelection(.disabled)
 
             Spacer()
+
+            FooterIconButton(systemImage: "arrow.clockwise", accessibilityLabel: "Refresh usage") {
+                model.refreshNow(force: true)
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -88,7 +106,9 @@ struct UsageMenuView: View {
                     provider: .codex,
                     plan: model.planType,
                     buckets: model.buckets,
-                    message: model.sectionMessage(for: .codex)
+                    message: model.sectionMessage(for: .codex),
+                    freshness: model.freshnessMessage(for: .codex, at: displayDate),
+                    date: displayDate
                 )
             }
 
@@ -97,7 +117,9 @@ struct UsageMenuView: View {
                     provider: .claude,
                     plan: model.claudePlan,
                     buckets: model.claudeBuckets,
-                    message: model.sectionMessage(for: .claude)
+                    message: model.sectionMessage(for: .claude),
+                    freshness: model.freshnessMessage(for: .claude, at: displayDate),
+                    date: displayDate
                 )
             }
 
@@ -106,7 +128,10 @@ struct UsageMenuView: View {
                     provider: .cursor,
                     plan: model.cursorPlan,
                     buckets: model.cursorBuckets,
-                    message: model.sectionMessage(for: .cursor)
+                    message: model.sectionMessage(for: .cursor),
+                    freshness: model.freshnessMessage(for: .cursor, at: displayDate),
+                    date: displayDate,
+                    supplementalMessage: model.grokBotMessage(at: displayDate)
                 )
             }
 
@@ -115,7 +140,9 @@ struct UsageMenuView: View {
                     provider: .opencode,
                     plan: model.opencodePlan,
                     buckets: model.opencodeBuckets,
-                    message: model.sectionMessage(for: .opencode)
+                    message: model.sectionMessage(for: .opencode),
+                    freshness: model.freshnessMessage(for: .opencode, at: displayDate),
+                    date: displayDate
                 )
             }
 
@@ -124,7 +151,9 @@ struct UsageMenuView: View {
                     provider: .commandcode,
                     plan: model.commandcodePlan,
                     buckets: model.commandcodeBuckets,
-                    message: model.sectionMessage(for: .commandcode)
+                    message: model.sectionMessage(for: .commandcode),
+                    freshness: model.freshnessMessage(for: .commandcode, at: displayDate),
+                    date: displayDate
                 )
             }
         }
@@ -135,13 +164,7 @@ struct UsageMenuView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Group {
-                if let updatedAt = model.lastUpdated {
-                    Text("Updated at \(updatedAt.formatted(date: .omitted, time: .shortened))")
-                } else {
-                    Text("Codex, Claude, Cursor, OpenCode & Command Code usage")
-                }
-            }
+            Text("Refreshes every 3 min")
             .font(AppTheme.font(size: 10.5))
             .appSecondaryLabelStyle()
             .monospacedDigit()
@@ -201,6 +224,9 @@ private struct ProviderSection: View {
     let plan: String?
     let buckets: [LimitBucket]
     let message: String?
+    let freshness: String?
+    let date: Date
+    var supplementalMessage: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -216,11 +242,20 @@ private struct ProviderSection: View {
             .padding(.horizontal, 2)
 
             ForEach(buckets) { bucket in
-                LimitCard(bucket: bucket)
+                LimitCard(bucket: bucket, date: date)
             }
 
             if let message {
                 InlineWarning(message: message)
+            }
+            if let supplementalMessage {
+                InlineWarning(message: supplementalMessage)
+            }
+            if !buckets.isEmpty, let freshness {
+                Text(freshness)
+                    .font(AppTheme.font(size: 10))
+                    .appSecondaryLabelStyle()
+                    .monospacedDigit()
             }
         }
     }
@@ -247,6 +282,7 @@ private struct PlanBadge: View {
 
 private struct LimitCard: View {
     let bucket: LimitBucket
+    let date: Date
 
     private var color: Color {
         if bucket.reached {
@@ -267,9 +303,9 @@ private struct LimitCard: View {
                 trailingCaption
             }
 
-            UsageProgressBar(value: bucket.usedPercent, color: color)
+            UsageProgressBar(value: bucket.remainingPercent, color: color)
 
-            Text("\(bucket.usedPercent)% Used")
+            Text("\(bucket.remainingPercent)% Left")
                 .font(AppTheme.font(size: 11, weight: .medium))
                 .monospacedDigit()
                 .contentTransition(.numericText())
@@ -301,13 +337,13 @@ private struct LimitCard: View {
     }
 
     private var resetText: String? {
-        let duration = bucket.resetAfterSeconds ?? 0
+        let duration = bucket.remainingResetSeconds(at: date) ?? 0
         guard duration > 0 else { return nil }
         return "Resets in \(UsageModel.durationString(seconds: duration))"
     }
 
     private var accessibilityText: String {
-        var parts = ["\(bucket.displayName), \(bucket.usedPercent) percent used"]
+        var parts = ["\(bucket.displayName), \(bucket.remainingPercent) percent left"]
         if bucket.reached {
             parts.append("limit reached")
         } else if let resetText {
@@ -355,7 +391,7 @@ private struct LoadingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Loading limits…")
                     .font(AppTheme.font(size: 13, weight: .medium))
-                Text("Connecting to Codex, Claude, Cursor, OpenCode and Command Code")
+                Text("Connecting to your enabled plans")
                     .font(AppTheme.font(size: 11))
                     .appSecondaryLabelStyle()
             }
