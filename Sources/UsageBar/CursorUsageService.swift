@@ -10,7 +10,7 @@ enum CursorUsageError: LocalizedError {
     case notSignedIn
     case unreadableLogin
     case tokenExpired
-    case throttled
+    case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
     case decoding(String)
@@ -24,7 +24,7 @@ enum CursorUsageError: LocalizedError {
         case .tokenExpired:
             return "Cursor token expired. Open Cursor to refresh it."
         case .throttled:
-            return "Cursor usage endpoint is rate limited. Retrying at the next refresh."
+            return "Cursor usage endpoint is rate limited. Waiting before retrying."
         case .network(let message):
             return "Network error: \(message)"
         case .httpStatus(let code):
@@ -38,7 +38,7 @@ enum CursorUsageError: LocalizedError {
 enum CursorGrokBotFetchResult {
     case refreshed(CursorSandUsageStatus?)
     case unavailable
-    case throttled
+    case throttled(retryAfter: Date?)
 }
 
 struct CursorGrokBotBackoff {
@@ -56,8 +56,8 @@ struct CursorGrokBotBackoff {
         switch result {
         case .refreshed:
             backoff.reset()
-        case .throttled:
-            backoff.recordThrottle(now: now)
+        case .throttled(let retryAfter):
+            backoff.recordThrottle(now: now, retryAfter: retryAfter)
         case .unavailable:
             break
         }
@@ -153,8 +153,8 @@ actor CursorUsageService {
             let data = try await postDashboard(url: grokBotEndpoint, token: token)
             let status = try JSONDecoder().decode(CursorSandUsageStatus?.self, from: data)
             return .refreshed(status)
-        } catch CursorUsageError.throttled {
-            return .throttled
+        } catch CursorUsageError.throttled(let retryAfter) {
+            return .throttled(retryAfter: retryAfter)
         } catch {
             return .unavailable
         }
@@ -167,7 +167,7 @@ actor CursorUsageService {
                 throw CursorUsageError.tokenExpired
             }
             if http.statusCode == 429 {
-                throw CursorUsageError.throttled
+                throw CursorUsageError.throttled(retryAfter: RetryAfter.date(from: http))
             }
             throw CursorUsageError.httpStatus(http.statusCode)
         }

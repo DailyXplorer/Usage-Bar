@@ -132,22 +132,22 @@ final class CursorUsageServiceTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 1_786_400_000)
         var backoff = CursorGrokBotBackoff()
 
-        backoff.update(after: .throttled, now: now)
+        backoff.update(after: .throttled(retryAfter: nil), now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(5 * 60))
 
         backoff.update(after: .unavailable, now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(5 * 60))
 
-        backoff.update(after: .throttled, now: now)
+        backoff.update(after: .throttled(retryAfter: nil), now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(15 * 60))
 
-        backoff.update(after: .throttled, now: now)
+        backoff.update(after: .throttled(retryAfter: nil), now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(30 * 60))
 
-        backoff.update(after: .throttled, now: now)
+        backoff.update(after: .throttled(retryAfter: nil), now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(60 * 60))
 
-        backoff.update(after: .throttled, now: now)
+        backoff.update(after: .throttled(retryAfter: nil), now: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(60 * 60))
 
         backoff.update(after: .refreshed(nil), now: now)
