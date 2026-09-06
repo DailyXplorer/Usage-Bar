@@ -81,6 +81,7 @@ enum OpenCodeLimits {
         return LimitBucket(
             provider: bucket.provider,
             kind: bucket.kind,
+            scope: bucket.scope,
             name: nextName,
             usedPercent: bucket.usedPercent,
             resetAt: bucket.resetAt,
