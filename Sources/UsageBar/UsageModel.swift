@@ -420,10 +420,10 @@ final class UsageModel: ObservableObject {
                     claudeAvailable = false
                     claudeBuckets = []
                     claudeErrorMessage = nil
-                } catch ClaudeUsageError.throttled {
-                    claudeBackoff.recordThrottle()
+                } catch ClaudeUsageError.throttled(let retryAfter) {
+                    claudeBackoff.recordThrottle(retryAfter: retryAfter)
                     claudeAvailable = true
-                    claudeErrorMessage = ClaudeUsageError.throttled.errorDescription
+                    claudeErrorMessage = ClaudeUsageError.throttled(retryAfter: retryAfter).errorDescription
                 } catch {
                     claudeAvailable = true
                     claudeErrorMessage = error.localizedDescription
@@ -447,10 +447,10 @@ final class UsageModel: ObservableObject {
                     cursorAvailable = false
                     cursorBuckets = []
                     cursorErrorMessage = nil
-                } catch CursorUsageError.throttled {
-                    cursorBackoff.recordThrottle()
+                } catch CursorUsageError.throttled(let retryAfter) {
+                    cursorBackoff.recordThrottle(retryAfter: retryAfter)
                     cursorAvailable = true
-                    cursorErrorMessage = CursorUsageError.throttled.errorDescription
+                    cursorErrorMessage = CursorUsageError.throttled(retryAfter: retryAfter).errorDescription
                 } catch {
                     cursorAvailable = true
                     cursorErrorMessage = error.localizedDescription
@@ -468,10 +468,10 @@ final class UsageModel: ObservableObject {
                     opencodeAvailable = false
                     opencodeBuckets = []
                     opencodeErrorMessage = nil
-                } catch OpenCodeUsageError.throttled {
-                    opencodeBackoff.recordThrottle()
+                } catch OpenCodeUsageError.throttled(let retryAfter) {
+                    opencodeBackoff.recordThrottle(retryAfter: retryAfter)
                     opencodeAvailable = true
-                    opencodeErrorMessage = OpenCodeUsageError.throttled.errorDescription
+                    opencodeErrorMessage = OpenCodeUsageError.throttled(retryAfter: retryAfter).errorDescription
                 } catch {
                     opencodeAvailable = true
                     opencodeErrorMessage = error.localizedDescription

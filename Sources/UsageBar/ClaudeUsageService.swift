@@ -27,7 +27,7 @@ struct ClaudeCredentials {
 enum ClaudeUsageError: LocalizedError {
     case notSignedIn
     case tokenExpired
-    case throttled
+    case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
     case decoding(String)
@@ -39,7 +39,7 @@ enum ClaudeUsageError: LocalizedError {
         case .tokenExpired:
             return "Claude token expired. Open Claude Code to refresh it."
         case .throttled:
-            return "Claude usage endpoint is rate limited. Retrying at the next refresh."
+            return "Claude usage endpoint is rate limited. Waiting before retrying."
         case .network(let message):
             return "Network error: \(message)"
         case .httpStatus(let code):
@@ -81,7 +81,7 @@ actor ClaudeUsageService {
                 throw ClaudeUsageError.tokenExpired
             }
             if http.statusCode == 429 {
-                throw ClaudeUsageError.throttled
+                throw ClaudeUsageError.throttled(retryAfter: RetryAfter.date(from: http))
             }
             throw ClaudeUsageError.httpStatus(http.statusCode)
         }

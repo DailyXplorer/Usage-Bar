@@ -9,6 +9,7 @@ enum UsageError: LocalizedError {
     case missingAuthFile
     case missingTokens
     case network(String)
+    case throttled(retryAfter: Date?)
     case httpStatus(Int)
     case decoding(String)
 
@@ -20,6 +21,8 @@ enum UsageError: LocalizedError {
             return "Missing tokens in auth.json. Run `codex login` again."
         case .network(let message):
             return "Network error: \(message)"
+        case .throttled:
+            return "Codex usage is temporarily rate limited."
         case .httpStatus(let code):
             return "HTTP \(code). Check that you are signed in to ChatGPT (codex login)."
         case .decoding(let message):
@@ -53,6 +56,9 @@ actor UsageService {
             throw UsageError.network("invalid response")
         }
         guard http.statusCode == 200 else {
+            if http.statusCode == 429 {
+                throw UsageError.throttled(retryAfter: RetryAfter.date(from: http))
+            }
             throw UsageError.httpStatus(http.statusCode)
         }
 

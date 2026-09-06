@@ -235,7 +235,7 @@ final class CursorLimitsTests: XCTestCase {
             )
         ]
 
-        for result in [CursorGrokBotFetchResult.unavailable, .throttled] {
+        for result in [CursorGrokBotFetchResult.unavailable, .throttled(retryAfter: nil)] {
             let buckets = CursorLimits.buckets(
                 from: try decode(),
                 grokBot: result,
@@ -265,7 +265,7 @@ final class CursorLimitsTests: XCTestCase {
             )
         ]
 
-        for result in [CursorGrokBotFetchResult.unavailable, .throttled] {
+        for result in [CursorGrokBotFetchResult.unavailable, .throttled(retryAfter: nil)] {
             let buckets = CursorLimits.buckets(
                 from: try decode(),
                 grokBot: result,

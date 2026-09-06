@@ -120,10 +120,14 @@ struct ThrottleBackoff {
         return blockedUntil > Date()
     }
 
-    mutating func recordThrottle(now: Date = Date()) {
+    mutating func recordThrottle(now: Date = Date(), retryAfter: Date? = nil) {
         let delay = Self.steps[min(attempt, Self.steps.count - 1)]
-        attempt += 1
-        blockedUntil = now.addingTimeInterval(delay)
+        attempt = min(attempt + 1, Self.steps.count)
+        blockedUntil = max(
+            now.addingTimeInterval(delay),
+            retryAfter ?? .distantPast,
+            blockedUntil ?? .distantPast
+        )
     }
 
     mutating func reset() {
