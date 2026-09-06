@@ -67,6 +67,13 @@ struct RateLimitResetCreditsSummary: Decodable {
 }
 
 struct LimitBucket: Identifiable, Codable {
+    struct IdentityKey: Hashable {
+        let provider: Provider
+        let kind: Kind
+        let scope: String?
+        let windowSeconds: Int?
+    }
+
     enum Provider: String, Codable, CaseIterable, Identifiable {
         case codex, claude, cursor, opencode, commandcode
 
@@ -93,12 +100,12 @@ struct LimitBucket: Identifiable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case provider, kind, name, usedPercent, resetAt, resetAfterSeconds
-        case limitWindowSeconds, reached, detail
+        case limitWindowSeconds, reached, detail, scope
     }
 
-    let id = UUID()
     var provider: Provider = .codex
     let kind: Kind
+    let scope: String?
     let name: String
     let usedPercent: Int
     let resetAt: Date?
@@ -110,6 +117,7 @@ struct LimitBucket: Identifiable, Codable {
     init(
         provider: Provider = .codex,
         kind: Kind,
+        scope: String? = nil,
         name: String,
         usedPercent: Int,
         resetAt: Date?,
@@ -120,6 +128,7 @@ struct LimitBucket: Identifiable, Codable {
     ) {
         self.provider = provider
         self.kind = kind
+        self.scope = scope
         self.name = name
         self.usedPercent = usedPercent
         self.resetAt = resetAt
@@ -133,6 +142,7 @@ struct LimitBucket: Identifiable, Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         provider = try container.decodeIfPresent(Provider.self, forKey: .provider) ?? .codex
         kind = try container.decode(Kind.self, forKey: .kind)
+        scope = try container.decodeIfPresent(String.self, forKey: .scope)
         name = try container.decode(String.self, forKey: .name)
         usedPercent = try container.decode(Int.self, forKey: .usedPercent)
         resetAt = try container.decodeIfPresent(Date.self, forKey: .resetAt)
@@ -146,6 +156,7 @@ struct LimitBucket: Identifiable, Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(provider, forKey: .provider)
         try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(scope, forKey: .scope)
         try container.encode(name, forKey: .name)
         try container.encode(usedPercent, forKey: .usedPercent)
         try container.encodeIfPresent(resetAt, forKey: .resetAt)
@@ -159,9 +170,23 @@ struct LimitBucket: Identifiable, Codable {
         max(0, min(100, 100 - usedPercent))
     }
 
+    var id: IdentityKey {
+        IdentityKey(
+            provider: provider,
+            kind: kind,
+            scope: scope ?? (kind == .other ? name : nil),
+            windowSeconds: limitWindowSeconds
+        )
+    }
+
     var displayName: String {
         guard let first = name.first else { return name }
         return String(first).uppercased() + name.dropFirst()
+    }
+
+    func remainingResetSeconds(at date: Date) -> Int? {
+        guard let resetAt else { return nil }
+        return max(0, Int(resetAt.timeIntervalSince(date).rounded()))
     }
 
     func recountingReset(from now: Date) -> LimitBucket {
@@ -245,19 +270,27 @@ enum CodexLimits {
                 now: now
             ))
         }
-        if let spark = sparkWindow(from: usage) {
+        for spark in additionalWindows(from: usage, matching: isSpark) {
             result.append(makeBucket(
                 kind: .spark,
-                name: sparkDisplayName,
+                scope: "spark.\(spark.position.scopeName)",
+                name: additionalLimitName(
+                    base: sparkDisplayName,
+                    window: spark.window
+                ),
                 window: spark.window,
                 reached: spark.reached,
                 now: now
             ))
         }
-        if let reserve = lunaReserveWindow(from: usage) {
+        for reserve in additionalWindows(from: usage, matching: isLunaReserve) {
             result.append(makeBucket(
                 kind: .lunaReserve,
-                name: lunaReserveDisplayName,
+                scope: "luna-reserve.\(reserve.position.scopeName)",
+                name: additionalLimitName(
+                    base: lunaReserveDisplayName,
+                    window: reserve.window
+                ),
                 window: reserve.window,
                 reached: reserve.reached,
                 now: now
@@ -266,12 +299,15 @@ enum CodexLimits {
         return result
     }
 
-    private static func sparkWindow(
-        from usage: UsageResponse
-    ) -> (window: RateLimitWindow, reached: Bool)? {
-        guard let match = usage.additionalRateLimits?.first(where: isSpark) else { return nil }
-        guard let window = match.rateLimit?.primaryWindow else { return nil }
-        return (window, match.rateLimit?.limitReached ?? false)
+    private enum AdditionalWindowPosition {
+        case primary, secondary
+
+        var scopeName: String {
+            switch self {
+            case .primary: return "primary"
+            case .secondary: return "secondary"
+            }
+        }
     }
 
     private static func isSpark(_ item: AdditionalRateLimit) -> Bool {
@@ -280,16 +316,38 @@ enum CodexLimits {
         return name.range(of: "spark", options: .caseInsensitive) != nil
     }
 
-    private static func lunaReserveWindow(
-        from usage: UsageResponse
-    ) -> (window: RateLimitWindow, reached: Bool)? {
-        guard let match = usage.additionalRateLimits?.first(where: isLunaReserve) else { return nil }
-        guard let window = match.rateLimit?.primaryWindow else { return nil }
-        return (window, match.rateLimit?.limitReached ?? false)
+    private static func additionalWindows(
+        from usage: UsageResponse,
+        matching predicate: (AdditionalRateLimit) -> Bool
+    ) -> [(window: RateLimitWindow, position: AdditionalWindowPosition, reached: Bool)] {
+        guard let match = usage.additionalRateLimits?.first(where: predicate),
+              let rateLimit = match.rateLimit else {
+            return []
+        }
+        let reached = rateLimit.limitReached ?? false
+        var windows: [(window: RateLimitWindow, position: AdditionalWindowPosition, reached: Bool)] = []
+        if let primary = rateLimit.primaryWindow {
+            windows.append((primary, .primary, reached))
+        }
+        if let secondary = rateLimit.secondaryWindow {
+            windows.append((secondary, .secondary, reached))
+        }
+        return windows
     }
 
     private static func isLunaReserve(_ item: AdditionalRateLimit) -> Bool {
         item.limitName == lunaReserveLimitName
+    }
+
+    private static func additionalLimitName(base: String, window: RateLimitWindow) -> String {
+        switch WindowLabels.label(forWindowSeconds: window.limitWindowSeconds, isSecondary: false) {
+        case WindowLabels.currentSession:
+            return "\(base) 5-Hour Limit"
+        case WindowLabels.weeklyLimit:
+            return "\(base) Weekly Limit"
+        default:
+            return base
+        }
     }
 
     static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
@@ -306,6 +364,7 @@ enum CodexLimits {
         return LimitBucket(
             provider: bucket.provider,
             kind: bucket.kind,
+            scope: bucket.scope,
             name: nextName,
             usedPercent: bucket.usedPercent,
             resetAt: bucket.resetAt,
@@ -318,6 +377,7 @@ enum CodexLimits {
 
     private static func makeBucket(
         kind: LimitBucket.Kind,
+        scope: String? = nil,
         name: String? = nil,
         window: RateLimitWindow,
         isSecondary: Bool = false,
@@ -325,10 +385,12 @@ enum CodexLimits {
         now: Date
     ) -> LimitBucket {
         let resetAt = window.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+            ?? window.resetAfterSeconds.map { now.addingTimeInterval(TimeInterval(max(0, $0))) }
         let resetAfterSeconds = window.resetAfterSeconds
             ?? resetAt.map { max(0, Int($0.timeIntervalSince(now).rounded())) }
         return LimitBucket(
             kind: kind,
+            scope: scope,
             name: name ?? WindowLabels.label(
                 forWindowSeconds: window.limitWindowSeconds,
                 isSecondary: isSecondary

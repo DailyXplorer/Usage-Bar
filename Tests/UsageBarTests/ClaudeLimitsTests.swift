@@ -24,6 +24,17 @@ final class ClaudeLimitsTests: XCTestCase {
         try JSONDecoder().decode(ClaudeUsageResponse.self, from: Data(payload.utf8))
     }
 
+    func testUnknownQuotaKindsKeepDistinctStableIdentities() throws {
+        let response = try JSONDecoder().decode(ClaudeUsageResponse.self, from: Data(
+            #"{"limits":[{"kind":"daily_routines","percent":10},{"kind":"monthly_credits","percent":20}]}"#.utf8
+        ))
+        let first = ClaudeLimits.buckets(from: response)
+        let second = ClaudeLimits.buckets(from: response)
+        XCTAssertEqual(first.count, 2)
+        XCTAssertEqual(Set(first.map(\.id)).count, 2)
+        XCTAssertEqual(first.map(\.id), second.map(\.id))
+    }
+
     func testLabelsDropWindowPrefixes() {
         XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.sessionKind, scopeModel: nil), "Current Session")
         XCTAssertEqual(ClaudeLimits.label(kind: ClaudeLimits.weeklyAllKind, scopeModel: nil), "All Models")
@@ -115,14 +126,42 @@ final class ClaudeLimitsTests: XCTestCase {
         let legacy = """
         {"five_hour": {"utilization": 25.0, "resets_at": "2026-08-08T23:40:00Z"},
          "seven_day": {"utilization": 10.0, "resets_at": "2026-08-10T23:00:00Z"},
-         "seven_day_opus": {"utilization": 90.0, "resets_at": "2026-08-10T23:00:00Z"}}
+         "seven_day_opus": {"utilization": 90.0, "resets_at": "2026-08-10T23:00:00Z"},
+         "seven_day_sonnet": {"utilization": 50.0, "resets_at": "2026-08-10T23:00:00Z"}}
         """
         let response = try JSONDecoder().decode(ClaudeUsageResponse.self, from: Data(legacy.utf8))
         let buckets = ClaudeLimits.buckets(from: response)
 
-        XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
-        XCTAssertEqual(buckets.map(\.remainingPercent), [75, 90, 10])
+        XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped, .weeklyScoped])
+        XCTAssertEqual(buckets.map(\.remainingPercent), [75, 90, 10, 50])
         XCTAssertEqual(buckets[2].displayName, "Opus")
+        XCTAssertEqual(buckets[3].displayName, "Sonnet")
+        XCTAssertNotEqual(buckets[2].id, buckets[3].id)
+    }
+
+    func testScopedModelIDsDisambiguateMatchingDisplayNames() throws {
+        let payload = """
+        {
+          "limits": [
+            {
+              "kind": "weekly_scoped",
+              "percent": 10,
+              "scope": {"model": {"id": "claude-opus-4-6", "display_name": "Claude"}}
+            },
+            {
+              "kind": "weekly_scoped",
+              "percent": 20,
+              "scope": {"model": {"id": "claude-sonnet-4-5", "display_name": "Claude"}}
+            }
+          ]
+        }
+        """
+        let response = try JSONDecoder().decode(ClaudeUsageResponse.self, from: Data(payload.utf8))
+        let buckets = ClaudeLimits.buckets(from: response)
+
+        XCTAssertEqual(buckets.map(\.displayName), ["Claude", "Claude"])
+        XCTAssertEqual(buckets.map(\.scope), ["model:claude-opus-4-6", "model:claude-sonnet-4-5"])
+        XCTAssertNotEqual(buckets[0].id, buckets[1].id)
     }
 
     func testISODateParsesSixDigitFractionalSeconds() {

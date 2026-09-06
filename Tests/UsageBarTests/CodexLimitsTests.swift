@@ -47,6 +47,47 @@ final class CodexLimitsTests: XCTestCase {
         XCTAssertEqual(buckets[1].usedPercent, 3)
     }
 
+    func testAdditionalLimitSecondaryWindowsKeepSeparateSparkAndReserveBars() throws {
+        let payload = """
+        {
+          "additional_rate_limits": [
+            {
+              "limit_name": "GPT-5.3-Codex-Spark",
+              "metered_feature": "codex_bengalfox",
+              "rate_limit": {
+                "primary_window": {"used_percent": 12, "limit_window_seconds": 18000},
+                "secondary_window": {"used_percent": 34, "limit_window_seconds": 604800}
+              }
+            },
+            {
+              "limit_name": "gpt-reserve",
+              "rate_limit": {
+                "primary_window": {"used_percent": 56, "limit_window_seconds": 18000},
+                "secondary_window": {"used_percent": 78, "limit_window_seconds": 604800}
+              }
+            }
+          ]
+        }
+        """
+        let buckets = CodexLimits.buckets(from: try decode(payload), now: now)
+
+        XCTAssertEqual(buckets.map(\.kind), [.spark, .spark, .lunaReserve, .lunaReserve])
+        XCTAssertEqual(buckets.map(\.name), [
+            "Spark 5-Hour Limit",
+            "Spark Weekly Limit",
+            "Luna Reserve 5-Hour Limit",
+            "Luna Reserve Weekly Limit",
+        ])
+        XCTAssertEqual(buckets.map(\.scope), [
+            "spark.primary",
+            "spark.secondary",
+            "luna-reserve.primary",
+            "luna-reserve.secondary",
+        ])
+        XCTAssertNotEqual(buckets[0].id, buckets[1].id)
+        XCTAssertNotEqual(buckets[2].id, buckets[3].id)
+    }
+
     func testEmptyAdditionalLimitsHideSpark() throws {
         let payload = """
         {
@@ -168,10 +209,10 @@ final class CodexLimitsTests: XCTestCase {
         """
         let buckets = CodexLimits.buckets(from: try decode(payload), now: now)
 
-        XCTAssertEqual(buckets.map(\.name), ["Weekly Limit", "Spark", "Luna Reserve"])
+        XCTAssertEqual(buckets.map(\.name), ["Weekly Limit", "Spark 5-Hour Limit", "Luna Reserve Weekly Limit"])
         XCTAssertEqual(buckets.map(\.kind), [.primary, .spark, .lunaReserve])
         XCTAssertEqual(buckets.map(\.usedPercent), [7, 0, 0])
-        let reserve = try XCTUnwrap(buckets.first { $0.name == "Luna Reserve" })
+        let reserve = try XCTUnwrap(buckets.first { $0.kind == .lunaReserve })
         XCTAssertEqual(reserve.remainingPercent, 100)
         XCTAssertEqual(reserve.resetAt, Date(timeIntervalSince1970: 1_788_682_021))
         XCTAssertFalse(reserve.reached)
