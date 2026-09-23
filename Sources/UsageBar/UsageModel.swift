@@ -161,11 +161,12 @@ final class UsageModel: ObservableObject {
         errorMessage: String? = nil,
         cursorAvailable: Bool? = nil,
         opencodeAvailable: Bool? = nil,
-        commandcodeAvailable: Bool? = nil
+        commandcodeAvailable: Bool? = nil,
+        now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         fetcher = .live
-        now = Date.init
+        self.now = now
         sleep = { delay in
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -196,7 +197,7 @@ final class UsageModel: ObservableObject {
 #endif
 
     var claudeSession: LimitBucket? {
-        claudeBuckets.first { $0.kind == .session }
+        claudeBuckets.first { $0.kind == .session && !$0.hasReset(at: now()) }
     }
 
     var menuBarClaudeText: String? {
