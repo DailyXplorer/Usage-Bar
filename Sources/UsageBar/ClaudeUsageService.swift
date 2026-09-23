@@ -251,28 +251,19 @@ actor ClaudeUsageService {
     }
 
     private static func keychainData() -> Data? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", keychainService, "-w"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0, !data.isEmpty else { return nil }
-        return data
+        security(["find-generic-password", "-s", keychainService, "-w"]).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     private static func keychainAccount() -> String? {
+        security(["find-generic-password", "-s", keychainService]).flatMap {
+            ClaudeKeychainCommand.account(fromAttributes: String(decoding: $0, as: UTF8.self))
+        }
+    }
+
+    private static func security(_ arguments: [String]) -> Data? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", keychainService]
+        process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
@@ -284,8 +275,7 @@ actor ClaudeUsageService {
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return ClaudeKeychainCommand.account(fromAttributes: String(decoding: data, as: UTF8.self))
+        return process.terminationStatus == 0 ? data : nil
     }
 
     private static func saveKeychainData(_ data: Data) throws {
@@ -306,7 +296,8 @@ actor ClaudeUsageService {
             throw ClaudeUsageError.credentialsNotSaved
         }
         if let stdin = invocation.input {
-            input.fileHandleForWriting.write(Data(stdin.utf8))
+            _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            try? input.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
             try? input.fileHandleForWriting.close()
         }
         process.waitUntilExit()
