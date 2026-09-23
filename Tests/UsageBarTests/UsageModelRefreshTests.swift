@@ -34,11 +34,12 @@ final class UsageModelRefreshTests: XCTestCase {
     func testMenuBarRedrawsWhenTheClaudeSessionResets() async throws {
         let fixture = TestDefaultsFixture(providers: [.claude])
         defer { fixture.clear() }
+        let clock = TestClock(fixedNow())
         let gate = SleepGate()
         let model = UsageModel(
             defaults: fixture.defaults,
             fetcher: UsageFetcher { _ in try testClaudeResult(resetsAt: fixedNow().addingTimeInterval(120)) },
-            now: fixedNow,
+            now: { clock.date },
             automaticallySchedules: false,
             sleep: { delay in await gate.sleep(delay) }
         )
@@ -49,13 +50,41 @@ final class UsageModelRefreshTests: XCTestCase {
         model.refreshNow(force: true)
         let receivedClaude = await waitUntil { model.claudeAvailable && !model.isLoading }
         let scheduled = await gate.waitForSleeps()
+        let displayBeforeReset = model.menuBarClaudeDisplay
         let redrawsBeforeReset = redraws
+        clock.advance(by: 120)
         await gate.open()
         let redrawnAtReset = await waitUntil { redraws > redrawsBeforeReset }
 
         XCTAssertTrue(receivedClaude)
         XCTAssertEqual(scheduled, [120])
+        XCTAssertEqual(displayBeforeReset, "75%")
         XCTAssertTrue(redrawnAtReset)
+        XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
+    }
+
+    @MainActor
+    func testClaudeSessionRedrawWaitsInBoundedSteps() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let clock = TestClock(fixedNow())
+        let gate = SleepGate()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { _ in try testClaudeResult(resetsAt: fixedNow().addingTimeInterval(5000)) },
+            now: { clock.date },
+            automaticallySchedules: false,
+            sleep: { delay in await gate.sleep(delay) }
+        )
+
+        model.refreshNow(force: true)
+        let firstStep = await gate.waitForSleeps(count: 1)
+        clock.advance(by: 3600)
+        await gate.open()
+        let secondStep = await gate.waitForSleeps(count: 2)
+
+        XCTAssertEqual(firstStep, [3600])
+        XCTAssertEqual(secondStep, [3600, 1400])
     }
 
     @MainActor
@@ -649,9 +678,9 @@ private actor SleepGate {
         await withCheckedContinuation { waiters.append($0) }
     }
 
-    func waitForSleeps() async -> [TimeInterval] {
+    func waitForSleeps(count: Int = 1) async -> [TimeInterval] {
         let deadline = Date().addingTimeInterval(testWaitTimeout)
-        while delays.isEmpty, Date() < deadline {
+        while delays.count < count, Date() < deadline {
             await Task.yield()
         }
         return delays

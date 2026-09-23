@@ -450,15 +450,19 @@ final class UsageModel: ObservableObject {
     private func scheduleClaudeSessionRedraw() {
         claudeSessionRedraw?.cancel()
         guard let resetAt = claudeSession?.resetAt else { return }
-        let delay = max(0, resetAt.timeIntervalSince(now()))
+        let now = now
         let sleep = sleep
         claudeSessionRedraw = Task { [weak self] in
-            do {
-                try await sleep(delay)
-            } catch {
-                return
+            var remaining = resetAt.timeIntervalSince(now())
+            while remaining > 0 {
+                do {
+                    try await sleep(min(remaining, 3600))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                remaining = resetAt.timeIntervalSince(now())
             }
-            guard !Task.isCancelled else { return }
             self?.objectWillChange.send()
         }
     }
