@@ -189,6 +189,11 @@ struct LimitBucket: Identifiable, Codable {
         return max(0, Int(resetAt.timeIntervalSince(date).rounded()))
     }
 
+    func hasReset(at date: Date) -> Bool {
+        guard let resetAt else { return false }
+        return resetAt <= date
+    }
+
     func recountingReset(from now: Date) -> LimitBucket {
         guard let resetAt else { return self }
         var copy = self

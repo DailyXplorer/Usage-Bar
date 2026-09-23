@@ -190,7 +190,8 @@ final class ClaudeLimitsTests: XCTestCase {
             planType: "prolite",
             lastUpdated: Date(),
             claudeBuckets: ClaudeLimits.buckets(from: try decode()),
-            claudePlan: "max"
+            claudePlan: "max",
+            now: { Date(timeIntervalSince1970: 1_786_230_000) }
         )
 
         XCTAssertEqual(model.menuBarText, "58%")
@@ -236,6 +237,31 @@ final class ClaudeLimitsTests: XCTestCase {
         XCTAssertNil(model.menuBarClaudeText)
         XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
         XCTAssertNil(model.menuBarClaudeAccessibilityText)
+    }
+
+    @MainActor
+    func testMenuBarHidesClaudeSessionWhoseWindowAlreadyReset() {
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "prolite",
+            lastUpdated: Date(),
+            claudeBuckets: [
+                LimitBucket(
+                    provider: .claude,
+                    kind: .session,
+                    name: "Current Session",
+                    usedPercent: 10,
+                    resetAt: Date().addingTimeInterval(-60),
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 18_000,
+                    reached: false
+                )
+            ],
+            claudePlan: "max"
+        )
+
+        XCTAssertNil(model.menuBarClaudeText)
+        XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
     }
 
     @MainActor
