@@ -12,7 +12,9 @@ final class UsageModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var menuPresented = false
 
-    @Published private(set) var claudeBuckets: [LimitBucket] = []
+    @Published private(set) var claudeBuckets: [LimitBucket] = [] {
+        didSet { scheduleClaudeSessionRedraw() }
+    }
     @Published private(set) var claudePlan: String?
     @Published private(set) var claudeErrorMessage: String?
     @Published private(set) var claudeAvailable = false
@@ -43,6 +45,7 @@ final class UsageModel: ObservableObject {
     private let automaticallySchedules: Bool
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
+    private var claudeSessionRedraw: Task<Void, Never>?
     private var requests: [UsageEndpoint: Task<Void, Never>] = [:]
     private var started = false
     private var sleeping = false
@@ -442,6 +445,22 @@ final class UsageModel: ObservableObject {
         }
         isLoading = !requests.isEmpty
         scheduleNextRefresh()
+    }
+
+    private func scheduleClaudeSessionRedraw() {
+        claudeSessionRedraw?.cancel()
+        guard let resetAt = claudeSession?.resetAt else { return }
+        let delay = max(0, resetAt.timeIntervalSince(now()))
+        let sleep = sleep
+        claudeSessionRedraw = Task { [weak self] in
+            do {
+                try await sleep(delay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.objectWillChange.send()
+        }
     }
 
     private func scheduleNextRefresh() {

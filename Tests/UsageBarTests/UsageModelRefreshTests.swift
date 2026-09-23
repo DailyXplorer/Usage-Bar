@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import UsageBar
@@ -27,6 +28,34 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertTrue(recordedInitialRequest)
         XCTAssertEqual(endpoints, [.codex])
         XCTAssertTrue(receivedCodex)
+    }
+
+    @MainActor
+    func testMenuBarRedrawsWhenTheClaudeSessionResets() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let gate = SleepGate()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { _ in try testClaudeResult(resetsAt: fixedNow().addingTimeInterval(120)) },
+            now: fixedNow,
+            automaticallySchedules: false,
+            sleep: { delay in await gate.sleep(delay) }
+        )
+        var redraws = 0
+        let observation = model.objectWillChange.sink { redraws += 1 }
+        defer { observation.cancel() }
+
+        model.refreshNow(force: true)
+        let receivedClaude = await waitUntil { model.claudeAvailable && !model.isLoading }
+        let scheduled = await gate.waitForSleeps()
+        let redrawsBeforeReset = redraws
+        await gate.open()
+        let redrawnAtReset = await waitUntil { redraws > redrawsBeforeReset }
+
+        XCTAssertTrue(receivedClaude)
+        XCTAssertEqual(scheduled, [120])
+        XCTAssertTrue(redrawnAtReset)
     }
 
     @MainActor
@@ -579,11 +608,12 @@ private func testCodexResult() -> UsageFetchResult {
     )
 }
 
-private func testClaudeResult() throws -> UsageFetchResult {
+private func testClaudeResult(resetsAt: Date? = nil) throws -> UsageFetchResult {
+    let reset = resetsAt.map { #","resets_at":"\#(ISO8601DateFormatter().string(from: $0))""# } ?? ""
     let response = try JSONDecoder().decode(
         ClaudeUsageResponse.self,
         from: Data("""
-        {"five_hour":{"utilization":25}}
+        {"five_hour":{"utilization":25\(reset)}}
         """.utf8)
     )
     return .claude(
@@ -608,6 +638,29 @@ private func testCursorResult() throws -> UsageFetchResult {
         response,
         CursorCredentials(accessToken: "token", membershipType: "pro")
     )
+}
+
+private actor SleepGate {
+    private var delays: [TimeInterval] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func sleep(_ delay: TimeInterval) async {
+        delays.append(delay)
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func waitForSleeps() async -> [TimeInterval] {
+        let deadline = Date().addingTimeInterval(testWaitTimeout)
+        while delays.isEmpty, Date() < deadline {
+            await Task.yield()
+        }
+        return delays
+    }
+
+    func open() {
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
 }
 
 private actor EndpointCallLog {
