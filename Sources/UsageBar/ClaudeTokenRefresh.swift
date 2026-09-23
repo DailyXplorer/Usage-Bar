@@ -36,6 +36,10 @@ enum ClaudeTokenRefresh {
         ])
     }
 
+    static func allowsRedirect(to url: URL?) -> Bool {
+        url?.scheme == "https" && url?.host == endpoint.host
+    }
+
     static func storedCredentials(_ stored: Data, applying grant: ClaudeTokenGrant, now: Date) throws -> Data {
         guard var root = try JSONSerialization.jsonObject(with: stored) as? [String: Any],
               var oauth = root["claudeAiOauth"] as? [String: Any] else {
@@ -58,6 +62,17 @@ enum ClaudeTokenRefresh {
 
     private static func milliseconds(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+}
+
+final class ClaudeTokenRedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        ClaudeTokenRefresh.allowsRedirect(to: request.url) ? request : nil
     }
 }
 
