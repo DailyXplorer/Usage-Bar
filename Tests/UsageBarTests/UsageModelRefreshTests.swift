@@ -85,6 +85,8 @@ final class UsageModelRefreshTests: XCTestCase {
 
         XCTAssertEqual(firstStep, [3600])
         XCTAssertEqual(secondStep, [3600, 1400])
+        clock.advance(by: 1400)
+        await gate.open()
     }
 
     @MainActor
