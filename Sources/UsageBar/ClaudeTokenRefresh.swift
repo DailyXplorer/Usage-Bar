@@ -93,26 +93,61 @@ struct ClaudeKeychainCommand: Equatable {
 }
 
 struct ClaudeRefreshLock {
-    static let staleAfter: TimeInterval = 10
+    static let staleAfter: TimeInterval = 60
 
-    let url: URL
+    struct Hold {
+        fileprivate let owned: [(url: URL, modified: Date)]
 
-    func acquire(now: Date = Date()) -> Bool {
-        guard FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path) else { return true }
-        if create() { return true }
-        guard let modified = try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date,
-              now.timeIntervalSince(modified) > Self.staleAfter else {
-            return false
+        func release() {
+            for lock in owned.reversed() where ClaudeRefreshLock.modificationDate(of: lock.url) == lock.modified {
+                try? FileManager.default.removeItem(at: lock.url)
+            }
+        }
+    }
+
+    let urls: [URL]
+
+    init(claudeDirectory: URL) {
+        let directory = claudeDirectory.resolvingSymlinksInPath()
+        urls = [
+            claudeDirectory.appendingPathComponent(".oauth_refresh.lock"),
+            directory.deletingLastPathComponent().appendingPathComponent(directory.lastPathComponent + ".lock"),
+        ]
+    }
+
+    init(urls: [URL]) {
+        self.urls = urls
+    }
+
+    func acquire(now: Date = Date()) -> Hold? {
+        var owned: [(url: URL, modified: Date)] = []
+        for url in urls where FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path) {
+            guard let modified = Self.create(url, now: now) else {
+                Hold(owned: owned).release()
+                return nil
+            }
+            owned.append((url, modified))
+        }
+        return Hold(owned: owned)
+    }
+
+    private static func create(_ url: URL, now: Date) -> Date? {
+        if let modified = makeDirectory(url) { return modified }
+        guard let modified = modificationDate(of: url), now.timeIntervalSince(modified) > staleAfter else {
+            return nil
         }
         try? FileManager.default.removeItem(at: url)
-        return create()
+        return makeDirectory(url)
     }
 
-    func release() {
-        try? FileManager.default.removeItem(at: url)
+    private static func makeDirectory(_ url: URL) -> Date? {
+        guard (try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)) != nil else {
+            return nil
+        }
+        return modificationDate(of: url)
     }
 
-    private func create() -> Bool {
-        (try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)) != nil
+    fileprivate static func modificationDate(of url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 }

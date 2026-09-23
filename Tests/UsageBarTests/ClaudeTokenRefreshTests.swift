@@ -111,23 +111,58 @@ final class ClaudeTokenRefreshTests: XCTestCase {
         XCTAssertNil(ClaudeKeychainCommand.account(fromAttributes: #"    "acct"<blob>="""#))
     }
 
+    func testRefreshLockUsesBothClaudeCodeLockPaths() {
+        let lock = ClaudeRefreshLock(claudeDirectory: URL(fileURLWithPath: "/Users/nobody-\(UUID().uuidString)/.claude"))
+
+        XCTAssertEqual(lock.urls.map(\.lastPathComponent), [".oauth_refresh.lock", ".claude.lock"])
+        XCTAssertEqual(lock.urls[0].deletingLastPathComponent().lastPathComponent, ".claude")
+        XCTAssertEqual(lock.urls[1].deletingLastPathComponent(), lock.urls[0].deletingLastPathComponent().deletingLastPathComponent())
+    }
+
     func testRefreshLockDoesNotBlockWithoutClaudeDirectory() {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("missing-\(UUID().uuidString)")
             .appendingPathComponent(".oauth_refresh.lock")
 
-        XCTAssertTrue(ClaudeRefreshLock(url: url).acquire())
+        XCTAssertNotNil(ClaudeRefreshLock(urls: [url]).acquire())
     }
 
     func testRefreshLockIsExclusiveUntilReleasedOrStale() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("oauth-lock-\(UUID().uuidString)")
-        let lock = ClaudeRefreshLock(url: url)
-        defer { lock.release() }
+        let lock = ClaudeRefreshLock(urls: [temporaryLockURL()])
 
-        XCTAssertTrue(lock.acquire(now: Date()))
-        XCTAssertFalse(lock.acquire(now: Date()))
-        XCTAssertTrue(lock.acquire(now: Date().addingTimeInterval(ClaudeRefreshLock.staleAfter + 1)))
-        lock.release()
-        XCTAssertTrue(lock.acquire(now: Date()))
+        let first = try XCTUnwrap(lock.acquire(now: Date()))
+        XCTAssertNil(lock.acquire(now: Date()))
+        XCTAssertNil(lock.acquire(now: Date().addingTimeInterval(ClaudeRefreshLock.staleAfter - 5)))
+        first.release()
+        let second = try XCTUnwrap(lock.acquire(now: Date()))
+        XCTAssertNotNil(lock.acquire(now: Date().addingTimeInterval(ClaudeRefreshLock.staleAfter + 1)))
+        second.release()
+    }
+
+    func testRefreshLockRollsBackWhenTheLegacyLockIsHeld() throws {
+        let current = temporaryLockURL()
+        let legacy = temporaryLockURL()
+        let other = try XCTUnwrap(ClaudeRefreshLock(urls: [legacy]).acquire())
+        defer { other.release() }
+
+        XCTAssertNil(ClaudeRefreshLock(urls: [current, legacy]).acquire())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: current.path))
+    }
+
+    func testReleaseLeavesALockTakenOverByAnotherProcess() throws {
+        let url = temporaryLockURL()
+        let lock = ClaudeRefreshLock(urls: [url])
+        let stolen = try XCTUnwrap(lock.acquire())
+        try FileManager.default.removeItem(at: url)
+        let current = try XCTUnwrap(lock.acquire())
+        defer { current.release() }
+
+        stolen.release()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    private func temporaryLockURL() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("oauth-lock-\(UUID().uuidString)")
     }
 }
