@@ -72,6 +72,14 @@ final class ClaudeTokenRefreshTests: XCTestCase {
         )
     }
 
+    func testTokenRequestOnlyFollowsRedirectsThatStayOnTheTokenHost() {
+        XCTAssertTrue(ClaudeTokenRefresh.allowsRedirect(to: URL(string: "https://platform.claude.com/v2/oauth/token")))
+        XCTAssertFalse(ClaudeTokenRefresh.allowsRedirect(to: URL(string: "http://platform.claude.com/v1/oauth/token")))
+        XCTAssertFalse(ClaudeTokenRefresh.allowsRedirect(to: URL(string: "https://example.com/v1/oauth/token")))
+        XCTAssertFalse(ClaudeTokenRefresh.allowsRedirect(to: URL(string: "https://platform.claude.com.example.com/token")))
+        XCTAssertFalse(ClaudeTokenRefresh.allowsRedirect(to: nil))
+    }
+
     func testKeychainSaveUsesStdinLikeClaudeCode() {
         let command = ClaudeKeychainCommand.save(Data("{}".utf8), account: "louis", service: "Claude Code-credentials")
 
