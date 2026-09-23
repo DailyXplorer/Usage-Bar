@@ -69,7 +69,7 @@ actor ClaudeUsageService {
     private static let claudeDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude")
     private static let credentialsFile = claudeDirectory.appendingPathComponent(".credentials.json")
-    private static let refreshLock = ClaudeRefreshLock(url: claudeDirectory.appendingPathComponent(".oauth_refresh.lock"))
+    private static let refreshLock = ClaudeRefreshLock(claudeDirectory: claudeDirectory)
     private static let expiryMargin: TimeInterval = 60
 
     func fetchUsage() async throws -> (usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
@@ -113,13 +113,13 @@ actor ClaudeUsageService {
     }
 
     private func refreshCredentials() async throws -> ClaudeCredentials {
-        var acquired = Self.refreshLock.acquire()
-        for _ in 0..<5 where !acquired {
+        var hold = Self.refreshLock.acquire()
+        for _ in 0..<5 where hold == nil {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            acquired = Self.refreshLock.acquire()
+            hold = Self.refreshLock.acquire()
         }
-        guard acquired else { throw ClaudeUsageError.refreshInProgress }
-        defer { Self.refreshLock.release() }
+        guard let hold else { throw ClaudeUsageError.refreshInProgress }
+        defer { hold.release() }
 
         let stored = try Self.loadStoredCredentials()
         guard stored.credentials.isExpired(at: Date().addingTimeInterval(Self.expiryMargin)) else {
@@ -152,7 +152,12 @@ actor ClaudeUsageService {
             if http.statusCode == 429 {
                 throw ClaudeUsageError.throttled(retryAfter: RetryAfter.date(from: http))
             }
-            if (400..<500).contains(http.statusCode) {
+            if [400, 401, 403].contains(http.statusCode) {
+                if let current = Self.loadStoredCredentials(from: stored.source)?.credentials,
+                   current.refreshToken != refreshToken,
+                   !current.isExpired(at: Date().addingTimeInterval(Self.expiryMargin)) {
+                    return current
+                }
                 throw ClaudeUsageError.tokenExpired
             }
             throw ClaudeUsageError.httpStatus(http.statusCode)
