@@ -28,6 +28,18 @@ final class ClaudeCredentialsTests: XCTestCase {
         XCTAssertEqual(credentials(subscription: "max", tier: "max_20x_preview").planToken, "max_20x")
     }
 
+    func testExpiryUsesTheStoredDeadline() {
+        let deadline = Date(timeIntervalSince1970: 1_790_000_000)
+        let stored = ClaudeCredentials(accessToken: "token", subscriptionType: "max", rateLimitTier: nil, expiresAt: deadline)
+        XCTAssertFalse(stored.isExpired(at: deadline.addingTimeInterval(-1)))
+        XCTAssertTrue(stored.isExpired(at: deadline))
+        XCTAssertTrue(stored.isExpired(at: deadline.addingTimeInterval(2 * 24 * 3600)))
+    }
+
+    func testCredentialsWithoutDeadlineNeverExpireLocally() {
+        XCTAssertFalse(credentials(subscription: "max", tier: nil).isExpired(at: .distantFuture))
+    }
+
     private func credentials(subscription: String?, tier: String?) -> ClaudeCredentials {
         ClaudeCredentials(
             accessToken: "token",
