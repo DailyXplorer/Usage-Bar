@@ -116,7 +116,11 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 - Reads the OAuth token from the macOS keychain through `/usr/bin/security`,
   exactly the way Claude Code writes it — that is what avoids a keychain
   authorization prompt on every launch. Falls back to
-  `~/.claude/.credentials.json`. No token is ever copied or rewritten.
+  `~/.claude/.credentials.json`. No token is ever copied elsewhere.
+- When that token has expired, renews it the way Claude Code does, through
+  `https://platform.claude.com/v1/oauth/token`, and saves it back to the same
+  keychain entry or file. It first takes Claude Code's own refresh locks, so the
+  two never renew at the same time, and it changes only the token fields.
 - Queries `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code
   uses for its `/usage` command.
 - Mirrors Claude Code's three built-in bars: **Current session**,
@@ -236,16 +240,19 @@ open. Missing reset times are omitted until a response supplies a reliable date.
   publisher. GitHub over HTTPS and the installer script you inspect remain the
   trusted distribution channel.
 - No data leaves your machine beyond the usage requests to chatgpt.com,
-  api.anthropic.com, api2.cursor.sh, opencode.ai and api.commandcode.ai,
+  api.anthropic.com, platform.claude.com (Claude sign-in renewal),
+  api2.cursor.sh, opencode.ai and api.commandcode.ai,
   identical to the ones the CLIs, Cursor, OpenCode and Command Code themselves
   make, and the optional GitHub Releases check for updates.
 - **Keychain**: the `Claude Code-credentials` entry is created by Claude Code
   through `/usr/bin/security`, so its ACL only trusts that binary. The app goes
-  through the same path: no authorization prompt, including after a rebuild
+  through the same path to read it and to save a renewed token: no
+  authorization prompt, including after a rebuild
   (the app is ad-hoc signed, so its signature changes every time).
-- The Claude token is refreshed by Claude Code itself. If it has expired and
-  Claude Code has not run in a while, the section shows "Claude token expired"
-  until the next time Claude Code opens.
+- The Claude token is renewed by Usage Bar when it expires, the same way Claude
+  Code renews it, so Claude Code keeps working with the new token. If the
+  renewal is refused, the section shows "Claude Code sign-in expired" until
+  you run `claude`, then `/login`.
 - The Cursor token is read from Cursor's local session store. If it has expired,
   the section shows "Cursor token expired" until the next time Cursor opens.
 - The `opencode-go` key is read from OpenCode's local `auth.json`. If it is

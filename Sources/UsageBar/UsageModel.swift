@@ -12,7 +12,9 @@ final class UsageModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var menuPresented = false
 
-    @Published private(set) var claudeBuckets: [LimitBucket] = []
+    @Published private(set) var claudeBuckets: [LimitBucket] = [] {
+        didSet { scheduleClaudeSessionRedraw() }
+    }
     @Published private(set) var claudePlan: String?
     @Published private(set) var claudeErrorMessage: String?
     @Published private(set) var claudeAvailable = false
@@ -43,6 +45,7 @@ final class UsageModel: ObservableObject {
     private let automaticallySchedules: Bool
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
+    private var claudeSessionRedraw: Task<Void, Never>?
     private var requests: [UsageEndpoint: Task<Void, Never>] = [:]
     private var started = false
     private var sleeping = false
@@ -161,11 +164,12 @@ final class UsageModel: ObservableObject {
         errorMessage: String? = nil,
         cursorAvailable: Bool? = nil,
         opencodeAvailable: Bool? = nil,
-        commandcodeAvailable: Bool? = nil
+        commandcodeAvailable: Bool? = nil,
+        now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
         fetcher = .live
-        now = Date.init
+        self.now = now
         sleep = { delay in
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -196,7 +200,7 @@ final class UsageModel: ObservableObject {
 #endif
 
     var claudeSession: LimitBucket? {
-        claudeBuckets.first { $0.kind == .session }
+        claudeBuckets.first { $0.kind == .session && !$0.hasReset(at: now()) }
     }
 
     var menuBarClaudeText: String? {
@@ -441,6 +445,26 @@ final class UsageModel: ObservableObject {
         }
         isLoading = !requests.isEmpty
         scheduleNextRefresh()
+    }
+
+    private func scheduleClaudeSessionRedraw() {
+        claudeSessionRedraw?.cancel()
+        guard let resetAt = claudeSession?.resetAt else { return }
+        let now = now
+        let sleep = sleep
+        claudeSessionRedraw = Task { [weak self] in
+            var remaining = resetAt.timeIntervalSince(now())
+            while remaining > 0 {
+                do {
+                    try await sleep(min(remaining, 3600))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                remaining = resetAt.timeIntervalSince(now())
+            }
+            self?.objectWillChange.send()
+        }
     }
 
     private func scheduleNextRefresh() {
