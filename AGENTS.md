@@ -133,6 +133,7 @@ broken. If you must, generate both files together and keep the exact
 | --- | --- |
 | `CONTRIBUTING.md` | Human setup, validation, and pull request workflow |
 | `CONVENTIONS.md` | Branch, commit, PR, file, and Swift naming |
+| `docs/DECISIONS.md` | Product rules per provider; read before changing provider behaviour |
 | `Sources/UsageBar/` | App sources |
 | `Support/Info.plist` | Bundle id `com.usagebar.app`; default version `1.0` |
 | `scripts/build-app.sh` | Build, sign, install, optional zip + checksum |

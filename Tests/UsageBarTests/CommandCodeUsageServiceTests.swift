@@ -27,7 +27,7 @@ final class CommandCodeUsageServiceTests: XCTestCase {
         clock.advance(by: 1_799)
         _ = try await fetchUsage(service, key: "key-one")
 
-        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 1)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 1)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 2)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/usage/summary"), 2)
@@ -35,7 +35,7 @@ final class CommandCodeUsageServiceTests: XCTestCase {
         clock.advance(by: 1)
         _ = try await fetchUsage(service, key: "key-one")
 
-        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 3)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 2)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 3)
     }
@@ -64,14 +64,14 @@ final class CommandCodeUsageServiceTests: XCTestCase {
         clock.advance(by: 1_799)
         _ = try await fetchUsage(service, key: "key-one")
 
-        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 1)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 1)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 2)
 
         clock.advance(by: 1)
         _ = try await fetchUsage(service, key: "key-one")
 
-        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 3)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 2)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/credits"), 3)
     }
@@ -264,8 +264,36 @@ final class CommandCodeUsageServiceTests: XCTestCase {
 
         clock.advance(by: 1)
         _ = try await fetchUsage(service, key: "key-one")
-        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 3)
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 2)
+    }
+
+    func testWhoamiAsksForSpendLimitsOnEveryRefresh() async throws {
+        let clock = CommandCodeUsageServiceTestClock(start)
+        CommandCodeUsageServiceStubURLProtocol.configure { request in
+            if request.url?.path == "/alpha/whoami" {
+                let spent = clock.date > self.start ? 7 : 2
+                return .ok("""
+                {"org":{"id":"org-one"},"orgLimits":[{"scope":"org","limit":10,"spent":\(spent),"exceeded":false,"resetInterval":"monthly"}]}
+                """)
+            }
+            return self.standardResponse(
+                for: request,
+                periodStart: "2026-09-01T00:00:00Z",
+                periodEnd: "2026-09-06T02:00:00Z"
+            )
+        }
+        let service = makeService(clock: clock)
+
+        let first = try await fetchUsage(service, key: "key-one")
+        clock.advance(by: 60)
+        let second = try await fetchUsage(service, key: "key-one")
+
+        XCTAssertEqual(first.orgLimits.first?.spent, 2)
+        XCTAssertEqual(second.orgLimits.first?.spent, 7)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 1)
+        let whoami = CommandCodeUsageServiceStubURLProtocol.requests(for: "/alpha/whoami")
+        XCTAssertTrue(whoami.allSatisfy { queryValue(named: "limits", in: $0) == "1" })
     }
 
     private func makeService(clock: CommandCodeUsageServiceTestClock) -> CommandCodeUsageService {
@@ -317,7 +345,7 @@ final class CommandCodeUsageServiceTests: XCTestCase {
             }
             """)
         case "/alpha/usage/summary":
-            return .ok("{ \"totalMonthlyCredits\": \(summaryUsed) }")
+            return .ok("{ \"totalCost\": \(summaryUsed), \"totalCount\": 3 }")
         default:
             return .status(404)
         }

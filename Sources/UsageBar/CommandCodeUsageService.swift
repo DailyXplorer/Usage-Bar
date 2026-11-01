@@ -15,17 +15,17 @@ enum CommandCodeUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No Command Code key. Run `cmd login` in your terminal."
+            return "No Command Code key found. Run `cmd login` in your terminal."
         case .invalidKey:
-            return "Command Code API key is invalid. Run `cmd login` again."
+            return "Command Code rejected the key. Run `cmd login` again."
         case .throttled:
-            return "Command Code usage endpoint is rate limited. Waiting before retrying."
-        case .network(let message):
-            return "Network error: \(message)"
-        case .httpStatus(let code):
-            return "Command Code returned HTTP \(code). Run `cmd login`."
-        case .decoding(let message):
-            return "Unreadable Command Code response: \(message)"
+            return "Command Code paused usage updates. Usage Bar will try again later."
+        case .network:
+            return "Can’t reach Command Code. Check your connection."
+        case .httpStatus:
+            return "Command Code isn’t responding right now. Usage Bar will try again."
+        case .decoding:
+            return "Command Code sent usage in a format Usage Bar can’t read. Check for a Usage Bar update."
         }
     }
 }
@@ -47,7 +47,7 @@ actor CommandCodeUsageService {
 
     init(
         baseURL: URL = CommandCodeUsageService.defaultBaseURL,
-        session: URLSession = .shared,
+        session: URLSession = ProviderIO.session,
         now: @escaping () -> Date = Date.init,
         accountCacheLifetime: TimeInterval = CommandCodeUsageService.accountCacheLifetime
     ) {
@@ -92,7 +92,8 @@ actor CommandCodeUsageService {
                 currentPeriodEnd: account.subscriptions.data?.currentPeriodEnd,
                 credits: credits.credits,
                 windowLimits: credits.windowLimits,
-                monthlyUsed: monthlyUsed
+                monthlyUsed: monthlyUsed,
+                orgLimits: account.orgLimits
             )
             return (snapshot, credentials)
         } catch CommandCodeUsageError.invalidKey {
@@ -191,7 +192,7 @@ actor CommandCodeUsageService {
             if Task.isCancelled {
                 throw CancellationError()
             }
-            throw CommandCodeUsageError.decoding(error.localizedDescription)
+            throw CommandCodeUsageError.decoding(String(describing: type(of: error)))
         }
     }
 
@@ -200,17 +201,23 @@ actor CommandCodeUsageService {
         generation: Int
     ) async throws -> CachedAccount {
         let currentTime = now()
-        if let accountCache,
+        let whoami: CommandCodeWhoamiResponse = try await get(
+            path: "/alpha/whoami",
+            token: credentials.apiKey,
+            query: [URLQueryItem(name: "limits", value: "1")]
+        )
+        try Task.checkCancellation()
+        if var accountCache,
            accountCache.context.apiKey == credentials.apiKey,
+           accountCache.context.orgId == whoami.org?.id,
            accountCache.expiresAt > currentTime {
+            accountCache.orgLimits = whoami.orgLimits
+            if generation == fetchGeneration {
+                self.accountCache = accountCache
+            }
             return accountCache
         }
 
-        let whoami: CommandCodeWhoamiResponse = try await get(
-            path: "/alpha/whoami",
-            token: credentials.apiKey
-        )
-        try Task.checkCancellation()
         let subscriptions: CommandCodeSubscriptionsResponse = try await get(
             path: "/alpha/billing/subscriptions",
             token: credentials.apiKey,
@@ -227,6 +234,7 @@ actor CommandCodeUsageService {
         let account = CachedAccount(
             context: context,
             subscriptions: subscriptions,
+            orgLimits: whoami.orgLimits,
             expiresAt: accountCacheExpiry(
                 currentPeriodEnd: subscriptions.data?.currentPeriodEnd,
                 currentTime: currentTime
@@ -258,7 +266,7 @@ actor CommandCodeUsageService {
             )
             try Task.checkCancellation()
             recordSummarySuccess(for: context, generation: generation)
-            return summary.totalMonthlyCredits
+            return summary.spent
         } catch is CancellationError {
             throw CancellationError()
         } catch CommandCodeUsageError.throttled(let retryAfter) {
@@ -368,6 +376,7 @@ private struct AccountContext: Equatable {
 private struct CachedAccount {
     let context: AccountContext
     let subscriptions: CommandCodeSubscriptionsResponse
+    var orgLimits: [CommandCodeOrgLimit]
     let expiresAt: Date
 }
 

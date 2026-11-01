@@ -1,13 +1,13 @@
 import Foundation
 
 enum UsageEndpoint: String, Codable, CaseIterable {
-    case codex, claude, cursor, cursorGrokBot, opencode, commandcode
+    case codex, claude, cursor, opencode, commandcode
 
     var provider: LimitBucket.Provider {
         switch self {
         case .codex: return .codex
         case .claude: return .claude
-        case .cursor, .cursorGrokBot: return .cursor
+        case .cursor: return .cursor
         case .opencode: return .opencode
         case .commandcode: return .commandcode
         }
@@ -52,8 +52,7 @@ struct UsageRefreshState: Codable {
 enum UsageFetchResult {
     case codex(UsageResponse)
     case claude(ClaudeUsageResponse, ClaudeCredentials)
-    case cursor(CursorUsageResponse, CursorCredentials)
-    case cursorGrokBot(CursorGrokBotFetchResult, CursorCredentials)
+    case cursor(CursorUsageSnapshot)
     case opencode(OpenCodeUsageResponse)
     case commandcode(CommandCodeUsageSnapshot)
 }
@@ -75,11 +74,7 @@ struct UsageFetcher {
                 let (usage, credentials) = try await claude.fetchUsage()
                 return .claude(usage, credentials)
             case .cursor:
-                let (usage, credentials) = try await cursor.fetchPeriodUsage()
-                return .cursor(usage, credentials)
-            case .cursorGrokBot:
-                let (usage, credentials) = try await cursor.fetchGrokBotUsage()
-                return .cursorGrokBot(usage, credentials)
+                return .cursor(try await cursor.fetchUsage())
             case .opencode:
                 return .opencode(try await opencode.fetchUsage().usage)
             case .commandcode:

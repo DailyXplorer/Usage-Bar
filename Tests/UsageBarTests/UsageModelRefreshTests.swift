@@ -237,49 +237,6 @@ final class UsageModelRefreshTests: XCTestCase {
     }
 
     @MainActor
-    func testCursorRefreshContinuesWhileGrokBotIsRateLimited() async throws {
-        let fixture = TestDefaultsFixture(providers: [.cursor])
-        defer { fixture.clear() }
-        let defaults = fixture.defaults
-        let calls = EndpointCallLog()
-        let retryAfter = fixedNow().addingTimeInterval(600)
-        let model = UsageModel(
-            defaults: defaults,
-            fetcher: UsageFetcher { endpoint in
-                await calls.record(endpoint)
-                switch endpoint {
-                case .cursor:
-                    return try testCursorResult()
-                case .cursorGrokBot:
-                    throw CursorUsageError.throttled(retryAfter: retryAfter)
-                default:
-                    return testCodexResult()
-                }
-            },
-            now: fixedNow,
-            automaticallySchedules: false
-        )
-
-        model.refreshNow(force: true)
-
-        let refreshedCursorAndThrottledGrok = await waitUntil {
-            model.refreshStates[.cursor]?.lastSuccess != nil
-                && model.refreshStates[.cursorGrokBot]?.backoff.blockedUntil != nil
-        }
-        XCTAssertTrue(refreshedCursorAndThrottledGrok)
-        XCTAssertEqual(model.refreshStates[.cursorGrokBot]?.backoff.blockedUntil, retryAfter)
-
-        model.refreshNow(force: true)
-
-        let recordedSecondCursorRequest = await calls.waitForCount(3)
-        let cursorCalls = await calls.count(for: .cursor)
-        let grokCalls = await calls.count(for: .cursorGrokBot)
-        XCTAssertTrue(recordedSecondCursorRequest)
-        XCTAssertEqual(cursorCalls, 2)
-        XCTAssertEqual(grokCalls, 1)
-    }
-
-    @MainActor
     func testAnotherProvidersSuccessCannotRefreshFailedSavedData() async throws {
         let fixture = TestDefaultsFixture(providers: [.codex, .claude])
         defer { fixture.clear() }
@@ -317,38 +274,6 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertEqual(model.buckets.first?.usedPercent, 70)
         XCTAssertEqual(model.lastUpdated, oldDate)
         XCTAssertTrue(model.freshnessMessage(for: .codex, at: fixedNow())?.hasPrefix("Saved data") == true)
-    }
-
-    @MainActor
-    func testGrokRefreshContinuesWhileCursorPeriodIsRateLimited() async {
-        let fixture = TestDefaultsFixture(providers: [.cursor])
-        defer { fixture.clear() }
-        let calls = EndpointCallLog()
-        let model = UsageModel(
-            defaults: fixture.defaults,
-            fetcher: UsageFetcher { endpoint in
-                await calls.record(endpoint)
-                if endpoint == .cursor {
-                    throw CursorUsageError.throttled(retryAfter: fixedNow().addingTimeInterval(600))
-                }
-                return .cursorGrokBot(.refreshed(nil), CursorCredentials(accessToken: "test", membershipType: "pro"))
-            },
-            now: fixedNow,
-            automaticallySchedules: false
-        )
-        model.refreshNow(force: true)
-        let receivedBoth = await waitUntil {
-            model.refreshStates[.cursor]?.lastError != nil
-                && model.refreshStates[.cursorGrokBot]?.lastSuccess != nil
-        }
-        XCTAssertTrue(receivedBoth)
-        model.refreshNow(force: true)
-        let refreshedGrok = await calls.waitForCount(3)
-        XCTAssertTrue(refreshedGrok)
-        let periodCount = await calls.count(for: .cursor)
-        let grokCount = await calls.count(for: .cursorGrokBot)
-        XCTAssertEqual(periodCount, 1)
-        XCTAssertEqual(grokCount, 2)
     }
 
     @MainActor
@@ -665,10 +590,7 @@ private func testCursorResult() throws -> UsageFetchResult {
         {"planUsage":{"autoPercentUsed":12,"apiPercentUsed":3},"enabled":true}
         """.utf8)
     )
-    return .cursor(
-        response,
-        CursorCredentials(accessToken: "token", membershipType: "pro")
-    )
+    return .cursor(CursorUsageSnapshot(period: response, sand: nil, planInfo: nil, membershipType: "pro"))
 }
 
 private actor SleepGate {

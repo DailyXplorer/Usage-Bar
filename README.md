@@ -10,7 +10,7 @@ usage limits: **percentage remaining** and time until reset.
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex primary window, Claude Code's **Current session** bar, then Cursor's
-**Cursor Models** pool (Cursor Grok and Composer). OpenCode's
+**Weekly usage** (the **Cursor Models** pool on legacy Cursor plans). OpenCode's
 **Current session** and Command Code's **Current session** windows can be turned
 on in Settings. Settings let you pick which plans appear. The popover breaks
 down every window on each side.
@@ -64,7 +64,8 @@ instances.
   Automatic checks are on by default; automatic installation requires opt-in.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
-login for Anthropic limits, a signed-in Cursor app for Cursor limits, an
+login for Anthropic limits, a signed-in Cursor editor or a Cursor session token
+in Settings for Cursor limits, an
 `opencode-go` API key (`/connect` → OpenCode Go) for OpenCode limits, and a
 Command Code login (`cmd login`) for Command Code limits. Missing accounts
 are hidden, not errors.
@@ -130,34 +131,52 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 
 ### Cursor
 
-- Reads the session from Cursor's local store
-  (`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`):
-  `cursorAuth/accessToken` and `cursorAuth/stripeMembershipType`. No token is
-  ever copied or rewritten.
-- Queries `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`
-  for the monthly plan pools, and
-  `https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus` for
-  the weekly Grok Bot allowance. Both use the same Cursor session token.
-- Mirrors Cursor's two monthly plan pools: **Cursor Models** (Cursor Grok and
-  Composer) and **Other Models** (third-party models billed at API rates), each
-  with the billing-cycle reset. When the account has a personal Grok Bot
-  weekly allowance, the popover adds a **Grok Bot** bar under Other Models.
-  That bar is hidden for pooled Enterprise seats and accounts without an
-  included Bot limit. A Grok Bot fetch failure leaves the monthly bars intact.
-  The menu bar shows the Cursor Models pool.
-- If there is no Cursor session, the section is simply hidden.
+Cursor and Grok share one account since The X Subscription. Usage Bar supports
+both account shapes:
+
+- **Unified accounts** (Cursor and Grok combined): one **Weekly usage** bar for
+  the shared weekly pool, with its reset time and the plan name as the badge.
+  When the account has a monthly additional-usage limit, an
+  **Additional usage** row shows `$used / $limit`. The menu bar shows the weekly
+  pool. While Cursor is still merging the accounts, the section says
+  **Account merge in progress** instead of showing an empty bar.
+- **Legacy Cursor plans**: **Cursor Models** (Cursor Grok and Composer) and
+  **Other Models** (third-party models billed at API rates). On weekly plans
+  the reset comes from Cursor's plan details, otherwise from the billing cycle.
+  A **Grok Bot** bar appears only when the account still has a separate,
+  non-zero Grok Bot allowance. The menu bar shows the Cursor Models pool.
+
+Requests: `GetSandUsageStatus` and `GetCurrentPeriodUsage` on
+`https://api2.cursor.sh/aiserver.v1.DashboardService/`, plus `GetPlanInfo` for
+legacy accounts (cached for an hour). All three use the same Cursor token and
+are made together, once per refresh.
+
+Sign-in sources, first usable one wins:
+
+1. The Cursor editor's saved sign-in in
+   `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`
+   (`cursorAuth/accessToken`), opened read-only. Cursor 3.27 and later encrypt
+   that value; Usage Bar decrypts it with the **Cursor Safe Storage** Keychain
+   item, which macOS may ask you to allow once.
+2. A **Cursor session token** pasted in **Settings** → **Cursor**: the value of
+   the `WorkosCursorSessionToken` cookie from cursor.com. Usage Bar keeps it in
+   its own Keychain item.
+
+The Grok Bot app's sign-in is not read: its sealed files belong to its local
+agent, not to your account, and its token store is internal to the app (see
+[docs/DECISIONS.md](docs/DECISIONS.md)). Usage Bar never renews a Cursor or
+Grok token. When no source works, the section says how to sign in.
 
 ### OpenCode
 
-- Reads the `opencode-go` API key from OpenCode's `auth.json`. OpenCode stores
-  that file under `$XDG_DATA_HOME/opencode` when set, otherwise
-  `~/.local/share/opencode/auth.json`, then
-  `~/Library/Application Support/opencode/auth.json`. No key is ever copied or
-  rewritten.
+- Reads the `opencode-go` API key from OpenCode's database, `opencode.db`
+  (`$OPENCODE_DB`, else under `$XDG_DATA_HOME/opencode`, else
+  `~/.local/share/opencode`), opened read-only. Falls back to the legacy
+  `auth.json` in the same folders. No key is ever copied or rewritten.
 - Queries `https://opencode.ai/zen/go/v1/usage`, the official Go quota endpoint,
   with the same Bearer key the TUI already uses.
-- Mirrors the three Go windows: **Current session** ($12), **Weekly** ($30) and
-  **Monthly** ($60), each with its reset time. The menu bar shows the current
+- Mirrors the three Go windows: **Current session** (5 hours), **Weekly** and
+  **Monthly**, each with its reset time. The menu bar shows the current
   session window.
 - If there is no `opencode-go` key, the section is simply hidden.
 
@@ -166,14 +185,17 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 - Reads the API key the Command Code CLI writes to `~/.commandcode/auth.json`
   on `cmd login` (`apiKey`). `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`)
   overrides that file when set. No key is ever copied or rewritten.
-- Queries the same public `/alpha` endpoints the CLI `/usage` view uses on
-  `api.commandcode.ai`: `whoami` → `billing/subscriptions` → `billing/credits`
-  → `usage/summary`.
-- Mirrors the three subscription windows: **Current session** (5-hour cap),
-  **Weekly** and **Monthly**, each with its reset time. The menu bar shows the
-  current session window. Pay-as-you-go Provider accounts have no rolling
-  windows, so the section stays hidden — the same treatment as OpenCode Zen.
-- Plan badge: **Go**, **Goat**, **Pro**, **Max 10x**, **Max 20x**, **Team Pro**.
+- Queries the same `/alpha` endpoints the CLI `/usage` view uses on
+  `api.commandcode.ai`: `whoami?limits=1` → `billing/subscriptions` →
+  `billing/credits` → `usage/summary`.
+- Shows **Current session** (5-hour cap) and **Weekly** when the plan has
+  rolling windows, and **Monthly** with the CLI's formula: your remaining
+  monthly, purchased and free credits against the plan's monthly credits
+  (or credits spent plus what is left when the subscription is not active).
+- Organization spend caps appear as extra rows, for example
+  **Org-wide spend limit** with `$spent of $limit/mo`.
+- Plan badge, as in the CLI: **Go**, **GOAT**, **Pro**, **Provider**, **Max**,
+  **Ultra**, **Teams Pro**.
 - If there is no Command Code key, the section is simply hidden.
 
 All accounts are queried in parallel: a slow backend does not block the others,
@@ -193,10 +215,10 @@ request per endpoint after wake.
   active rate-limit delay. Requests to the same endpoint cannot overlap.
 - All providers respect HTTP 429 with progressive backoff (5 → 15 → 30 → 60 min)
   and any longer `Retry-After` deadline. These delays survive an app restart.
-  Cursor's monthly usage and Grok Bot have independent schedules and delays.
-- Command Code caches account and subscription details for up to 30 minutes,
-  expiring sooner at the known billing-period end. Credits remain live; the
-  optional summary has its own retry delay and its amounts are never cached.
+- Command Code caches subscription details for up to 30 minutes, expiring
+  sooner at the known billing-period end. Account details, spend limits and
+  credits stay live; the optional summary has its own retry delay and its
+  amounts are never cached.
 
 Each section's timestamp belongs to its own data. Failed or overdue reads show
 **Saved data** without making another provider appear fresh. Older saved data
@@ -225,7 +247,8 @@ open. Missing reset times are omitted until a response supplies a reliable date.
 - macOS 14+ (Sonoma or newer), Apple Silicon and Intel
 - Signed in to the Codex CLI with a ChatGPT account: `codex login`
 - For the Claude side: signed in to Claude Code (`claude`, then `/login`)
-- For the Cursor side: signed in to the Cursor app
+- For the Cursor side: signed in to the Cursor editor, or a Cursor session
+  token pasted in Settings
 - For the OpenCode side: an `opencode-go` key (`/connect` → OpenCode Go)
 - For the Command Code side: signed in to the Command Code CLI (`cmd login`)
 - To **build from source**: Xcode Command Line Tools (`xcode-select --install`)
@@ -253,9 +276,11 @@ open. Missing reset times are omitted until a response supplies a reliable date.
   Code renews it, so Claude Code keeps working with the new token. If the
   renewal is refused, the section shows "Claude Code sign-in expired" until
   you run `claude`, then `/login`.
-- The Cursor token is read from Cursor's local session store. If it has expired,
-  the section shows "Cursor token expired" until the next time Cursor opens.
-- The `opencode-go` key is read from OpenCode's local `auth.json`. If it is
+- The Cursor token is read from the Cursor editor's sign-in or from the token
+  saved in Settings. If it has expired, the section says so until Cursor
+  renews it or you paste a new token. Usage Bar does not renew it.
+- The `opencode-go` key is read from OpenCode's local database or `auth.json`.
+  If it is
   missing or rejected, the section stays hidden or shows that the key is
   invalid until the next `/connect`.
 - The Command Code key is read from `~/.commandcode/auth.json`. If it is

@@ -23,6 +23,7 @@ final class UsageModel: ObservableObject {
     @Published private(set) var cursorPlan: String?
     @Published private(set) var cursorErrorMessage: String?
     @Published private(set) var cursorAvailable = false
+    @Published private(set) var cursorNotice: String?
 
     @Published private(set) var opencodeBuckets: [LimitBucket] = []
     @Published private(set) var opencodePlan: String?
@@ -217,12 +218,12 @@ final class UsageModel: ObservableObject {
         return "Claude Code current session, \(bucket.remainingPercent) percent left"
     }
 
-    var cursorModels: LimitBucket? {
-        cursorBuckets.first { $0.kind == .cursorModels }
+    var cursorMenuBarBucket: LimitBucket? {
+        CursorLimits.menuBarBucket(in: cursorBuckets)
     }
 
     var menuBarCursorText: String? {
-        guard let bucket = cursorModels else { return nil }
+        guard let bucket = cursorMenuBarBucket else { return nil }
         return "\(bucket.remainingPercent)%"
     }
 
@@ -231,8 +232,8 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarCursorAccessibilityText: String? {
-        guard let bucket = cursorModels else { return nil }
-        return "Cursor models, \(bucket.remainingPercent) percent left"
+        guard let bucket = cursorMenuBarBucket else { return nil }
+        return CursorLimits.menuBarAccessibilityText(for: bucket)
     }
 
     var opencodeRolling: LimitBucket? {
@@ -503,20 +504,10 @@ final class UsageModel: ObservableObject {
                 applyClaude(response, credentials: credentials)
                 claudeErrorMessage = nil
                 state.succeed(at: date)
-            case .cursor(let response, let credentials):
-                applyCursor(response, grokBot: .unavailable, credentials: credentials)
+            case .cursor(let snapshot):
+                applyCursor(snapshot)
                 cursorErrorMessage = nil
                 state.succeed(at: date)
-            case .cursorGrokBot(let response, let credentials):
-                applyCursorGrokBot(response, credentials: credentials)
-                switch response {
-                case .refreshed:
-                    state.succeed(at: date)
-                case .unavailable:
-                    state.fail("Grok Bot usage is temporarily unavailable.", at: date)
-                case .throttled(let retryAfter):
-                    state.throttle("Grok Bot usage is temporarily rate limited.", retryAfter: retryAfter, at: date)
-                }
             case .opencode(let response):
                 applyOpenCode(response)
                 opencodeErrorMessage = nil
@@ -575,14 +566,11 @@ final class UsageModel: ObservableObject {
                 cursorAvailable = false
                 cursorBuckets = []
                 cursorPlan = nil
+                cursorNotice = nil
                 cursorErrorMessage = nil
             } else {
                 cursorAvailable = true
                 cursorErrorMessage = error.localizedDescription
-            }
-        case .cursorGrokBot:
-            if case CursorUsageError.notSignedIn = error {
-                cursorBuckets.removeAll { $0.kind == .grokBot }
             }
         case .opencode:
             if case OpenCodeUsageError.notSignedIn = error {
@@ -608,10 +596,7 @@ final class UsageModel: ObservableObject {
     }
 
     private func updateLastUpdated() {
-        let endpoints = UsageEndpoint.allCases.filter {
-            menuBarProviders.contains($0.provider)
-                && ($0 != .cursorGrokBot || cursorBuckets.contains { $0.kind == .grokBot })
-        }
+        let endpoints = UsageEndpoint.allCases.filter { menuBarProviders.contains($0.provider) }
         let dates = endpoints.compactMap { refreshStates[$0]?.lastSuccess }
         lastUpdated = dates.count == endpoints.count ? dates.min() : nil
     }
@@ -627,15 +612,6 @@ final class UsageModel: ObservableObject {
             return "Saved data from \(time)"
         }
         return "Updated at \(time)"
-    }
-
-    func grokBotMessage(at date: Date) -> String? {
-        guard let state = refreshStates[.cursorGrokBot] else { return nil }
-        if let error = state.lastError { return error }
-        guard cursorBuckets.contains(where: { $0.kind == .grokBot }),
-              let success = state.lastSuccess,
-              date.timeIntervalSince(success) > UsageRefreshState.interval + 1 else { return nil }
-        return "Grok Bot data from \(success.formatted(date: .omitted, time: .shortened))"
     }
 
     private func apply(_ usage: UsageResponse) {
@@ -654,35 +630,12 @@ final class UsageModel: ObservableObject {
         claudeBuckets = ClaudeLimits.buckets(from: usage, now: now())
     }
 
-    private func applyCursor(
-        _ usage: CursorUsageResponse,
-        grokBot: CursorGrokBotFetchResult,
-        credentials: CursorCredentials
-    ) {
+    private func applyCursor(_ snapshot: CursorUsageSnapshot) {
+        let layout = CursorLimits.layout(for: snapshot, now: now())
         cursorAvailable = true
-        cursorPlan = credentials.membershipType
-        cursorBuckets = CursorLimits.buckets(
-            from: usage,
-            grokBot: grokBot,
-            preserving: cursorBuckets,
-            now: now()
-        )
-    }
-
-    private func applyCursorGrokBot(
-        _ grokBot: CursorGrokBotFetchResult,
-        credentials: CursorCredentials
-    ) {
-        cursorBuckets = CursorLimits.updatingGrokBot(
-            in: cursorBuckets,
-            from: grokBot,
-            preserving: cursorBuckets,
-            now: now()
-        )
-        if case .refreshed = grokBot {
-            cursorAvailable = true
-            cursorPlan = credentials.membershipType
-        }
+        cursorPlan = layout.plan
+        cursorBuckets = layout.buckets
+        cursorNotice = layout.notice
     }
 
     private func applyOpenCode(_ usage: OpenCodeUsageResponse) {
@@ -692,12 +645,6 @@ final class UsageModel: ObservableObject {
     }
 
     private func applyCommandCode(_ usage: CommandCodeUsageSnapshot) {
-        if CommandCodeLimits.shouldHide(usage) {
-            commandcodeAvailable = false
-            commandcodeBuckets = []
-            commandcodePlan = nil
-            return
-        }
         commandcodeAvailable = true
         commandcodePlan = usage.planId
         commandcodeBuckets = CommandCodeLimits.buckets(from: usage, now: now())
@@ -722,10 +669,10 @@ final class UsageModel: ObservableObject {
             if let cursorErrorMessage { return cursorErrorMessage }
             if isLoading { return nil }
             if cursorAvailable && cursorBuckets.isEmpty {
-                return "Cursor returned no limits."
+                return cursorNotice ?? "Cursor returned no limits."
             }
             if !cursorAvailable {
-                return "No Cursor session. Open Cursor and sign in."
+                return CursorUsageError.notSignedIn.errorDescription
             }
             return nil
         case .opencode:

@@ -3,197 +3,242 @@ import XCTest
 @testable import UsageBar
 
 final class CursorUsageServiceTests: XCTestCase {
-    private let periodURL = URL(string: "https://cursor.test/period")!
-    private let sandURL = URL(string: "https://cursor.test/sand")!
+    private let baseURL = URL(string: "https://cursor.test/aiserver.v1.DashboardService/")!
+    private let legacyPeriod = #"{"planUsage":{"autoPercentUsed":12,"apiPercentUsed":3},"enabled":true}"#
+    private let legacySand = #"{"usagePercent":20,"hasNonZeroIncludedLimit":true}"#
+    private let unifiedSand = #"{"usagePercent":37.5,"isUnified":true,"cursorPlanName":"Ultra","nextResetTimestampUtc":"2026-11-04T09:00:00Z"}"#
+    private let weeklyPlan = #"{"planInfo":{"includedUsagePeriod":"INCLUDED_USAGE_PERIOD_WEEKLY","includedUsageResetsAt":"1893952000000"}}"#
 
     override func tearDown() {
-        CursorStubURLProtocol.responses = [:]
-        CursorStubURLProtocol.requestedPaths = []
+        CursorStubURLProtocol.reset()
         super.tearDown()
     }
 
-    func testSandThrottleIsReportedWithoutFailingPeriodUsage() async throws {
-        let service = makeService(sand: .status(429))
-        async let period = service.fetchPeriodUsage(credentials: credentials)
-        async let grok = service.fetchGrokBotUsage(credentials: credentials)
-        let periodResult = try await period
-        let grokResult = try await grok
-        let usage = periodResult.0
-        let grokBot = grokResult.0
+    func testUnifiedAccountSkipsPlanInfo() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .ok(unifiedSand),
+        ])
 
-        XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
-        guard case .throttled = grokBot else {
-            return XCTFail("Expected the Sand throttle to remain visible to the caller")
-        }
+        let snapshot = try await service.fetchUsage()
+
+        XCTAssertEqual(snapshot.sand?.isUnified, true)
+        XCTAssertNil(snapshot.planInfo)
+        XCTAssertEqual(CursorStubURLProtocol.count(for: "GetPlanInfo"), 0)
     }
 
-    func testSandThrottleIsReportedWhenPeriodAlsoFails() async throws {
-        let service = makeService(period: .status(500), sand: .status(429))
-        async let period = service.fetchPeriodUsage(credentials: credentials)
-        async let grok = service.fetchGrokBotUsage(credentials: credentials)
+    func testLegacyAccountReadsPlanInfoOnceWhileCached() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .ok(legacySand),
+            "GetPlanInfo": .ok(weeklyPlan),
+        ])
+
+        let first = try await service.fetchUsage()
+        let second = try await service.fetchUsage()
+
+        XCTAssertEqual(first.planInfo?.weeklyResetAt, Date(timeIntervalSince1970: 1_893_952_000))
+        XCTAssertNotNil(second.planInfo)
+        XCTAssertEqual(CursorStubURLProtocol.count(for: "GetPlanInfo"), 1)
+        XCTAssertEqual(CursorStubURLProtocol.count(for: "GetSandUsageStatus"), 2)
+    }
+
+    func testPlanInfoFailureFallsBackToBillingCycle() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .ok(legacySand),
+            "GetPlanInfo": .status(500),
+        ])
+
+        let snapshot = try await service.fetchUsage()
+
+        XCTAssertNil(snapshot.planInfo)
+        XCTAssertEqual(snapshot.period.planUsage?.modelsPercentUsed, 12)
+    }
+
+    func testMissingSandEndpointLeavesLegacyPools() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .status(404),
+            "GetPlanInfo": .ok("{}"),
+        ])
+
+        let snapshot = try await service.fetchUsage()
+
+        XCTAssertNil(snapshot.sand)
+        XCTAssertEqual(CursorLimits.layout(for: snapshot).buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testSandClientErrorKeepsLegacyPools() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .status(403),
+            "GetPlanInfo": .ok("{}"),
+        ])
+
+        let snapshot = try await service.fetchUsage()
+
+        XCTAssertNil(snapshot.sand)
+        XCTAssertEqual(CursorLimits.layout(for: snapshot).buckets.map(\.kind), [.cursorModels, .otherModels])
+    }
+
+    func testSandServerErrorFailsTheFetchInsteadOfShowingTheWrongLayout() async {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .status(503),
+        ])
 
         do {
-            _ = try await period
-            XCTFail("Expected the period failure")
+            _ = try await service.fetchUsage()
+            XCTFail("Expected the Sand failure")
         } catch CursorUsageError.httpStatus(let code) {
-            XCTAssertEqual(code, 500)
+            XCTAssertEqual(code, 503)
         } catch {
-            XCTFail("Expected the period HTTP failure, got \(error)")
-        }
-        let grokResult = try await grok
-        let grokBot = grokResult.0
-        guard case .throttled = grokBot else {
-            return XCTFail("Expected the concurrent Sand throttle")
+            XCTFail("Unexpected error \(error)")
         }
     }
 
-    func testSandFailuresAreReportedWithoutFailingPeriodUsage() async throws {
-        for response in [
-            CursorStubResponse.status(500),
-            CursorStubResponse.ok("not-json"),
-            CursorStubResponse.failure(.timedOut),
-        ] {
-            let service = makeService(sand: response)
-            async let period = service.fetchPeriodUsage(credentials: credentials)
-            async let grok = service.fetchGrokBotUsage(credentials: credentials)
-            let periodResult = try await period
-            let grokResult = try await grok
-            let usage = periodResult.0
-            let grokBot = grokResult.0
-
-            XCTAssertEqual(usage.planUsage?.modelsPercentUsed, 12)
-            guard case .unavailable = grokBot else {
-                return XCTFail("Expected the failed Sand refresh to preserve cached usage")
-            }
-        }
-    }
-
-    func testValidSandResponseIsDistinguishedFromFailure() async throws {
-        let service = makeService(sand: .ok("{}"))
-        let (grokBot, _) = try await service.fetchGrokBotUsage(credentials: credentials)
-
-        guard case .refreshed(let status) = grokBot else {
-            return XCTFail("Expected a decoded Sand response")
-        }
-        XCTAssertNotNil(status)
-    }
-
-    func testSandFetchCanRunWithoutPeriodUsage() async throws {
-        let service = makeService(period: .status(500), sand: .ok("{}"))
-        let (grokBot, _) = try await service.fetchGrokBotUsage(credentials: credentials)
-
-        guard case .refreshed = grokBot else {
-            return XCTFail("Expected Sand to refresh while period usage is blocked")
-        }
-        XCTAssertEqual(CursorStubURLProtocol.requestedPaths, [sandURL.path])
-    }
-
-    func testPeriodUsageCompletesBeforeDelayedSand() async throws {
-        let sandStarted = expectation(description: "Sand request started")
-        let delay = CursorStubDelay(onHold: sandStarted.fulfill)
-        defer { delay.release() }
-        let service = makeService(sand: .delayedOK("{}", delay: delay))
-        async let period = service.fetchPeriodUsage(credentials: credentials)
-        async let grok = service.fetchGrokBotUsage(credentials: credentials)
-
-        await fulfillment(of: [sandStarted], timeout: 1)
-        let usage = try await period
-
-        XCTAssertEqual(usage.0.planUsage?.modelsPercentUsed, 12)
-        XCTAssertTrue(delay.isHoldingResponse)
-
-        delay.release()
-        let (grokBot, _) = try await grok
-        guard case .refreshed = grokBot else {
-            return XCTFail("Expected Sand to finish after its response was released")
-        }
-    }
-
-    func testRetryAfterIsReturnedByEachIndependentEndpoint() async throws {
-        let service = makeService(
-            period: .status(429, headers: ["Retry-After": "120"]),
-            sand: .status(429, headers: ["Retry-After": "120"])
-        )
-        let before = Date()
+    func testThrottleKeepsTheServerRetryDate() async {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .status(429, headers: ["Retry-After": "120"]),
+            "GetSandUsageStatus": .ok(unifiedSand),
+        ])
 
         do {
-            _ = try await service.fetchPeriodUsage(credentials: credentials)
-            XCTFail("Expected period usage to be rate limited")
+            _ = try await service.fetchUsage()
+            XCTFail("Expected a throttle")
         } catch CursorUsageError.throttled(let retryAfter) {
-            let retryAfter = try XCTUnwrap(retryAfter)
-            XCTAssertGreaterThanOrEqual(retryAfter.timeIntervalSince(before), 119)
+            XCTAssertNotNil(retryAfter)
         } catch {
-            XCTFail("Expected a period throttle, got \(error)")
+            XCTFail("Unexpected error \(error)")
         }
-
-        let (grokBot, _) = try await service.fetchGrokBotUsage(credentials: credentials)
-        guard case .throttled(let retryAfter) = grokBot else {
-            return XCTFail("Expected Sand usage to be rate limited")
-        }
-        let retryDate = try XCTUnwrap(retryAfter)
-        XCTAssertGreaterThanOrEqual(retryDate.timeIntervalSince(before), 119)
     }
 
-    private var credentials: CursorCredentials {
-        CursorCredentials(accessToken: "test-token", membershipType: "pro")
+    func testRejectedTokenReportsExpiredSignIn() async {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .status(401),
+            "GetSandUsageStatus": .status(401),
+        ])
+
+        do {
+            _ = try await service.fetchUsage()
+            XCTFail("Expected an expired sign-in")
+        } catch CursorUsageError.tokenExpired {
+        } catch {
+            XCTFail("Unexpected error \(error)")
+        }
+    }
+
+    func testRequestsUseBearerTokenAndConnectHeadersOnDashboardMethodsOnly() async throws {
+        let service = makeService(responses: [
+            "GetCurrentPeriodUsage": .ok(legacyPeriod),
+            "GetSandUsageStatus": .ok(legacySand),
+            "GetPlanInfo": .ok(weeklyPlan),
+        ])
+
+        _ = try await service.fetchUsage()
+
+        let requests = CursorStubURLProtocol.requests
+        XCTAssertEqual(Set(requests.map(\.method)), ["GetCurrentPeriodUsage", "GetSandUsageStatus", "GetPlanInfo"])
+        for request in requests {
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.authorization, "Bearer test-token")
+            XCTAssertEqual(request.connectVersion, "1")
+            XCTAssertEqual(request.host, "cursor.test")
+        }
+    }
+
+    func testMissingCredentialsSendNoRequest() async {
+        let service = makeService(responses: [:], credentials: .stub(editor: nil, settings: nil))
+
+        do {
+            _ = try await service.fetchUsage()
+            XCTFail("Expected not signed in")
+        } catch CursorUsageError.notSignedIn {
+            XCTAssertTrue(CursorStubURLProtocol.requests.isEmpty)
+        } catch {
+            XCTFail("Unexpected error \(error)")
+        }
     }
 
     private func makeService(
-        period: CursorStubResponse? = nil,
-        sand: CursorStubResponse
+        responses: [String: CursorStubResponse],
+        credentials: CursorCredentialLoader = .stub(editor: "test-token", settings: nil)
     ) -> CursorUsageService {
-        CursorStubURLProtocol.responses = [
-            periodURL.path: period ?? .ok("""
-                {"planUsage":{"autoPercentUsed":12,"apiPercentUsed":3},"enabled":true}
-                """),
-            sandURL.path: sand,
-        ]
+        CursorStubURLProtocol.configure(responses)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CursorStubURLProtocol.self]
-        let service = CursorUsageService(
-            endpoint: periodURL,
-            grokBotEndpoint: sandURL,
-            session: URLSession(configuration: configuration)
+        return CursorUsageService(
+            baseURL: baseURL,
+            session: URLSession(configuration: configuration),
+            credentials: credentials
         )
-        return service
     }
 }
 
-private struct CursorStubResponse {
-    let status: Int?
-    let data: Data
-    let error: URLError.Code?
-    let delay: CursorStubDelay?
+extension CursorCredentialLoader {
+    static func stub(
+        editor: String?,
+        settings: String?,
+        password: String? = nil,
+        membership: String? = "pro",
+        now: Date = Date(timeIntervalSince1970: 1_793_000_000)
+    ) -> CursorCredentialLoader {
+        CursorCredentialLoader(
+            editorLogin: { editor.map { CursorEditorLogin(accessToken: $0, membershipType: membership) } },
+            safeStoragePassword: { password },
+            settingsToken: { settings },
+            now: { now }
+        )
+    }
+}
+
+struct CursorStubResponse {
+    let status: Int
+    let body: Data
     let headers: [String: String]
 
     static func ok(_ json: String) -> CursorStubResponse {
-        CursorStubResponse(status: 200, data: Data(json.utf8), error: nil, delay: nil, headers: [:])
-    }
-
-    static func delayedOK(_ json: String, delay: CursorStubDelay) -> CursorStubResponse {
-        CursorStubResponse(status: 200, data: Data(json.utf8), error: nil, delay: delay, headers: [:])
+        CursorStubResponse(status: 200, body: Data(json.utf8), headers: [:])
     }
 
     static func status(_ code: Int, headers: [String: String] = [:]) -> CursorStubResponse {
-        CursorStubResponse(status: code, data: Data(), error: nil, delay: nil, headers: headers)
-    }
-
-    static func failure(_ error: URLError.Code) -> CursorStubResponse {
-        CursorStubResponse(status: nil, data: Data(), error: error, delay: nil, headers: [:])
+        CursorStubResponse(status: code, body: Data(), headers: headers)
     }
 }
 
-private final class CursorStubURLProtocol: URLProtocol {
-    private static let store = CursorStubStore()
+struct CursorRecordedRequest {
+    let method: String
+    let httpMethod: String?
+    let authorization: String?
+    let connectVersion: String?
+    let host: String?
+}
 
-    static var responses: [String: CursorStubResponse] {
-        get { store.value }
-        set { store.value = newValue }
+final class CursorStubURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var responses: [String: CursorStubResponse] = [:]
+    private static var recorded: [CursorRecordedRequest] = []
+
+    static func configure(_ values: [String: CursorStubResponse]) {
+        lock.lock()
+        responses = values
+        recorded = []
+        lock.unlock()
     }
 
-    static var requestedPaths: [String] {
-        get { store.requestedPaths }
-        set { store.requestedPaths = newValue }
+    static func reset() {
+        configure([:])
+    }
+
+    static var requests: [CursorRecordedRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    static func count(for method: String) -> Int {
+        requests.filter { $0.method == method }.count
     }
 
     override class func canInit(with request: URLRequest) -> Bool {
@@ -205,114 +250,30 @@ private final class CursorStubURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        guard let url = request.url,
-              let stub = Self.responses[url.path] else {
+        guard let url = request.url else { return }
+        let method = url.lastPathComponent
+        Self.lock.lock()
+        Self.recorded.append(
+            CursorRecordedRequest(
+                method: method,
+                httpMethod: request.httpMethod,
+                authorization: request.value(forHTTPHeaderField: "Authorization"),
+                connectVersion: request.value(forHTTPHeaderField: "Connect-Protocol-Version"),
+                host: url.host
+            )
+        )
+        let stub = Self.responses[method]
+        Self.lock.unlock()
+        guard let stub,
+              let response = HTTPURLResponse(url: url, statusCode: stub.status, httpVersion: nil, headerFields: stub.headers)
+        else {
             client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
             return
         }
-        Self.store.appendRequestedPath(url.path)
-        if let error = stub.error {
-            client?.urlProtocol(self, didFailWithError: URLError(error))
-            return
-        }
-        if let delay = stub.delay {
-            delay.hold { [self] in finishLoading(url: url, stub: stub) }
-            return
-        }
-        finishLoading(url: url, stub: stub)
-    }
-
-    private func finishLoading(url: URL, stub: CursorStubResponse) {
-        guard let status = stub.status,
-              let response = HTTPURLResponse(
-            url: url,
-            statusCode: status,
-            httpVersion: nil,
-            headerFields: stub.headers
-              ) else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: stub.data)
+        client?.urlProtocol(self, didLoad: stub.body)
         client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}
-}
-
-private final class CursorStubDelay: @unchecked Sendable {
-    private let lock = NSLock()
-    private let onHold: () -> Void
-    private var completion: (() -> Void)?
-    private var isReleased = false
-
-    init(onHold: @escaping () -> Void) {
-        self.onHold = onHold
-    }
-
-    var isHoldingResponse: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return completion != nil
-    }
-
-    func hold(_ completion: @escaping () -> Void) {
-        lock.lock()
-        if isReleased {
-            lock.unlock()
-            completion()
-            return
-        }
-        self.completion = completion
-        lock.unlock()
-        onHold()
-    }
-
-    func release() {
-        lock.lock()
-        isReleased = true
-        let completion = completion
-        self.completion = nil
-        lock.unlock()
-        completion?()
-    }
-}
-
-private final class CursorStubStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: [String: CursorStubResponse] = [:]
-    private var requestedPathStorage: [String] = []
-
-    var value: [String: CursorStubResponse] {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return storage
-        }
-        set {
-            lock.lock()
-            storage = newValue
-            lock.unlock()
-        }
-    }
-
-    var requestedPaths: [String] {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return requestedPathStorage
-        }
-        set {
-            lock.lock()
-            requestedPathStorage = newValue
-            lock.unlock()
-        }
-    }
-
-    func appendRequestedPath(_ path: String) {
-        lock.lock()
-        requestedPathStorage.append(path)
-        lock.unlock()
-    }
 }

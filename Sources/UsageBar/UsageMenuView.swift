@@ -131,7 +131,7 @@ struct UsageMenuView: View {
                     message: model.sectionMessage(for: .cursor),
                     freshness: model.freshnessMessage(for: .cursor, at: displayDate),
                     date: displayDate,
-                    supplementalMessage: model.grokBotMessage(at: displayDate)
+                    supplementalMessage: model.cursorBuckets.isEmpty ? nil : model.cursorNotice
                 )
             }
 

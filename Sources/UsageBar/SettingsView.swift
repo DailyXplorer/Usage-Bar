@@ -33,6 +33,8 @@ struct SettingsView: View {
                 Text("Enabled plans appear in the menu bar and refresh every 3 minutes. Server retry delays may take longer.")
             }
 
+            CursorSessionTokenSection()
+
             Section {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {

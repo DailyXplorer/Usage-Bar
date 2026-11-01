@@ -1,10 +1,4 @@
 import Foundation
-import SQLite3
-
-struct CursorCredentials {
-    let accessToken: String
-    let membershipType: String?
-}
 
 enum CursorUsageError: LocalizedError {
     case notSignedIn
@@ -18,117 +12,102 @@ enum CursorUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No Cursor session. Open Cursor and sign in."
+            return "Not signed in to Cursor. Sign in to the Cursor editor, or paste a Cursor session token in Settings."
         case .unreadableLogin:
-            return "Couldn’t read the Cursor session. Open Cursor and try again."
+            return "Usage Bar couldn’t open the Cursor sign-in. Allow Keychain access, or paste a Cursor session token in Settings."
         case .tokenExpired:
-            return "Cursor token expired. Open Cursor to refresh it."
+            return "Cursor sign-in expired. Open Cursor to renew it, or paste a new session token in Settings."
         case .throttled:
-            return "Cursor usage endpoint is rate limited. Waiting before retrying."
-        case .network(let message):
-            return "Network error: \(message)"
-        case .httpStatus(let code):
-            return "Cursor returned HTTP \(code). Open Cursor to refresh the session."
-        case .decoding(let message):
-            return "Unreadable Cursor response: \(message)"
+            return "Cursor paused usage updates. Usage Bar will try again later."
+        case .network:
+            return "Can’t reach Cursor. Check your connection."
+        case .httpStatus:
+            return "Cursor isn’t responding right now. Usage Bar will try again."
+        case .decoding:
+            return "Cursor sent usage in a format Usage Bar can’t read. Check for a Usage Bar update."
         }
     }
-}
-
-enum CursorGrokBotFetchResult {
-    case refreshed(CursorSandUsageStatus?)
-    case unavailable
-    case throttled(retryAfter: Date?)
 }
 
 actor CursorUsageService {
-    static let defaultEndpoint = URL(
-        string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
-    )!
-    static let defaultGrokBotEndpoint = URL(
-        string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus"
-    )!
-    private static let stateDB = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+    static let defaultBaseURL = URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/")!
+    private static let planInfoLifetime: TimeInterval = 60 * 60
 
-    private let endpoint: URL
-    private let grokBotEndpoint: URL
+    private let baseURL: URL
     private let session: URLSession
+    private let credentials: CursorCredentialLoader
+    private let now: @Sendable () -> Date
+    private var planInfoCache: (token: String, info: CursorPlanInfoResponse, expiresAt: Date)?
 
     init(
-        endpoint: URL = CursorUsageService.defaultEndpoint,
-        grokBotEndpoint: URL = CursorUsageService.defaultGrokBotEndpoint,
-        session: URLSession = .shared
+        baseURL: URL = CursorUsageService.defaultBaseURL,
+        session: URLSession = ProviderIO.session,
+        credentials: CursorCredentialLoader = .live,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.endpoint = endpoint
-        self.grokBotEndpoint = grokBotEndpoint
+        self.baseURL = baseURL
         self.session = session
+        self.credentials = credentials
+        self.now = now
     }
 
-    func fetchPeriodUsage(
-        credentials: CursorCredentials? = nil
-    ) async throws -> (CursorUsageResponse, CursorCredentials) {
-        let resolvedCredentials: CursorCredentials
-        if let credentials {
-            resolvedCredentials = credentials
-        } else {
-            resolvedCredentials = try Self.loadCredentials()
+    func fetchUsage() async throws -> CursorUsageSnapshot {
+        let login = try await credentials.load()
+        async let periodData = post("GetCurrentPeriodUsage", token: login.accessToken)
+        async let sandStatus = fetchSand(token: login.accessToken)
+        let period: CursorUsageResponse = try decode(try await periodData)
+        let sand = try await sandStatus
+
+        var planInfo: CursorPlanInfoResponse?
+        if sand?.isUnified != true, period.planUsage != nil {
+            planInfo = await fetchPlanInfo(token: login.accessToken)
         }
-        let usage = try await fetchPeriod(token: resolvedCredentials.accessToken)
-        return (usage, resolvedCredentials)
+        return CursorUsageSnapshot(
+            period: period,
+            sand: sand,
+            planInfo: planInfo,
+            membershipType: login.membershipType
+        )
     }
 
-    func fetchGrokBotUsage(
-        credentials: CursorCredentials? = nil
-    ) async throws -> (CursorGrokBotFetchResult, CursorCredentials) {
-        let resolvedCredentials: CursorCredentials
-        if let credentials {
-            resolvedCredentials = credentials
-        } else {
-            resolvedCredentials = try Self.loadCredentials()
-        }
-        return (await fetchGrokBot(token: resolvedCredentials.accessToken), resolvedCredentials)
-    }
-
-    private func fetchPeriod(token: String) async throws -> CursorUsageResponse {
+    private func fetchSand(token: String) async throws -> CursorSandUsageStatus? {
         do {
-            let data = try await postDashboard(url: endpoint, token: token)
-            return try JSONDecoder().decode(CursorUsageResponse.self, from: data)
-        } catch let error as CursorUsageError {
-            throw error
-        } catch {
-            throw CursorUsageError.decoding(error.localizedDescription)
+            let data = try await post("GetSandUsageStatus", token: token)
+            return try? JSONDecoder().decode(CursorSandUsageStatus.self, from: data)
+        } catch CursorUsageError.httpStatus(let code) where (400..<500).contains(code) {
+            return nil
+        } catch CursorUsageError.tokenExpired {
+            return nil
         }
     }
 
-    private func fetchGrokBot(token: String) async -> CursorGrokBotFetchResult {
+    private func fetchPlanInfo(token: String) async -> CursorPlanInfoResponse? {
+        let date = now()
+        if let planInfoCache, planInfoCache.token == token, planInfoCache.expiresAt > date {
+            return planInfoCache.info
+        }
+        guard let data = try? await post("GetPlanInfo", token: token),
+              let info = try? JSONDecoder().decode(CursorPlanInfoResponse.self, from: data) else {
+            return planInfoCache?.token == token ? planInfoCache?.info : nil
+        }
+        var expiresAt = date.addingTimeInterval(Self.planInfoLifetime)
+        if let resetAt = info.weeklyResetAt, resetAt > date {
+            expiresAt = min(expiresAt, resetAt)
+        }
+        planInfoCache = (token, info, expiresAt)
+        return info
+    }
+
+    private func decode<T: Decodable>(_ data: Data) throws -> T {
         do {
-            let data = try await postDashboard(url: grokBotEndpoint, token: token)
-            let status = try JSONDecoder().decode(CursorSandUsageStatus?.self, from: data)
-            return .refreshed(status)
-        } catch CursorUsageError.throttled(let retryAfter) {
-            return .throttled(retryAfter: retryAfter)
+            return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            return .unavailable
+            throw CursorUsageError.decoding(String(describing: type(of: error)))
         }
     }
 
-    private func postDashboard(url: URL, token: String) async throws -> Data {
-        let (data, http) = try await sendDashboard(url: url, token: token)
-        guard http.statusCode == 200 else {
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw CursorUsageError.tokenExpired
-            }
-            if http.statusCode == 429 {
-                throw CursorUsageError.throttled(retryAfter: RetryAfter.date(from: http))
-            }
-            throw CursorUsageError.httpStatus(http.statusCode)
-        }
-        return data
-    }
-
-    private func sendDashboard(url: URL, token: String) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: url)
+    private func post(_ method: String, token: String) async throws -> Data {
+        var request = URLRequest(url: baseURL.appendingPathComponent(method))
         request.httpMethod = "POST"
         request.timeoutInterval = 20
         request.httpBody = Data("{}".utf8)
@@ -142,113 +121,18 @@ actor CursorUsageService {
         } catch {
             throw CursorUsageError.network(error.localizedDescription)
         }
-
         guard let http = response as? HTTPURLResponse else {
             throw CursorUsageError.network("invalid response")
         }
-        return (data, http)
-    }
-
-    private static func loadCredentials() throws -> CursorCredentials {
-        guard FileManager.default.fileExists(atPath: stateDB.path) else {
-            throw CursorUsageError.notSignedIn
+        switch http.statusCode {
+        case 200:
+            return data
+        case 401, 403:
+            throw CursorUsageError.tokenExpired
+        case 429:
+            throw CursorUsageError.throttled(retryAfter: RetryAfter.date(from: http))
+        default:
+            throw CursorUsageError.httpStatus(http.statusCode)
         }
-        guard let values = sqliteValues() else {
-            throw CursorUsageError.unreadableLogin
-        }
-        guard let accessToken = values["cursorAuth/accessToken"], !accessToken.isEmpty else {
-            throw CursorUsageError.notSignedIn
-        }
-        let membership = values["cursorAuth/stripeMembershipType"]
-        return CursorCredentials(
-            accessToken: accessToken,
-            membershipType: membership?.isEmpty == false ? membership : nil
-        )
-    }
-
-    private static func sqliteValues() -> [String: String]? {
-        if let values = sqliteValuesInProcess() {
-            return values
-        }
-        let encodedPath = stateDB.path.addingPercentEncoding(
-            withAllowedCharacters: CharacterSet.urlPathAllowed.union(CharacterSet(charactersIn: "/"))
-        ) ?? stateDB.path
-        let queries = [
-            stateDB.path,
-            "file:\(encodedPath)?mode=ro",
-        ]
-        for database in queries {
-            if let values = sqliteValues(database: database) {
-                return values
-            }
-        }
-        return nil
-    }
-
-    private static func sqliteValuesInProcess() -> [String: String]? {
-        var db: OpaquePointer?
-        let encodedPath = stateDB.path.addingPercentEncoding(
-            withAllowedCharacters: CharacterSet.urlPathAllowed.union(CharacterSet(charactersIn: "/"))
-        ) ?? stateDB.path
-        let uri = "file:\(encodedPath)?mode=ro"
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2(uri, &db, flags, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return nil
-        }
-        defer { sqlite3_close(db) }
-        sqlite3_busy_timeout(db, 1500)
-
-        let sql = "SELECT key, value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/stripeMembershipType');"
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            return nil
-        }
-        defer { sqlite3_finalize(statement) }
-
-        var values: [String: String] = [:]
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let keyPointer = sqlite3_column_text(statement, 0),
-                  let valuePointer = sqlite3_column_text(statement, 1) else {
-                continue
-            }
-            values[String(cString: keyPointer)] = String(cString: valuePointer)
-        }
-        return values
-    }
-
-    private static func sqliteValues(database: String) -> [String: String]? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        process.arguments = [
-            "-readonly",
-            "-batch",
-            "-separator",
-            "\t",
-            database,
-            "SELECT key, value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/stripeMembershipType');",
-        ]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        var values: [String: String] = [:]
-        for line in text.split(whereSeparator: \.isNewline) {
-            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { continue }
-            values[String(parts[0])] = String(parts[1])
-        }
-        return values
     }
 }
