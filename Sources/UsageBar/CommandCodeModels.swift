@@ -396,7 +396,7 @@ enum CommandCodeLimits {
         let resetAt = ISODate.parse(limit.resetAt).flatMap { $0 > now ? $0 : nil }
         return LimitBucket(
             provider: .commandcode,
-            kind: .other,
+            kind: .spendLimit,
             scope: "spend-limit-\(index)-\(limit.scope ?? "org")-\(limit.model ?? "")",
             name: "\(name) spend limit",
             usedPercent: reached ? 100 : usedPercent,

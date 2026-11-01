@@ -150,7 +150,11 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/Subprocess.swift` | Time-limited subprocess runner (`/usr/bin/security`) |
 | `Sources/UsageBar/CursorCredentials.swift` | Cursor sign-in sources: editor store, Safe Storage decryption, Settings token |
 | `Sources/UsageBar/ProviderIO.swift` | Off-main blocking reads with a deadline; read-only SQLite |
-| `docs/DECISIONS.md` | Product rules (D1–D19) the code must keep; read before changing provider behaviour |
+| `Sources/UsageBar/UsageAlerts.swift` | Pure D20 notification rule, preferences and per-period ledger |
+| `Sources/UsageBar/UsageAlertCenter.swift` | Notification permission, delivery (`UsageNotifying`) and click to open the popover |
+| `Sources/UsageBar/NotificationSettingsSection.swift` | Settings → Notifications |
+| `Sources/UsageBar/PaceForecast.swift` | Pure D21 time-to-exhaustion and its row text |
+| `docs/DECISIONS.md` | Product rules (D1–D21) the code must keep; read before changing provider behaviour |
 
 The `.notFound` login-item fallback writes a LaunchAgent for the next login but
 does not bootstrap it in the current session. Usage Bar is already running when

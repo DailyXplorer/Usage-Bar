@@ -58,6 +58,8 @@ final class UsageModel: ObservableObject {
 
     @Published private(set) var refreshStates: [UsageEndpoint: UsageRefreshState] = [:]
 
+    let alerts: UsageAlertCenter
+
     var menuBarProviders: Set<LimitBucket.Provider> {
         providers.menuBar
     }
@@ -96,6 +98,7 @@ final class UsageModel: ObservableObject {
         now: @escaping () -> Date = Date.init,
         automaticallySchedules: Bool = true,
         detectedProviders: @escaping () -> Set<LimitBucket.Provider> = ProviderCredentialDetector.detected,
+        alerts: UsageAlertCenter? = nil,
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { delay in
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -105,6 +108,7 @@ final class UsageModel: ObservableObject {
         self.now = now
         self.sleep = sleep
         self.automaticallySchedules = automaticallySchedules
+        self.alerts = alerts ?? UsageAlertCenter(defaults: defaults)
         providers = ProviderPreferences.load(from: defaults, detected: detectedProviders)
         claudeQuotaCheckEnabled = defaults.bool(forKey: Self.claudeQuotaCheckKey)
         restoreSnapshot()
@@ -231,9 +235,11 @@ final class UsageModel: ObservableObject {
         opencodeAvailable: Bool? = nil,
         commandcodeAvailable: Bool? = nil,
         claudePausedUntil: Date? = nil,
+        alerts: UsageAlertCenter? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
+        self.alerts = alerts ?? UsageAlertCenter(defaults: defaults, notifier: SilentUsageNotifier())
         fetcher = .live
         self.now = now
         sleep = { delay in
@@ -703,6 +709,14 @@ final class UsageModel: ObservableObject {
         refreshStates[endpoint] = state
         updateLastUpdated()
         persistSnapshot()
+        if case .success(let usage) = result, usage.carriesUsage {
+            evaluateAlerts(for: endpoint.provider, at: date)
+        }
+    }
+
+    private func evaluateAlerts(for provider: LimitBucket.Provider, at date: Date) {
+        guard isVisibleInPopover(provider), hasFreshData(for: provider, at: date) else { return }
+        alerts.receive(provider: provider, buckets: buckets(for: provider), at: date)
     }
 
     private func receiveClaude(
@@ -919,13 +933,23 @@ final class UsageModel: ObservableObject {
         guard let lastSuccess = dataDate(for: provider) else {
             return "Saved data — refresh pending"
         }
-        let primary = UsageEndpoint(rawValue: provider.rawValue)
-        let staleAfter = primary?.policy.staleAfter ?? UsageEndpoint.codex.policy.staleAfter
-        let failed = primary.flatMap { refreshStates[$0]?.lastError } != nil
-        if failed || date.timeIntervalSince(lastSuccess) > staleAfter {
+        if !isRecent(provider, at: date) {
             return "Saved data from \(ClockText.from(lastSuccess, relativeTo: date))"
         }
         return "Updated \(ClockText.at(lastSuccess, relativeTo: date))"
+    }
+
+    func hasFreshData(for provider: LimitBucket.Provider, at date: Date) -> Bool {
+        guard provider != .claude || claudePausedUntil(at: date) == nil else { return false }
+        return isRecent(provider, at: date)
+    }
+
+    private func isRecent(_ provider: LimitBucket.Provider, at date: Date) -> Bool {
+        guard let lastSuccess = dataDate(for: provider) else { return false }
+        let primary = UsageEndpoint(rawValue: provider.rawValue)
+        let staleAfter = primary?.policy.staleAfter ?? UsageEndpoint.codex.policy.staleAfter
+        let failed = primary.flatMap { refreshStates[$0]?.lastError } != nil
+        return !failed && date.timeIntervalSince(lastSuccess) <= staleAfter
     }
 
     func updatedText(at date: Date) -> String {
@@ -1044,7 +1068,7 @@ final class UsageModel: ObservableObject {
         return messages.first ?? "No usage limits were returned."
     }
 
-    static func durationString(seconds: Int) -> String {
+    nonisolated static func durationString(seconds: Int) -> String {
         let total = max(0, seconds)
         let days = total / 86400
         let hours = (total % 86400) / 3600

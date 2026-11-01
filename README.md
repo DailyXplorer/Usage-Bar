@@ -23,6 +23,13 @@ never drive the menu bar. VoiceOver names the window, for example "Claude weekly
 limit, 25 percent left". A window whose reset time passed after the last fetch
 shows as full and "Reset, waiting for new data" until fresh data arrives.
 
+A time window whose usage, spread evenly over the time already passed, would
+use it up before the reset gets an orange note on its **% Left** line, for
+example "Runs out in ~1d 4h at this pace". The note needs a known window length
+(5-hour session, 7-day week, 30-day month, or the period the provider reports),
+at least 5% of the window passed and at least 3% used. A window on pace shows
+nothing extra. The menu bar never shows it.
+
 Settings has two switches per plan: **Popover** (the plan is fetched and has a
 section) and **Menu bar** (a subset of the popover plans). Hiding a plan from
 the menu bar no longer stops fetching it. A plan shown in the popover without a
@@ -72,6 +79,13 @@ instances.
 
 - Open the popover from the menu bar icon.
 - **Settings…** → **Launch at login** to start Usage Bar when you log in.
+- **Settings…** → **Notifications**: **Notify when a limit runs low** (on by
+  default) with **Warn at** 50%, 30%, 20% (default) or 10% left, a second
+  notification when a limit is reached, and **Notify when a limit resets** (on
+  by default, only for a window that warned in that period). macOS asks for
+  permission when the first notification is due or when you turn a switch on.
+  If notifications are off for Usage Bar, Settings says so and opens System
+  Settings for you. Clicking a notification opens the popover.
 - **Settings…** → **Updates** to check GitHub or turn on automatic installs.
   When a newer release exists, an **Update** button also appears in the popover.
   Automatic checks are on by default (once a day at launch and at most every
@@ -285,6 +299,13 @@ full 15 minutes; only one that never left the Mac is retried sooner.
   sooner at the known billing-period end. Account details, spend limits and
   credits stay live; the optional summary has its own retry delay and its
   amounts are never cached.
+
+Notifications cover every time window with a percentage and a reset time of a
+plan shown in the popover; credit and spend rows never notify. Each window
+notifies at most once per threshold and reset period, remembered in
+`UserDefaults` across relaunches. Only freshly fetched data can notify: saved
+data, a paused provider, and a window waiting for fresh data after its reset
+never do.
 
 The popover footer shows when data last arrived ("Updated 2 min ago").
 Each section's timestamp belongs to its own data. Failed reads, or data older

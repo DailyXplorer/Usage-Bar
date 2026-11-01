@@ -237,7 +237,7 @@ final class CommandCodeLimitsTests: XCTestCase {
         var snapshot = goSnapshot()
         snapshot.orgLimits = whoami.orgLimits
         let rows = CommandCodeLimits.buckets(from: snapshot, now: Date(timeIntervalSince1970: 1_793_000_000))
-            .filter { $0.kind == .other }
+            .filter { $0.kind == .spendLimit }
 
         XCTAssertEqual(whoami.orgLimits.count, 2)
         XCTAssertEqual(rows.map(\.name), ["Model X spend limit", "Org-wide spend limit"])

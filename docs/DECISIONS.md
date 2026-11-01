@@ -258,3 +258,54 @@ Go limits are per model and change over time.
   spend-limit row (`$spent of $limit` with its interval). The 5-hour and weekly
   windows are hidden when `windowLimits.limited` is false; the monthly pool
   still shows.
+
+## Notifications and pace
+
+### D20 Threshold notifications
+
+- Usage Bar posts macOS notifications through `UNUserNotificationCenter`,
+  behind the `UsageNotifying` protocol. Settings → Notifications holds
+  **Notify when a limit runs low** (default on) with **Warn at** 50%, 30%, 20%
+  (default) or 10% left, and **Notify when a limit resets** (default on).
+- A low warning is sent when a window's percentage left is at or below the
+  chosen threshold. A second notification is sent when the limit is reached
+  (0% left or the provider's limit-reached status). Both follow the first
+  switch.
+- A reset notification is sent only for a window that warned or reached its
+  limit in the period that ended, when fresh data shows the next period. A
+  window that comes back idle after its period ended (0% used, no reset time)
+  also counts as reset.
+- Covered: every time window with a percentage and a reset time of a provider
+  shown in the popover (D8): sessions, weeklies, model-scoped weeklies, Codex
+  primary, secondary and additional windows, Cursor weekly, OpenCode Go and
+  Command Code windows. Credit, balance and spend-limit rows never notify
+  (Cursor's additional usage and Command Code org limits are spend limits).
+- One notification per window, threshold and reset period. The record is kept
+  in `UserDefaults` across relaunches and dropped once its period has passed.
+  A reset time that drifts by less than 30 minutes is the same period. Lowering
+  the threshold can warn again at the new one; raising it does not repeat a
+  warning.
+- Only fresh data notifies: never saved data from launch, a reply that carried
+  no usage, data older than
+  twice its refresh interval, a failed read, a paused provider, or a window
+  in the D11 "reset, waiting for new data" state.
+- Text: provider, window, what happened, reset time. For example "Claude
+  weekly limit: 20% left" / "Resets Tue at 14:00.", "Codex 5-hour limit
+  reached" / "Resets at 15:30.", "Claude weekly limit has reset".
+- Permission is requested when the first notification is due, or when the
+  user turns a switch on. If macOS denies it, Settings shows one line saying
+  notifications are off for Usage Bar in System Settings, with a button that
+  opens that pane. Clicking a notification opens the popover.
+
+### D21 Pace forecast
+
+- For a time window with a known length and reset time, past the first 5% of
+  the window and at 3% used or more, usage is projected linearly to the reset.
+- Only when the projection exceeds 100% does the row show "Runs out in
+  ~<duration> at this pace" in the warning colour, at the trailing edge of its
+  "% Left" line under the reset time. Otherwise nothing extra shows.
+- Window length comes from the data (Codex `limit_window_seconds`, a period
+  start and end where given) or the documented fixed lengths (5-hour session,
+  7-day week, 30-day month). Unknown length means no forecast. Reached limits
+  and credit or spend rows never forecast.
+- Popover only; the menu bar is unchanged. No new badges, ticks or rows.

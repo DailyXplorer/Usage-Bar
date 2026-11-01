@@ -149,7 +149,7 @@ final class CursorLimitsTests: XCTestCase {
         let now = try XCTUnwrap(ISODate.parse("2026-10-30T09:00:00Z"))
         let result = try layout(period: unifiedPeriod, sand: unifiedSand, membership: "pro", now: now)
 
-        XCTAssertEqual(result.buckets.map(\.kind), [.weekly, .other])
+        XCTAssertEqual(result.buckets.map(\.kind), [.weekly, .spendLimit])
         XCTAssertEqual(result.plan, "Ultra")
         XCTAssertNil(result.notice)
 

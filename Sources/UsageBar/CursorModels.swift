@@ -280,7 +280,7 @@ enum CursorLimits {
         let usedCents = max(0, spend.individualUsed ?? 0)
         let resetAt = CursorTimestamp.parse(response.billingCycleEnd)
         return bucket(
-            kind: .other,
+            kind: .spendLimit,
             name: additionalUsageDisplayName,
             used: usedCents / limitCents * 100,
             resetAt: resetAt,

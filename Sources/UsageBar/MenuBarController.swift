@@ -185,6 +185,12 @@ final class MenuBarController: NSObject {
         }
     }
 
+    func showPanel() {
+        guard !panel.isVisible else { return }
+        activeButton = statusItem.button
+        show()
+    }
+
     private func show() {
         guard !stopped, !panel.isVisible else { return }
         model.refreshForOpenedPanel()

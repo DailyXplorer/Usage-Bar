@@ -444,6 +444,15 @@ struct LimitBucket: Identifiable, Codable {
         }
     }
 
+    var isTimeWindow: Bool {
+        drivesMenuBar && resetAt != nil
+    }
+
+    var alertKey: String {
+        [provider.rawValue, kind.rawValue, id.scope ?? "", limitWindowSeconds.map(String.init) ?? ""]
+            .joined(separator: "|")
+    }
+
     func remainingResetSeconds(at date: Date) -> Int? {
         guard let resetAt else { return nil }
         return Self.clampedSeconds(resetAt.timeIntervalSince(date))
