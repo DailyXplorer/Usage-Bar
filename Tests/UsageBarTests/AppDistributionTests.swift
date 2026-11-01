@@ -13,6 +13,20 @@ final class AppDistributionTests: XCTestCase {
         )
     }
 
+    func testFailedInstallKeepsTheBackupWhenNoAppIsInstalled() throws {
+        let root = temporaryRoot()
+        let applications = root.appendingPathComponent("Applications", isDirectory: true)
+        let destination = applications.appendingPathComponent("UsageBar.app")
+        let backup = applications.appendingPathComponent(".UsageBar.app.\(UUID().uuidString).previous")
+        try makeBundle(at: backup, marker: "old")
+
+        XCTAssertThrowsError(
+            try AppBundleReplacement.install(from: root.appendingPathComponent("Missing.app"), to: destination)
+        )
+
+        XCTAssertEqual(try String(contentsOf: backup.appendingPathComponent("Contents/marker")), "old")
+    }
+
     func testReplacementRemovesBackupsLeftByEarlierInstalls() throws {
         let root = temporaryRoot()
         let applications = root.appendingPathComponent("Applications", isDirectory: true)

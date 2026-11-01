@@ -38,9 +38,12 @@ In this order:
    shape (`User-Agent: claude-cli/‹version› (external, cli)` with a pinned
    recent version, `anthropic-beta: oauth-2025-04-20`, JSON `Accept` and
    `Content-Type`), through a session with no URL cache. Background refresh at
-   most every 15 minutes. Opening the popover refetches only when the data is
-   older than 5 minutes and the last call was at least 60 seconds ago. The
-   refresh button follows the same 60-second floor.
+   most every 15 minutes, including after a network error that may have
+   reached Anthropic (a timeout); only a request that never left the Mac
+   (no connection, host not found) is retried sooner. Opening the popover
+   refetches only when the data is older than 5 minutes and the last call was
+   at least 60 seconds ago. The refresh button follows the same 60-second
+   floor.
 3. Optional, off by default (Settings → Claude): while source 2 is paused by a
    429, at most once every 15 minutes, the quota check Claude Code itself sends
    (Haiku 4.5, `max_tokens: 1`, user text "quota"). Usage Bar reads the

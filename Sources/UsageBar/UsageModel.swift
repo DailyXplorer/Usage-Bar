@@ -770,11 +770,12 @@ final class UsageModel: ObservableObject {
             return
         }
         if Self.isNetworkFailure(error) {
+            let delivered = Self.mayHaveReachedAnthropic(error, from: endpoint) ? interval : nil
             if let wokeAt, date.timeIntervalSince(wokeAt) < Self.wakeGrace {
-                state.fail(state.lastError, at: date, retryAfter: RefreshPolicy.wakeRetry)
+                state.fail(state.lastError, at: date, retryAfter: delivered ?? RefreshPolicy.wakeRetry)
                 return
             }
-            state.fail(message, at: date, retryAfter: min(interval, RefreshPolicy.networkRetry))
+            state.fail(message, at: date, retryAfter: delivered ?? min(interval, RefreshPolicy.networkRetry))
         } else {
             state.fail(message, at: date, retryAfter: interval)
         }
@@ -794,9 +795,15 @@ final class UsageModel: ObservableObject {
         }
     }
 
+    private static func mayHaveReachedAnthropic(_ error: Error, from endpoint: UsageEndpoint) -> Bool {
+        guard endpoint.provider == .claude else { return false }
+        if case ClaudeUsageError.offline = error { return false }
+        return true
+    }
+
     private static func isNetworkFailure(_ error: Error) -> Bool {
         switch error {
-        case UsageError.network, ClaudeUsageError.network, CursorUsageError.network,
+        case UsageError.network, ClaudeUsageError.offline, ClaudeUsageError.network, CursorUsageError.network,
              OpenCodeUsageError.network, CommandCodeUsageError.network:
             return true
         default:

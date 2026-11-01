@@ -154,6 +154,19 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(reloaded, migrated)
     }
 
+    func testUpgradeWithoutSavedProviderKeysKeepsTheOldCodexAndClaudeMenuBar() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+        UsageSnapshotStore.save(UsageSnapshot(fetchedAt: Date()), to: defaults)
+
+        let migrated = ProviderPreferences.load(from: defaults, detected: { [.claude, .cursor] })
+
+        XCTAssertEqual(migrated.menuBar, [.codex, .claude])
+        XCTAssertEqual(migrated.popover, [.codex, .claude, .cursor])
+        XCTAssertEqual(ProviderPreferences.load(from: defaults, detected: { [] }), migrated)
+    }
+
     func testMenuBarStaysASubsetOfThePopover() {
         var preferences = ProviderPreferences(popover: [.codex], menuBar: [.codex])
 

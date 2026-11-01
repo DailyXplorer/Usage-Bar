@@ -268,7 +268,9 @@ a session with no URL cache and no cookies, so a cached reply is never
 replayed. Polling stops during sleep and in-flight replies are dropped. No
 request starts while macOS reports no network; when the network comes back,
 due data is fetched at once. A network failure in the first minute after wake
-is retried quietly every 15 seconds instead of shown.
+is retried quietly every 15 seconds instead of shown. A Claude request that
+failed after it may have reached Anthropic (for example a timeout) waits the
+full 15 minutes; only one that never left the Mac is retried sooner.
 
 - The last values and each endpoint's successful fetch time are persisted in
   `UserDefaults`, so the popover can show saved data while a refresh is pending.

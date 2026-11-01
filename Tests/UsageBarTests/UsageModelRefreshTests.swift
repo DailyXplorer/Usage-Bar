@@ -732,6 +732,32 @@ final class UsageModelRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeWaitsFifteenMinutesUnlessTheRequestNeverLeftTheMac() async {
+        for (transport, retry) in [(URLError(.timedOut), 900.0), (URLError(.notConnectedToInternet), 60)] {
+            let fixture = TestDefaultsFixture(providers: [.claude])
+            defer { fixture.clear() }
+            let model = UsageModel(
+                defaults: fixture.defaults,
+                fetcher: UsageFetcher { _ in throw ClaudeUsageError(transportError: transport) },
+                now: fixedNow,
+                automaticallySchedules: false
+            )
+
+            model.refreshNow(force: true)
+            let scheduled = await waitUntil {
+                !model.isLoading && model.refreshStates[.claude]?.nextRefresh != nil
+            }
+
+            XCTAssertTrue(scheduled)
+            XCTAssertEqual(
+                model.refreshStates[.claude]?.nextRefresh,
+                fixedNow().addingTimeInterval(retry),
+                "\(transport.code)"
+            )
+        }
+    }
+
+    @MainActor
     func testNetworkErrorRightAfterWakeStaysHiddenAndRetriesSoon() async {
         let fixture = TestDefaultsFixture(providers: [.codex])
         defer { fixture.clear() }
