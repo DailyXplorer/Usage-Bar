@@ -107,6 +107,9 @@ struct UsageRefreshState: Codable {
         if let nextRefresh, nextRefresh.timeIntervalSince(now) > ThrottleBackoff.maximumPause {
             copy.nextRefresh = now
         }
+        if let lastAttempt, lastAttempt > now {
+            copy.lastAttempt = now
+        }
         return copy
     }
 }

@@ -53,10 +53,13 @@ In this order:
 A 429 on the usage endpoint pauses it until `Retry-After` when that is greater
 than zero, otherwise for 5, 15, 30, then 60 minutes on consecutive 429s. Any
 pause is capped at 60 minutes. The pause is stored per account (a hash of the
-account id, never a token) and survives relaunch; the refresh button does not
-bypass it. While paused, the Claude section keeps the last values and says
-"Anthropic paused usage updates. Showing values from ‹time›. Next try at
-‹time›." The backoff resets on the next success.
+account id from `~/.claude.json`, or of the sign-in's refresh token when no
+account id is known; never the token itself) and survives relaunch; the
+refresh button does not bypass it. While paused, the Claude section keeps the
+last values and says "Anthropic paused usage updates. Showing values from
+‹time›. Next try at ‹time›." Times are a short clock time in the system's 12-
+or 24-hour format, with "tomorrow", "yesterday" or a short weekday when the
+time is not today. The backoff resets on the next success.
 
 ### D5 Claude plan name
 
@@ -203,9 +206,19 @@ Tried in order; the first usable source wins:
    internal, multi-account format, and the app rotates the token itself.
    Reading it would mean depending on private internals for no gain over
    source 3.
-3. A **Cursor session token** pasted in Settings (the `WorkosCursorSessionToken`
-   cookie from cursor.com; the cookie's user prefix is stripped). It is stored
-   in Usage Bar's own Keychain item and never shown again.
+3. A **Cursor session token** pasted in Settings: the `WorkosCursorSessionToken`
+   cookie of cursor.com, whose value is `<user id>%3A%3A<access token>` (or
+   `::` once decoded). The field accepts the raw access token, `Bearer <token>`,
+   the cookie value with either separator, the `name=value` pair, or a whole
+   `Cookie:` header line, trims whitespace, and keeps only the access token.
+   Anything that is not a three-part token with a readable expiry is refused
+   with a short message, and so is a token that expires within a minute; a
+   Cursor API key, an encrypted editor value or another cookie is refused
+   rather than exchanged. The token is stored in Usage Bar's own Keychain item
+   and never shown again. The cookie's token is the editor's access token
+   wrapped with the user id, which the editor sends as `Bearer` to the same
+   endpoints; no client is seen sending the cookie's token itself to
+   `api2.cursor.sh`, so that last step rests on this shared shape.
 
 A failed Grok Bot status call (client error or refused token) falls back to
 the legacy layout; a server error keeps the last values. Usage Bar never
@@ -217,9 +230,11 @@ in.
 ### D17 OpenCode Go key
 
 The `opencode-go` key comes from OpenCode's `opencode.db` first (table
-`credential`, active row first, then the newest), opened read-only through
-SQLite's read-only mode so WAL content is honoured and nothing is written. The
-legacy `auth.json` is the fallback. The popover does not print plan prices:
+`credential`, active row first, then the newest), opened through SQLite's
+read-only mode so WAL content is honoured and no row is written (SQLite may
+still create its `-shm` index next to the file). When that open fails and no
+`-wal`, `-shm` or `-journal` file exists, the file is opened as immutable.
+Every read has a deadline. The legacy `auth.json` is the fallback. The popover does not print plan prices:
 Go limits are per model and change over time.
 
 ### D18 Command Code numbers

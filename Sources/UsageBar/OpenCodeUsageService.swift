@@ -16,9 +16,9 @@ enum OpenCodeUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No OpenCode Go key found. Run `/connect` in OpenCode and select OpenCode Go."
+            return "No OpenCode Go key found. In OpenCode, run /connect and choose OpenCode Go."
         case .invalidKey:
-            return "OpenCode Go rejected the key. Run `/connect` in OpenCode again."
+            return "OpenCode Go rejected the key. In OpenCode, run /connect again."
         case .notSubscribed:
             return "This OpenCode workspace has no Go subscription. Subscribe to OpenCode Go, then try again."
         case .throttled:

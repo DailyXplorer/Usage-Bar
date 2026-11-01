@@ -67,15 +67,61 @@ final class CursorCredentialsTests: XCTestCase {
         await XCTAssertThrowsCursorError(.notSignedIn) { try await loader.load() }
     }
 
-    func testSessionTokenAcceptsCookieForms() {
-        let token = jwt(expiry: now)
-        XCTAssertEqual(CursorSessionToken.accessToken(from: token), token)
-        XCTAssertEqual(CursorSessionToken.accessToken(from: " user_01ABC%3A%3A\(token)\n"), token)
-        XCTAssertEqual(CursorSessionToken.accessToken(from: "user_01ABC::\(token)"), token)
-        XCTAssertEqual(CursorSessionToken.accessToken(from: "WorkosCursorSessionToken=user_01ABC%3A%3A\(token); Path=/"), token)
-        XCTAssertEqual(CursorSessionToken.accessToken(from: "Bearer \(token)"), token)
-        XCTAssertNil(CursorSessionToken.accessToken(from: ""))
-        XCTAssertNil(CursorSessionToken.accessToken(from: "two words"))
+    func testSessionTokenAcceptsEveryCopyableForm() {
+        let token = jwt(expiry: now.addingTimeInterval(3_600))
+        let forms = [
+            token,
+            "  \(token)\n",
+            "Bearer \(token)",
+            "user_01ABC%3A%3A\(token)",
+            "user_01ABC::\(token)",
+            "WorkosCursorSessionToken=user_01ABC%3A%3A\(token)",
+            "WorkosCursorSessionToken=user_01ABC%3A%3A\(token); Path=/; Secure",
+            "Cookie: theme=dark; WorkosCursorSessionToken=user_01ABC%3A%3A\(token); other=1",
+        ]
+        for form in forms {
+            XCTAssertEqual(CursorSessionToken.validated(form, at: now), .success(token), form)
+        }
+    }
+
+    func testSessionTokenRejectsWhatIsNotACursorToken() {
+        let token = jwt(expiry: now.addingTimeInterval(3_600))
+        let rejected = [
+            "",
+            "two words",
+            "key_0123456789abcdef",
+            "cursor-safe-storage:v1:dGVzdA==",
+            "wos-session=abc.def",
+            "Cookie: next-auth.session-token=\(token)",
+            "WorkosCursorSessionToken=\(token)",
+            "header.bm90LWpzb24.signature",
+            "\(Data(#"{"alg":"none"}"#.utf8).base64URLEncoded).\(Data(#"{"sub":"user_synthetic"}"#.utf8).base64URLEncoded).signature",
+        ]
+        for form in rejected {
+            XCTAssertEqual(CursorSessionToken.validated(form, at: now), .failure(.unrecognized), form)
+        }
+    }
+
+    func testSessionTokenRejectsATokenAboutToExpire() {
+        XCTAssertEqual(CursorSessionToken.validated(jwt(expiry: now.addingTimeInterval(30)), at: now), .failure(.expired))
+        XCTAssertEqual(CursorSessionToken.validated(jwt(expiry: now.addingTimeInterval(-60)), at: now), .failure(.expired))
+    }
+
+    func testSavingAnInvalidTokenNeverTouchesTheKeychain() async {
+        let store = CursorSessionTokenStore(read: { XCTFail("Keychain read"); return nil }, now: { [now] in now })
+
+        let unrecognized = await store.save("not a token")
+        let expired = await store.save("user_01ABC::\(jwt(expiry: now))")
+
+        XCTAssertEqual(unrecognized, .invalid(.unrecognized))
+        XCTAssertEqual(expired, .invalid(.expired))
+    }
+
+    func testSettingsFooterSaysWhatWentWrong() {
+        XCTAssertEqual(CursorSessionTokenSection.message(for: nil), CursorSessionTokenSection.helpText)
+        XCTAssertTrue(CursorSessionTokenSection.message(for: .invalid(.unrecognized)).hasPrefix("That isn’t a Cursor session token"))
+        XCTAssertTrue(CursorSessionTokenSection.message(for: .invalid(.expired)).contains("expired"))
+        XCTAssertTrue(CursorSessionTokenSection.message(for: .keychainFailed).contains("Keychain"))
     }
 
     func testJWTExpiryIsReadWithoutNetwork() {

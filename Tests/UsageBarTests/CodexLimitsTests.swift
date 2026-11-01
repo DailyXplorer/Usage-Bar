@@ -391,6 +391,28 @@ final class CodexLimitsTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuBarShowsTheWeeklyWindowWhenItHasLessLeft() {
+        func window(_ kind: LimitBucket.Kind, used: Int, seconds: Int) -> LimitBucket {
+            LimitBucket(
+                kind: kind,
+                name: kind == .primary ? "5h Limit" : "Weekly Limit",
+                usedPercent: used,
+                resetAt: nil,
+                resetAfterSeconds: nil,
+                limitWindowSeconds: seconds,
+                reached: false
+            )
+        }
+        let model = UsageModel(
+            previewBuckets: [window(.primary, used: 10, seconds: 18_000), window(.secondary, used: 70, seconds: 604_800)],
+            planType: "plus",
+            lastUpdated: now
+        )
+
+        XCTAssertEqual(model.menuBarText, "30%")
+    }
+
+    @MainActor
     func testMenuBarStaysOnWeeklyOnlyWindow() throws {
         let buckets = CodexLimits.buckets(from: try decode(CodexFixtures.proWeeklyOnly), now: now)
         let model = UsageModel(

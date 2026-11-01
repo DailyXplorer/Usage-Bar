@@ -80,6 +80,19 @@ final class UsageRefreshStateTests: XCTestCase {
         XCTAssertTrue(state.canStart(at: now.addingTimeInterval(900), force: false, policy: policy))
     }
 
+    func testQuotaCheckIsNotBlockedForDaysAfterTheClockMovesBack() {
+        var state = UsageRefreshState()
+        let policy = UsageEndpoint.claudeWhilePaused.policy
+        state.begin(at: now)
+        state.fail("offline", at: now, retryAfter: 60)
+        let earlier = now.addingTimeInterval(-3 * 86_400)
+
+        let restored = state.restored(now: earlier)
+
+        XCTAssertFalse(restored.canStart(at: earlier.addingTimeInterval(899), force: false, policy: policy))
+        XCTAssertTrue(restored.canStart(at: earlier.addingTimeInterval(900), force: false, policy: policy))
+    }
+
     func testCooldownRoundTripsThroughCoding() throws {
         let retryAfter = now.addingTimeInterval(600)
         var state = UsageRefreshState()

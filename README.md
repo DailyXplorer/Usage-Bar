@@ -164,7 +164,8 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   pause is stored per Claude account and survives a restart; the refresh button
   does not skip it. The Claude section keeps the last values and says
   "Anthropic paused usage updates. Showing values from ‹time›. Next try at
-  ‹time›."
+  ‹time›." Times read like "at 00:19" in your 12- or 24-hour format, with
+  "tomorrow" or a short weekday when they are not today.
 - Mirrors Claude Code's `/usage` rows: **Current session** (only when the plan
   has a 5-hour window), **Current week (all models)** and
   **Current week (‹model›)** for per-model weekly limits such as Fable. Other
@@ -172,7 +173,7 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   (spent / monthly limit) and Claude credit windows appear when enabled.
 - The plan badge comes from Anthropic's profile (for example **Claude Ultra**),
   checked at most once a day, else from the sign-in's plan fields. When the
-  usage comes from Claude Code's saved copy, the badge uses the profile name
+  usage comes from Claude Code's saved copy or the quota check, the badge uses the profile name
   already stored for that account, or the sign-in's plan fields; Usage Bar
   sends no profile request then.
 - If there is no Claude Code session, the section says how to sign in.
@@ -206,9 +207,13 @@ Sign-in sources, first usable one wins:
    (`cursorAuth/accessToken`), opened read-only. Cursor 3.27 and later encrypt
    that value; Usage Bar decrypts it with the **Cursor Safe Storage** Keychain
    item, which macOS may ask you to allow once.
-2. A **Cursor session token** pasted in **Settings** → **Cursor**: the value of
-   the `WorkosCursorSessionToken` cookie from cursor.com. Usage Bar keeps it in
-   its own Keychain item.
+2. A **Cursor session token** pasted in **Settings** → **Cursor**: sign in at
+   cursor.com in your browser, open its developer tools, and copy the
+   `WorkosCursorSessionToken` cookie under Cookies for cursor.com. The value
+   (`user_…%3A%3A…`), the `name=value` pair or the whole `Cookie:` line all
+   work; Usage Bar keeps only the access token, in its own Keychain item. A
+   value that is not a Cursor session token, or one that has expired, is
+   refused with a short message.
 
 The Grok Bot app's sign-in is not read: its sealed files belong to its local
 agent, not to your account, and its token store is internal to the app (see
@@ -218,8 +223,9 @@ Grok token. When no source works, the section says how to sign in.
 ### OpenCode
 
 - Reads the `opencode-go` API key from OpenCode's database, `opencode.db`
-  (`$OPENCODE_DB`, else under `$XDG_DATA_HOME/opencode`, else
-  `~/.local/share/opencode`), opened read-only. Falls back to the legacy
+  (`$OPENCODE_DB`, else under `$XDG_DATA_HOME/opencode`,
+  `~/.local/share/opencode` or `~/Library/Application Support/opencode`),
+  opened read-only. Falls back to the legacy
   `auth.json` in the same folders. No key is ever copied or rewritten.
 - Queries `https://opencode.ai/zen/go/v1/usage`, the official Go quota endpoint,
   with the same Bearer key the TUI already uses.
@@ -259,11 +265,10 @@ previous request completes: Codex every 3 minutes, Claude every 15 minutes,
 Cursor, OpenCode and Command Code every 5 minutes. Opening the popover fetches
 only data that is due (Claude: see above). Every provider request goes through
 a session with no URL cache and no cookies, so a cached reply is never
-replayed. Polling stops
-during sleep and in-flight replies are dropped. After wake or a network change,
-Usage Bar waits until macOS reports a working network before fetching, and a
-network failure in the first minute after wake is retried quietly instead of
-shown.
+replayed. Polling stops during sleep and in-flight replies are dropped. No
+request starts while macOS reports no network; when the network comes back,
+due data is fetched at once. A network failure in the first minute after wake
+is retried quietly every 15 seconds instead of shown.
 
 - The last values and each endpoint's successful fetch time are persisted in
   `UserDefaults`, so the popover can show saved data while a refresh is pending.

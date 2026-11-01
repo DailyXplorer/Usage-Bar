@@ -569,4 +569,14 @@ final class UsageSnapshotStoreTests: XCTestCase {
 
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(60 * 60))
     }
+
+    func testOpenCodeDatabaseAloneCountsAsADetectedSignIn() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let folder = home.appendingPathComponent(".local/share/opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data().write(to: folder.appendingPathComponent("opencode.db"))
+
+        XCTAssertEqual(ProviderCredentialDetector.detected(home: home, environment: [:]), [.opencode])
+    }
 }

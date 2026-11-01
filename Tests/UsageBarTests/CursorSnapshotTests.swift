@@ -41,7 +41,7 @@ final class CursorSnapshotTests: XCTestCase {
     func testSettingsCursorSessionTokenField() throws {
         let model = UsageModel(previewBuckets: [], planType: "plus", lastUpdated: now, menuBarProviders: [.cursor])
         for (saved, suffix) in [(false, "empty"), (true, "saved")] {
-            let stub = CursorSessionTokenActions(hasToken: { saved }, save: { _ in true }, remove: { true })
+            let stub = CursorSessionTokenActions(hasToken: { saved }, save: { _ in .saved }, remove: { true })
             let form = Form {
                 CursorSessionTokenSection(actions: stub, hasSavedToken: saved)
             }

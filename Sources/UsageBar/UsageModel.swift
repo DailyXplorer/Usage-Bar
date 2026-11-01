@@ -915,16 +915,10 @@ final class UsageModel: ObservableObject {
         let primary = UsageEndpoint(rawValue: provider.rawValue)
         let staleAfter = primary?.policy.staleAfter ?? UsageEndpoint.codex.policy.staleAfter
         let failed = primary.flatMap { refreshStates[$0]?.lastError } != nil
-        let time = Self.clockText(lastSuccess, relativeTo: date)
         if failed || date.timeIntervalSince(lastSuccess) > staleAfter {
-            return "Saved data from \(time)"
+            return "Saved data from \(ClockText.from(lastSuccess, relativeTo: date))"
         }
-        return "Updated at \(time)"
-    }
-
-    static func clockText(_ date: Date, relativeTo reference: Date) -> String {
-        let sameDay = Calendar.current.isDate(date, inSameDayAs: reference)
-        return date.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened)
+        return "Updated \(ClockText.at(lastSuccess, relativeTo: date))"
     }
 
     func updatedText(at date: Date) -> String {
@@ -935,7 +929,7 @@ final class UsageModel: ObservableObject {
         if minutes < 60 { return "Updated \(minutes) min ago" }
         let hours = minutes / 60
         if hours < 24 { return "Updated \(hours) h ago" }
-        return "Updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened))"
+        return "Updated \(ClockText.at(lastUpdated, relativeTo: date))"
     }
 
     private func apply(_ usage: UsageResponse) {
@@ -1029,11 +1023,11 @@ final class UsageModel: ObservableObject {
     }
 
     private func claudePausedMessage(until pausedUntil: Date, at date: Date) -> String {
-        let next = "Next try at \(Self.clockText(pausedUntil, relativeTo: date))."
+        let next = "Next try \(ClockText.at(pausedUntil, relativeTo: date))."
         guard !claudeBuckets.isEmpty, let dataDate = dataDate(for: .claude) else {
             return "Anthropic paused usage updates. \(next)"
         }
-        return "Anthropic paused usage updates. Showing values from \(Self.clockText(dataDate, relativeTo: date)). \(next)"
+        return "Anthropic paused usage updates. Showing values from \(ClockText.from(dataDate, relativeTo: date)). \(next)"
     }
 
     var visibleEmptyStateMessage: String {

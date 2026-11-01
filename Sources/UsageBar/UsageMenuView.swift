@@ -5,6 +5,7 @@ struct UsageMenuView: View {
     static let width: CGFloat = 304
 
     var onBeforeOpenSettings: () -> Void = {}
+    var contentMaxHeight: CGFloat = 434
 
     @State private var displayDate = Date()
 
@@ -93,7 +94,7 @@ struct UsageMenuView: View {
                 }
                 .scrollIndicators(.visible)
             }
-            .frame(maxHeight: 434)
+            .frame(maxHeight: contentMaxHeight)
         }
     }
 

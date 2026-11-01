@@ -155,7 +155,7 @@ final class UsageServiceTests: XCTestCase {
                 XCTAssertFalse(text.contains(banned), "\(text) contains \(banned)")
             }
         }
-        XCTAssertEqual(UsageError.missingAuthFile.localizedDescription, "No Codex sign-in found. Run `codex` and sign in.")
+        XCTAssertEqual(UsageError.missingAuthFile.localizedDescription, "No Codex sign-in found. Open Codex and sign in.")
         XCTAssertEqual(
             UsageError.network("offline").localizedDescription,
             "Could not reach ChatGPT. Check your internet connection."

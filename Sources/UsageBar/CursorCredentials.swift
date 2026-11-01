@@ -226,24 +226,50 @@ actor CursorSafeStorageKeychain {
 }
 
 enum CursorSessionToken {
+    enum Problem: Error, Equatable {
+        case unrecognized, expired
+    }
+
+    static let cookieName = "WorkosCursorSessionToken"
+    static let minimumLifetime: TimeInterval = 60
+
+    static func validated(_ raw: String, at now: Date) -> Result<String, Problem> {
+        guard let token = accessToken(from: raw), let expiry = CursorJWT.expiry(of: token) else {
+            return .failure(.unrecognized)
+        }
+        guard expiry.timeIntervalSince(now) > minimumLifetime else { return .failure(.expired) }
+        return .success(token)
+    }
+
     static func accessToken(from raw: String) -> String? {
         var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let range = value.range(of: "WorkosCursorSessionToken=") {
+        if let range = value.range(of: "\(cookieName)=") {
             value = String(value[range.upperBound...])
             if let end = value.firstIndex(of: ";") {
                 value = String(value[..<end])
             }
-        }
-        value = value.removingPercentEncoding ?? value
-        if let range = value.range(of: "::", options: .backwards) {
-            value = String(value[range.upperBound...])
+            value = value.removingPercentEncoding ?? value
+            guard let separator = value.range(of: "::") else { return nil }
+            value = String(value[separator.upperBound...])
+        } else {
+            value = value.removingPercentEncoding ?? value
+            if let separator = value.range(of: "::", options: .backwards) {
+                value = String(value[separator.upperBound...])
+            }
         }
         if value.lowercased().hasPrefix("bearer ") {
             value = String(value.dropFirst("bearer ".count))
         }
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, !value.contains(where: { $0.isWhitespace }) else { return nil }
-        return value
+        return isJWTShaped(value) ? value : nil
+    }
+
+    private static func isJWTShaped(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        let alphabet = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        return parts.count == 3 && parts.allSatisfy { part in
+            !part.isEmpty && part.unicodeScalars.allSatisfy(alphabet.contains)
+        }
     }
 }
 
@@ -308,15 +334,26 @@ actor CursorSessionTokenStore {
         return cached
     }
 
-    func save(_ raw: String) async -> Bool {
-        guard let token = CursorSessionToken.accessToken(from: raw) else { return false }
-        let saved = await ProviderIO.runBlocking(timeout: Self.readTimeout) { Self.writeItem(token) } ?? false
-        if saved {
-            cached = token
-            loaded = true
-            failedAt = nil
+    enum SaveOutcome: Equatable {
+        case saved
+        case invalid(CursorSessionToken.Problem)
+        case keychainFailed
+    }
+
+    func save(_ raw: String) async -> SaveOutcome {
+        let token: String
+        switch CursorSessionToken.validated(raw, at: now()) {
+        case .success(let value):
+            token = value
+        case .failure(let problem):
+            return .invalid(problem)
         }
-        return saved
+        let saved = await ProviderIO.runBlocking(timeout: Self.readTimeout) { Self.writeItem(token) } ?? false
+        guard saved else { return .keychainFailed }
+        cached = token
+        loaded = true
+        failedAt = nil
+        return .saved
     }
 
     func remove() async -> Bool {

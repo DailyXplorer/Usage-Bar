@@ -16,17 +16,17 @@ enum ClaudeUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No Claude Code session. Run `claude`, then `/login`."
+            return "No Claude Code session. Run claude in Terminal, then /login."
         case .tokenExpired:
-            return "Claude Code sign-in expired. Run `claude`, then `/login`."
+            return "Claude Code sign-in expired. Run claude in Terminal, then /login."
         case .refreshInProgress:
             return "Claude Code is renewing its sign-in. Trying again shortly."
         case .credentialsNotSaved:
-            return "Could not save the renewed Claude Code sign-in. Run `claude` once to renew it."
+            return "Could not save the renewed Claude Code sign-in. Run claude in Terminal once to renew it."
         case .keychainUnavailable:
             return "Could not read the Claude Code sign-in from the Keychain. Trying again shortly."
         case .forbidden:
-            return "This Claude Code sign-in cannot read usage. Run `claude`, then `/login`."
+            return "This Claude Code sign-in cannot read usage. Run claude in Terminal, then /login."
         case .throttled:
             return "Anthropic paused usage updates. Trying again later."
         case .network:

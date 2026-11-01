@@ -188,7 +188,9 @@ enum ProviderCredentialDetector {
         if exists(home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")) {
             found.insert(.cursor)
         }
-        if OpenCodeUsageService.authFileCandidates(home: home, environment: environment).contains(where: exists) {
+        let opencodeFiles = OpenCodeUsageService.databaseCandidates(home: home, environment: environment)
+            + OpenCodeUsageService.authFileCandidates(home: home, environment: environment)
+        if opencodeFiles.contains(where: exists) {
             found.insert(.opencode)
         }
         let commandCodeKey = ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"].contains {

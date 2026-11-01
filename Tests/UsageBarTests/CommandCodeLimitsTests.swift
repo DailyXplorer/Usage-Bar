@@ -352,6 +352,32 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertEqual(response.windowLimits?.limited, true)
     }
 
+    func testCreditsResponseSurvivesWronglyTypedWindowFields() throws {
+        let payload = """
+        {
+          "credits": {"monthlyCredits": 8.5},
+          "windowLimits": {
+            "limited": "true",
+            "fiveHour": "soon",
+            "weekly": {"used": 1.2, "cap": 6, "exceeded": false, "resetAt": 1786800000000}
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(CommandCodeCreditsResponse.self, from: Data(payload.utf8))
+
+        XCTAssertEqual(response.credits?.monthlyCredits, 8.5)
+        XCTAssertEqual(response.windowLimits?.limited, true)
+        XCTAssertNil(response.windowLimits?.fiveHour)
+        XCTAssertEqual(response.windowLimits?.weekly?.cap, 6)
+
+        let broken = try JSONDecoder().decode(
+            CommandCodeCreditsResponse.self,
+            from: Data(#"{"credits": {"monthlyCredits": 8.5, "windowLimits": 3}, "windowLimits": []}"#.utf8)
+        )
+        XCTAssertEqual(broken.credits?.monthlyCredits, 8.5)
+        XCTAssertNil(broken.windowLimits)
+    }
+
     func testCreditsResponseDecodesNestedWindowLimitsAndStringNumbers() throws {
         let payload = """
         {

@@ -228,7 +228,7 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertTrue(model.isLoading)
         XCTAssertEqual(
             model.sectionMessage(for: .claude),
-            "No Claude Code session. Run `claude`, then `/login`."
+            "No Claude Code session. Run claude in Terminal, then /login."
         )
 
         await slowFetch.release()
@@ -553,11 +553,11 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertTrue(firstDone)
         XCTAssertTrue(paused)
         XCTAssertEqual(model.claudeBuckets.map(\.usedPercent), [25])
-        let time = UsageModel.clockText(fixedNow(), relativeTo: clock.date)
-        let next = UsageModel.clockText(clock.date.addingTimeInterval(300), relativeTo: clock.date)
+        let time = ClockText.from(fixedNow(), relativeTo: clock.date)
+        let next = ClockText.at(clock.date.addingTimeInterval(300), relativeTo: clock.date)
         XCTAssertEqual(
             model.sectionMessage(for: .claude),
-            "Anthropic paused usage updates. Showing values from \(time). Next try at \(next)."
+            "Anthropic paused usage updates. Showing values from \(time). Next try \(next)."
         )
         XCTAssertNil(model.freshnessMessage(for: .claude, at: clock.date))
 

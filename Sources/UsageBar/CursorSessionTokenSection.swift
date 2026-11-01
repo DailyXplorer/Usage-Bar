@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CursorSessionTokenActions {
     var hasToken: () async -> Bool
-    var save: (String) async -> Bool
+    var save: (String) async -> CursorSessionTokenStore.SaveOutcome
     var remove: () async -> Bool
 
     static let keychain = CursorSessionTokenActions(
@@ -13,12 +13,27 @@ struct CursorSessionTokenActions {
 }
 
 struct CursorSessionTokenSection: View {
-    static let helpText = "Paste the WorkosCursorSessionToken cookie from cursor.com. It stays in your Keychain."
+    static let helpText = "Sign in at cursor.com in your browser, open its developer tools, and copy the WorkosCursorSessionToken cookie under Cookies for cursor.com. It stays in your Keychain."
+
+    static func message(for outcome: CursorSessionTokenStore.SaveOutcome?) -> String {
+        switch outcome {
+        case .invalid(.unrecognized):
+            return "That isn’t a Cursor session token. Copy the WorkosCursorSessionToken cookie value from cursor.com."
+        case .invalid(.expired):
+            return "That Cursor session token has expired. Sign in at cursor.com again and copy the new cookie."
+        case .keychainFailed:
+            return keychainFailureText
+        case .saved, nil:
+            return helpText
+        }
+    }
+
+    private static let keychainFailureText = "Usage Bar couldn’t update the Keychain. Try again, or allow access when macOS asks."
 
     @EnvironmentObject private var model: UsageModel
     @State private var draft = ""
     @State private var hasSavedToken: Bool
-    @State private var rejected = false
+    @State private var outcome: CursorSessionTokenStore.SaveOutcome?
     @State private var userActed = false
     private let actions: CursorSessionTokenActions
 
@@ -50,7 +65,7 @@ struct CursorSessionTokenSection: View {
         } header: {
             SettingsSectionHeader(title: "Cursor")
         } footer: {
-            Text(rejected ? "Usage Bar couldn’t update the Keychain. Try again, or allow access when macOS asks." : Self.helpText)
+            Text(Self.message(for: outcome))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .task {
@@ -66,9 +81,9 @@ struct CursorSessionTokenSection: View {
         guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         userActed = true
         Task {
-            let saved = await actions.save(value)
-            rejected = !saved
-            if saved {
+            let result = await actions.save(value)
+            outcome = result
+            if result == .saved {
                 draft = ""
                 hasSavedToken = true
                 model.refreshNow(force: true)
@@ -80,7 +95,7 @@ struct CursorSessionTokenSection: View {
         userActed = true
         Task {
             let removed = await actions.remove()
-            rejected = !removed
+            outcome = removed ? nil : .keychainFailed
             if removed {
                 hasSavedToken = false
                 model.refreshNow(force: true)

@@ -15,7 +15,7 @@ struct CommandCodeWhoamiResponse: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         org = try? container.decodeIfPresent(Org.self, forKey: .org)
-        let entries = (try? container.decodeIfPresent([CommandCodeLenient<CommandCodeOrgLimit>].self, forKey: .orgLimits)) ?? nil
+        let entries = (try? container.decodeIfPresent([Lenient<CommandCodeOrgLimit>].self, forKey: .orgLimits)) ?? nil
         orgLimits = entries?.compactMap(\.value) ?? []
     }
 }
@@ -73,14 +73,6 @@ struct CommandCodeOrgLimit: Decodable, Equatable {
     }
 }
 
-struct CommandCodeLenient<Value: Decodable>: Decodable {
-    let value: Value?
-
-    init(from decoder: Decoder) throws {
-        value = try? Value(from: decoder)
-    }
-}
-
 struct CommandCodeSubscriptionsResponse: Decodable {
     struct Subscription: Decodable {
         let planId: String?
@@ -132,7 +124,7 @@ struct CommandCodeCreditsResponse: Decodable {
             monthlyCredits = try container.decodeFlexibleDoubleIfPresent(forKey: .monthlyCredits)
             purchasedCredits = try container.decodeFlexibleDoubleIfPresent(forKey: .purchasedCredits)
             freeCredits = try container.decodeFlexibleDoubleIfPresent(forKey: .freeCredits)
-            windowLimits = try container.decodeIfPresent(WindowLimits.self, forKey: .windowLimits)
+            windowLimits = (try? container.decodeIfPresent(WindowLimits.self, forKey: .windowLimits)) ?? nil
         }
     }
 
@@ -140,6 +132,23 @@ struct CommandCodeCreditsResponse: Decodable {
         let limited: Bool?
         let fiveHour: CommandCodeWindow?
         let weekly: CommandCodeWindow?
+
+        private enum CodingKeys: String, CodingKey {
+            case limited, fiveHour, weekly
+        }
+
+        init(limited: Bool?, fiveHour: CommandCodeWindow?, weekly: CommandCodeWindow?) {
+            self.limited = limited
+            self.fiveHour = fiveHour
+            self.weekly = weekly
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            limited = (try? container.decodeFlexibleBoolIfPresent(forKey: .limited)) ?? nil
+            fiveHour = (try? container.decodeIfPresent(CommandCodeWindow.self, forKey: .fiveHour)) ?? nil
+            weekly = (try? container.decodeIfPresent(CommandCodeWindow.self, forKey: .weekly)) ?? nil
+        }
     }
 
     let credits: Credits?
@@ -156,8 +165,8 @@ struct CommandCodeCreditsResponse: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        credits = try container.decodeIfPresent(Credits.self, forKey: .credits)
-        windowLimits = try container.decodeIfPresent(WindowLimits.self, forKey: .windowLimits)
+        credits = (try? container.decodeIfPresent(Credits.self, forKey: .credits)) ?? nil
+        windowLimits = ((try? container.decodeIfPresent(WindowLimits.self, forKey: .windowLimits)) ?? nil)
             ?? credits?.windowLimits
     }
 }

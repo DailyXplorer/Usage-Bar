@@ -15,9 +15,9 @@ enum CommandCodeUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No Command Code key found. Run `cmd login` in your terminal."
+            return "No Command Code key found. Run cmd login in Terminal."
         case .invalidKey:
-            return "Command Code rejected the key. Run `cmd login` again."
+            return "Command Code rejected the key. Run cmd login again in Terminal."
         case .throttled:
             return "Command Code paused usage updates. Usage Bar will try again later."
         case .network:
