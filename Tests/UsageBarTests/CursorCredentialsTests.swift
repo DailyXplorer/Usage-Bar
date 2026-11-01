@@ -128,6 +128,48 @@ final class CursorCredentialsTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
     }
 
+    func testUndecryptableLoginReadsSafeStorageOncePerRetryDelay() async throws {
+        let reads = KeychainReadCounter()
+        let clock = KeychainTestClock(now)
+        let keychain = CursorSafeStorageKeychain(read: { reads.read("stale-password") }, now: { clock.now })
+        let stored = try sealed(jwt(expiry: now.addingTimeInterval(3_600)), password: "current-password")
+        let loader = CursorCredentialLoader(
+            editorLogin: { CursorEditorLogin(accessToken: stored, membershipType: "pro") },
+            safeStoragePassword: { await keychain.password() },
+            settingsToken: { nil },
+            now: { clock.now },
+            forgetSafeStoragePassword: { await keychain.forget() }
+        )
+
+        for _ in 0..<3 {
+            await XCTAssertThrowsCursorError(.unreadableLogin) { try await loader.load() }
+        }
+        XCTAssertEqual(reads.count, 1)
+
+        clock.now = now.addingTimeInterval(60 * 60 + 1)
+        await XCTAssertThrowsCursorError(.unreadableLogin) { try await loader.load() }
+        await XCTAssertThrowsCursorError(.unreadableLogin) { try await loader.load() }
+        XCTAssertEqual(reads.count, 2)
+    }
+
+    func testFailedSettingsTokenReadIsRetriedAfterDelay() async {
+        let reads = KeychainReadCounter()
+        let clock = KeychainTestClock(now)
+        let store = CursorSessionTokenStore(read: { reads.count == 0 ? reads.read(nil) : reads.read("saved-token") }, now: { clock.now })
+
+        let first = await store.token()
+        let blocked = await store.token()
+        clock.now = now.addingTimeInterval(60 * 60 + 1)
+        let retried = await store.token()
+        let cached = await store.token()
+
+        XCTAssertNil(first)
+        XCTAssertNil(blocked)
+        XCTAssertEqual(retried, "saved-token")
+        XCTAssertEqual(cached, "saved-token")
+        XCTAssertEqual(reads.count, 2)
+    }
+
     func testBlockingWorkReturnsNilAfterTimeout() async {
         let start = Date()
         let value: Int? = await ProviderIO.runBlocking(timeout: 0.2) {
@@ -184,6 +226,34 @@ final class CursorCredentialsTests: XCTestCase {
         for sql in statements {
             XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql)
         }
+    }
+}
+
+private final class KeychainReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reads = 0
+
+    var count: Int {
+        lock.withLock { reads }
+    }
+
+    func read(_ value: String?) -> String? {
+        lock.withLock { reads += 1 }
+        return value
+    }
+}
+
+private final class KeychainTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+
+    init(_ start: Date) {
+        current = start
+    }
+
+    var now: Date {
+        get { lock.withLock { current } }
+        set { lock.withLock { current = newValue } }
     }
 }
 

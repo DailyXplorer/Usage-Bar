@@ -256,6 +256,10 @@ enum CommandCodeLimits {
         return plans.first(where: { $0.id == id })?.monthlyCredits
     }
 
+    static func shouldHide(_ snapshot: CommandCodeUsageSnapshot) -> Bool {
+        windowLimits(from: snapshot)?.limited == false && buckets(from: snapshot).isEmpty
+    }
+
     static func buckets(from snapshot: CommandCodeUsageSnapshot, now: Date = Date()) -> [LimitBucket] {
         let windows = windowLimits(from: snapshot).flatMap { $0.limited == false ? nil : $0 }
         var result: [LimitBucket] = []

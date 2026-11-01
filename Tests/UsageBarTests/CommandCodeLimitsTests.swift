@@ -181,6 +181,14 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertEqual(CommandCodeLimits.buckets(from: goSnapshot(limited: false)).map(\.kind), [.monthly])
     }
 
+    func testOnlyUnlimitedAccountsWithNothingToShowAreHidden() {
+        XCTAssertFalse(CommandCodeLimits.shouldHide(goSnapshot()))
+        XCTAssertFalse(CommandCodeLimits.shouldHide(goSnapshot(limited: false)))
+        XCTAssertFalse(CommandCodeLimits.shouldHide(goSnapshot(planId: "individual-provider", limited: false)))
+        XCTAssertFalse(CommandCodeLimits.shouldHide(goSnapshot(monthlyRemaining: nil, monthlyUsed: nil, planId: nil)))
+        XCTAssertTrue(CommandCodeLimits.shouldHide(goSnapshot(monthlyRemaining: nil, monthlyUsed: nil, limited: false)))
+    }
+
     func testMonthlyPoolIncludesPurchasedAndFreeCreditsAsTheCLIDoes() {
         var snapshot = goSnapshot(monthlyUsed: nil)
         snapshot.credits = CommandCodeCreditsResponse.Credits(monthlyCredits: 5, purchasedCredits: 4, freeCredits: 1)

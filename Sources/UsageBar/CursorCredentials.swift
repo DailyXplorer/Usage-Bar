@@ -172,15 +172,23 @@ actor CursorSafeStorageKeychain {
     private static let readTimeout: TimeInterval = 30
     private static let retryDelay: TimeInterval = 60 * 60
 
+    private let read: @Sendable () -> String?
+    private let now: @Sendable () -> Date
     private var cached: String?
     private var failedAt: Date?
     private var pending: Task<String?, Never>?
 
+    init(read: @escaping @Sendable () -> String? = readItem, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.read = read
+        self.now = now
+    }
+
     func password() async -> String? {
         if let cached { return cached }
-        if let failedAt, Date().timeIntervalSince(failedAt) < Self.retryDelay { return nil }
+        if let failedAt, now().timeIntervalSince(failedAt) < Self.retryDelay { return nil }
+        let read = read
         let task = pending ?? Task {
-            await ProviderIO.runBlocking(timeout: Self.readTimeout) { Self.readItem() }
+            await ProviderIO.runBlocking(timeout: Self.readTimeout) { read() }
         }
         pending = task
         let value = await task.value
@@ -189,13 +197,15 @@ actor CursorSafeStorageKeychain {
             cached = value
             failedAt = nil
         } else {
-            failedAt = Date()
+            failedAt = now()
         }
         return cached
     }
 
     func forget() {
+        guard cached != nil else { return }
         cached = nil
+        failedAt = now()
     }
 
     private static func readItem() -> String? {
@@ -264,16 +274,26 @@ actor CursorSessionTokenStore {
     static let service = "com.usagebar.app.cursor-session-token"
     static let account = "cursor"
     private static let readTimeout: TimeInterval = 30
+    private static let retryDelay: TimeInterval = 60 * 60
 
+    private let read: @Sendable () -> String?
+    private let now: @Sendable () -> Date
     private var loaded = false
     private var cached: String?
-    private var readBlocked = false
+    private var failedAt: Date?
     private var pending: Task<String?, Never>?
 
+    init(read: @escaping @Sendable () -> String? = readItem, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.read = read
+        self.now = now
+    }
+
     func token() async -> String? {
-        if loaded || readBlocked { return cached }
+        if loaded { return cached }
+        if let failedAt, now().timeIntervalSince(failedAt) < Self.retryDelay { return nil }
+        let read = read
         let task = pending ?? Task {
-            await ProviderIO.runBlocking(timeout: Self.readTimeout) { Self.readItem() }
+            await ProviderIO.runBlocking(timeout: Self.readTimeout) { read() }
         }
         pending = task
         let value = await task.value
@@ -281,8 +301,9 @@ actor CursorSessionTokenStore {
         if let value {
             cached = value.isEmpty ? nil : value
             loaded = true
+            failedAt = nil
         } else {
-            readBlocked = true
+            failedAt = now()
         }
         return cached
     }
@@ -293,7 +314,7 @@ actor CursorSessionTokenStore {
         if saved {
             cached = token
             loaded = true
-            readBlocked = false
+            failedAt = nil
         }
         return saved
     }
@@ -303,7 +324,7 @@ actor CursorSessionTokenStore {
         if removed {
             cached = nil
             loaded = true
-            readBlocked = false
+            failedAt = nil
         }
         return removed
     }

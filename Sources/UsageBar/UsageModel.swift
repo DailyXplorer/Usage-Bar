@@ -645,6 +645,12 @@ final class UsageModel: ObservableObject {
     }
 
     private func applyCommandCode(_ usage: CommandCodeUsageSnapshot) {
+        if CommandCodeLimits.shouldHide(usage) {
+            commandcodeAvailable = false
+            commandcodeBuckets = []
+            commandcodePlan = nil
+            return
+        }
         commandcodeAvailable = true
         commandcodePlan = usage.planId
         commandcodeBuckets = CommandCodeLimits.buckets(from: usage, now: now())

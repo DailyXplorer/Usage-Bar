@@ -40,8 +40,10 @@ Tried in order; the first usable source wins:
    **Cursor Safe Storage** Keychain password (account `Cursor`). Usage Bar
    reads that item itself, not through `/usr/bin/security`, so an "Always
    Allow" covers only Usage Bar. The read may ask the user once; the password
-   is kept in memory only, dropped when it no longer decrypts, and a refused
-   read is not retried for an hour.
+   is kept in memory only. A refused read, or a password that no longer
+   decrypts the login, waits an hour before the next Keychain read, so a user
+   who chose "Allow" sees at most one prompt per hour. A failed read of the
+   Settings token waits the same hour instead of blocking until relaunch.
 2. The Grok Bot app's sign-in is **not** read. Its `sandSealedFile` files
    belong to its local agent and use a second, app-specific AES-256-GCM layer
    whose key sits in the app's own secret store; its Cursor token store is an
@@ -78,6 +80,9 @@ Go limits are per model and change over time.
 - Plan names and credits follow the CLI table, matched by longest prefix: Go
   10, GOAT 70, Pro 30, Pro (v1) 80, Provider 15, Max 150, Ultra 300, Teams Pro
   40.
+- No plan is hidden: Provider shows its 15-credit pool. The section is hidden
+  only when `windowLimits.limited` is false and there is no monthly pool or
+  org limit to show.
 - `whoami?limits=1` runs on every refresh, and each `orgLimits` entry becomes a
   spend-limit row (`$spent of $limit` with its interval). The 5-hour and weekly
   windows are hidden when `windowLimits.limited` is false; the monthly pool
