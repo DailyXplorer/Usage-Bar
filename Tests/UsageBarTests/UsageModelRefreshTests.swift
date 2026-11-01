@@ -749,6 +749,45 @@ final class UsageModelRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedQuotaChecksWaitFifteenMinutesFromTheLastTry() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let calls = EndpointCallLog()
+        let quotaChecks = ResultQueue([
+            .failure(ClaudeUsageError.network),
+            .failure(ClaudeUsageError.throttled(retryAfter: nil)),
+        ])
+        let clock = TestClock(fixedNow())
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                await calls.record(endpoint)
+                if endpoint == .claude {
+                    throw ClaudeUsageError.throttled(retryAfter: fixedNow().addingTimeInterval(3600))
+                }
+                return try await quotaChecks.next()
+            },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+        model.claudeQuotaCheckEnabled = true
+
+        model.refreshNow(force: true)
+        _ = await waitUntil { model.claudePausedUntil(at: clock.date) != nil && !model.isLoading }
+        model.refreshNow()
+        _ = await calls.waitForCount(2)
+        _ = await waitUntil { !model.isLoading }
+        for (offset, expected) in [(61.0, 1), (899, 1), (900, 2), (1_200, 2), (1_799, 2), (1_800, 3)] {
+            clock.date = fixedNow().addingTimeInterval(offset)
+            model.refreshNow(force: true)
+            await Task.yield()
+            _ = await waitUntil { !model.isLoading }
+            let quotaCheckCalls = await calls.count(for: .claudeWhilePaused)
+            XCTAssertEqual(quotaCheckCalls, expected, "at +\(Int(offset))s")
+        }
+    }
+
+    @MainActor
     func testEmptyClaudeResponseSaysSo() async throws {
         let fixture = TestDefaultsFixture(providers: [.claude])
         defer { fixture.clear() }

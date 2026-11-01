@@ -71,17 +71,37 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertEqual(fetch.plan, "max_20x")
     }
 
-    func testRecentClaudeCodeCopyForTheSameAccountAvoidsTheNetwork() async throws {
+    func testRecentClaudeCodeCopyForTheSameAccountAvoidsTheNetworkAndTheSignIn() async throws {
         try writeClaudeCodeState(account: "account-1", cacheAccount: "account-1", fetchedAt: now.addingTimeInterval(-600))
+        let reads = Counter()
 
-        let fetch = try await service().fetchUsage(ownDataDate: now.addingTimeInterval(-1_200))
+        let fetch = try await service(reads: reads).fetchUsage(ownDataDate: now.addingTimeInterval(-1_200))
 
         XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
+        let readCount = await reads.value
+        XCTAssertEqual(readCount, 0)
         XCTAssertEqual(fetch.source, .claudeCode)
         XCTAssertEqual(fetch.dataDate, now.addingTimeInterval(-600))
         XCTAssertEqual(fetch.accountKey, ClaudeAccountKey.make("account-1"))
-        XCTAssertEqual(fetch.plan, "max_20x")
+        XCTAssertNil(fetch.plan)
         XCTAssertEqual(fetch.usage.map { ClaudeLimits.buckets(from: $0, now: now).map(\.kind) }, [.weeklyAll, .weeklyScoped, .spendLimit])
+    }
+
+    func testClaudeCodeCopyKeepsTheStoredProfilePlanAfterADay() async throws {
+        try writeClaudeCodeState(account: "account-1", cacheAccount: "account-1", fetchedAt: now.addingTimeInterval(-600))
+        ClaudeProfilePlanCache(
+            accountKey: ClaudeAccountKey.make("account-1"),
+            planName: "Ultra",
+            checkedAt: now.addingTimeInterval(-3 * 24 * 3600)
+        ).save(to: defaults)
+        let reads = Counter()
+
+        let fetch = try await service(reads: reads).fetchUsage(ownDataDate: nil)
+
+        XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
+        let readCount = await reads.value
+        XCTAssertEqual(readCount, 0)
+        XCTAssertEqual(fetch.plan, "Ultra")
     }
 
     func testClaudeCodeCopyIsIgnoredWhenOldForeignOrOlderThanOurs() async throws {
@@ -189,13 +209,16 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertNil(configuration.httpCookieStorage)
     }
 
-    private func service(now date: Date? = nil, renewals: Counter = Counter()) -> ClaudeUsageService {
+    private func service(now date: Date? = nil, renewals: Counter = Counter(), reads: Counter = Counter()) -> ClaudeUsageService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ClaudeStubProtocol.self]
         let fixed = date ?? now
         return ClaudeUsageService(
             credentials: ClaudeCredentialProvider(
-                usable: { Self.credentials("token-1") },
+                usable: {
+                    await reads.increment()
+                    return Self.credentials("token-1")
+                },
                 afterRejection: { _ in
                     await renewals.increment()
                     return Self.credentials("token-2")

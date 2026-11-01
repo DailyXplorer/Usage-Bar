@@ -654,7 +654,7 @@ final class UsageModel: ObservableObject {
         let date = now()
         let deadline = UsageEndpoint.allCases
             .filter { requests[$0] == nil && isEnabled($0, at: date) }
-            .map { (refreshStates[$0] ?? UsageRefreshState()).nextEligible }
+            .map { (refreshStates[$0] ?? UsageRefreshState()).nextEligible(policy: $0.policy) }
             .min()
         guard let next = deadline else { return }
         let delay = max(0.01, min(3600, next.timeIntervalSince(date)))
@@ -733,6 +733,9 @@ final class UsageModel: ObservableObject {
                 claude.backoff.reset()
                 claude.nextRefresh = date
                 refreshStates[.claude] = claude
+            }
+            if let previous = claudeAccountKey, previous != key {
+                claudePlan = nil
             }
             claudeAccountKey = key
         }

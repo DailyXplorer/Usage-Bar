@@ -88,6 +88,7 @@ final class ClaudeLimitsTests: XCTestCase {
         XCTAssertEqual(credits.name, "Usage credits")
         XCTAssertEqual(credits.usedPercent, 25)
         XCTAssertEqual(credits.detail, "$12.50 / $50.00 spent")
+        XCTAssertNil(credits.resetAt)
         XCTAssertFalse(credits.drivesMenuBar)
 
         let creditWindows = buckets.filter { $0.kind == .credit }

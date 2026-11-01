@@ -230,8 +230,9 @@ and an error on one side does not wipe out the other sides' bars.
 Each provider shown in the popover refreshes on its own schedule after its
 previous request completes: Codex every 3 minutes, Claude every 15 minutes,
 Cursor, OpenCode and Command Code every 5 minutes. Opening the popover fetches
-only data that is due (Claude: see above). Requests go through a session with
-no URL cache and no cookies, so a cached reply is never replayed. Polling stops
+only data that is due (Claude: see above). Codex, Claude, Cursor and Command
+Code requests go through a session with no URL cache and no cookies, so a
+cached reply is never replayed; OpenCode Go does not yet. Polling stops
 during sleep and in-flight replies are dropped. After wake or a network change,
 Usage Bar waits until macOS reports a working network before fetching, and a
 network failure in the first minute after wake is retried quietly instead of

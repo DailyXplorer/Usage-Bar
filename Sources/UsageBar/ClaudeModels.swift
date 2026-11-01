@@ -233,15 +233,14 @@ enum ClaudeLimits {
             if let limit = extra.monthlyLimit {
                 let used = extra.usedCredits ?? 0
                 let percent = extra.utilization ?? (limit > 0 ? used / limit * 100 : 100)
-                let resetAt = startOfNextMonth(after: now)
                 result.append(LimitBucket(
                     provider: .claude,
                     kind: .spendLimit,
                     scope: "extra_usage",
                     name: usageCreditsName,
                     usedPercent: clampPercent(percent),
-                    resetAt: resetAt,
-                    resetAfterSeconds: secondsUntil(resetAt, from: now),
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
                     limitWindowSeconds: nil,
                     reached: percent >= 100,
                     detail: "\(money(used / scale, currency: currency)) / \(money(limit / scale, currency: currency)) spent"
@@ -409,12 +408,6 @@ enum ClaudeLimits {
         case "monthly": return 30 * 24 * hour
         default: return nil
         }
-    }
-
-    private static func startOfNextMonth(after date: Date) -> Date? {
-        let calendar = Calendar.current
-        guard let start = calendar.dateInterval(of: .month, for: date)?.start else { return nil }
-        return calendar.date(byAdding: .month, value: 1, to: start)
     }
 
     private static func money(_ amount: Double, currency: String) -> String {

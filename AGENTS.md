@@ -144,7 +144,7 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/MenuBarController.swift` | Variable status item, panel, and dismissal lifecycle |
 | `Sources/UsageBar/MenuBarPanelPlacement.swift` | Pure panel placement across screens |
 | `Sources/UsageBar/UsageRefreshState.swift` | Per-endpoint cadence (`RefreshPolicy`), pauses, fetch routing |
-| `Sources/UsageBar/ProviderSession.swift` | Ephemeral, cache-free `URLSession` for every provider request |
+| `Sources/UsageBar/ProviderSession.swift` | Ephemeral, cache-free `URLSession` for provider requests |
 | `Sources/UsageBar/ClaudeUsageService.swift` | Claude sources: Claude Code's saved copy, usage endpoint, profile, quota check |
 | `Sources/UsageBar/ClaudeCredentialStore.swift` | Claude sign-in read, renewal and write-back |
 | `Sources/UsageBar/Subprocess.swift` | Time-limited subprocess runner (`/usr/bin/security`) |
@@ -159,8 +159,10 @@ button must receive one compact template image from `MenuBarLabelImage`. Do not
 reserve hidden percentage text, set a numeric status item length, or replace
 the AppKit status item with `MenuBarExtra`.
 
-Every provider request goes through `ProviderSession.shared` (no URL cache, no
-cookies). Refresh cadence lives in `UsageEndpoint.policy`; read
+Codex, Claude, Cursor and Command Code requests go through
+`ProviderSession.shared` (no URL cache, no cookies); `OpenCodeUsageService`
+still uses `URLSession.shared`. A new provider request must use
+`ProviderSession.shared`. Refresh cadence lives in `UsageEndpoint.policy`; read
 [docs/DECISIONS.md](docs/DECISIONS.md) (D3, D4, D9, D10) before changing it.
 Usage Bar renews only the Claude token, through `ClaudeCredentialStore`; it
 never renews Codex, Cursor or other tokens.

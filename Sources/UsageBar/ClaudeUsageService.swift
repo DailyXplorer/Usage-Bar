@@ -213,7 +213,7 @@ actor ClaudeUsageService {
                 usage: cached.usage,
                 source: .claudeCode,
                 dataDate: cached.date,
-                plan: await cachedPlan(accountKey: local.accountKey),
+                plan: storedPlan(accountKey: local.accountKey),
                 accountKey: local.accountKey
             )
         }
@@ -284,13 +284,11 @@ actor ClaudeUsageService {
         return (data, http)
     }
 
-    private func cachedPlan(accountKey: String?) async -> String? {
-        if let cache = ClaudeProfilePlanCache.load(from: defaults),
-           cache.isCurrent(for: accountKey, at: now()),
-           let planName = cache.planName {
-            return planName
+    private func storedPlan(accountKey: String?) -> String? {
+        guard let cache = ClaudeProfilePlanCache.load(from: defaults), cache.accountKey == accountKey else {
+            return nil
         }
-        return try? await credentials.usable().planToken
+        return cache.planName
     }
 
     private func plan(for credentials: ClaudeCredentials, accountKey: String?) async -> String? {

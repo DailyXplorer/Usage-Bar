@@ -20,7 +20,7 @@ enum UsageEndpoint: String, Codable, CaseIterable {
         case .claude:
             return RefreshPolicy(interval: 15 * 60, manualGap: 60, refreshOnOpenAfter: 5 * 60)
         case .claudeWhilePaused:
-            return RefreshPolicy(interval: 15 * 60, manualGap: nil)
+            return RefreshPolicy(interval: 15 * 60, manualGap: nil, minimumGap: 15 * 60)
         case .cursor, .cursorGrokBot, .opencode, .commandcode:
             return RefreshPolicy(interval: 5 * 60)
         }
@@ -34,6 +34,7 @@ struct RefreshPolicy: Equatable {
     let interval: TimeInterval
     var manualGap: TimeInterval? = 0
     var refreshOnOpenAfter: TimeInterval? = nil
+    var minimumGap: TimeInterval? = nil
 
     var staleAfter: TimeInterval {
         interval * 2
@@ -47,8 +48,9 @@ struct UsageRefreshState: Codable {
     var lastError: String?
     var backoff = ThrottleBackoff()
 
-    var nextEligible: Date {
-        max(nextRefresh ?? .distantPast, backoff.blockedUntil ?? .distantPast)
+    func nextEligible(policy: RefreshPolicy) -> Date {
+        let floor = policy.minimumGap.flatMap { gap in lastAttempt.map { $0.addingTimeInterval(gap) } }
+        return [nextRefresh, backoff.blockedUntil, floor].compactMap { $0 }.max() ?? .distantPast
     }
 
     func isPaused(at now: Date) -> Bool {
@@ -57,14 +59,14 @@ struct UsageRefreshState: Codable {
 
     func canStart(at now: Date, force: Bool, policy: RefreshPolicy) -> Bool {
         guard !isPaused(at: now) else { return false }
-        if nextEligible <= now { return true }
+        if nextEligible(policy: policy) <= now { return true }
         guard force, let gap = policy.manualGap else { return false }
         return lastAttempt.map { now.timeIntervalSince($0) >= gap || $0 > now } ?? true
     }
 
     func canStartOnOpen(at now: Date, policy: RefreshPolicy) -> Bool {
         guard !isPaused(at: now) else { return false }
-        if nextEligible <= now { return true }
+        if nextEligible(policy: policy) <= now { return true }
         guard let age = policy.refreshOnOpenAfter, let gap = policy.manualGap else { return false }
         let dataIsOld = lastSuccess.map { now.timeIntervalSince($0) > age } ?? true
         let gapPassed = lastAttempt.map { now.timeIntervalSince($0) >= gap || $0 > now } ?? true
@@ -138,9 +140,9 @@ struct UsageFetcher {
     static var live: UsageFetcher {
         let codex = UsageService()
         let claude = ClaudeUsageService()
-        let cursor = CursorUsageService()
+        let cursor = CursorUsageService(session: ProviderSession.shared)
         let opencode = OpenCodeUsageService()
-        let commandcode = CommandCodeUsageService()
+        let commandcode = CommandCodeUsageService(session: ProviderSession.shared)
         return UsageFetcher { endpoint, context in
             switch endpoint {
             case .codex:
