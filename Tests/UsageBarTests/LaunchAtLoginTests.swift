@@ -229,6 +229,45 @@ final class LaunchAtLoginTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: marker), "previous")
     }
 
+    func testInstallKeepsANewerCopyInApplications() throws {
+        let root = temporaryRoot()
+        let source = root.appendingPathComponent("Downloads/UsageBar.app")
+        let destination = root.appendingPathComponent("Applications/UsageBar.app")
+        try writeInfo(version: "1.0.0", to: source)
+        try writeInfo(version: "2.0.0", to: destination)
+
+        let location = AppInstallLocation(
+            destination: destination,
+            runningBundle: { source },
+            relaunch: { _ in XCTFail("installIfNeeded does not relaunch directly") }
+        )
+
+        let installed = try location.installIfNeeded()
+
+        XCTAssertEqual(installed.path, destination.path)
+        XCTAssertEqual(AppBundleReplacement.bundleVersion(at: destination), AppVersion("2.0.0"))
+    }
+
+    func testInstallClearsQuarantineSoTheCopyIsNotTranslocated() throws {
+        let root = temporaryRoot()
+        let source = root.appendingPathComponent("Downloads/UsageBar.app")
+        let destination = root.appendingPathComponent("Applications/UsageBar.app")
+        try writeInfo(version: "1.0.0", to: source)
+        let attribute = "com.apple.quarantine"
+        let value = Array("0081;00000000;Test;".utf8)
+        XCTAssertEqual(setxattr(source.path, attribute, value, value.count, 0, 0), 0)
+
+        let location = AppInstallLocation(
+            destination: destination,
+            runningBundle: { source },
+            relaunch: { _ in XCTFail("installIfNeeded does not relaunch directly") }
+        )
+        _ = try location.installIfNeeded()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(getxattr(destination.path, attribute, nil, 0, 0, 0), -1)
+    }
+
     func testEnableCopiesToApplicationsThenRelaunches() throws {
         let root = temporaryRoot()
         let source = root.appendingPathComponent("Source.app")
@@ -409,6 +448,14 @@ final class LaunchAtLoginTests: XCTestCase {
 
         XCTAssertFalse(completed)
         XCTAssertTrue(defaults.bool(forKey: AppInstallLocation.pendingKey))
+    }
+
+    private func writeInfo(version: String, to app: URL) throws {
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let info: [String: Any] = ["CFBundleShortVersionString": version]
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
     }
 
     private func plist(at url: URL) throws -> [String: Any] {

@@ -187,7 +187,7 @@ final class MenuBarController: NSObject {
 
     private func show() {
         guard !stopped, !panel.isVisible else { return }
-        model.refreshNow()
+        model.refreshForOpenedPanel()
         updater.checkWhenMenuAppears()
         attachPanelContent()
         guard resizeAndPositionPanel() else {
@@ -361,8 +361,24 @@ extension MenuBarController: NSWindowDelegate {
     }
 }
 
-private final class MenuBarPanel: NSPanel {
+final class MenuBarPanel: NSPanel {
     var onCancel: (() -> Void)?
+
+    static func isQuitShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+        return event.type == .keyDown
+            && modifiers == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "q"
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.isQuitShortcut(event) {
+            onCancel?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override var canBecomeKey: Bool {
         true

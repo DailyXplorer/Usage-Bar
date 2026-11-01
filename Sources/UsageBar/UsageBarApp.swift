@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import SwiftUI
 
 @main
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let appUpdater = AppUpdater()
 
     private var menuBarController: MenuBarController?
+    private let networkMonitor = NWPathMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -43,6 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        networkMonitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            DispatchQueue.main.async {
+                self?.usageModel.setNetworkAvailable(satisfied)
+            }
+        }
+        networkMonitor.start(queue: DispatchQueue(label: "UsageBar.network"))
         usageModel.start()
         appUpdater.startAutomaticChecks()
         DispatchQueue.global(qos: .utility).async {
@@ -61,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        networkMonitor.cancel()
         usageModel.stop()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         NotificationCenter.default.removeObserver(self)

@@ -15,7 +15,21 @@ struct SettingsView: View {
         Form {
             Section {
                 ForEach(LimitBucket.Provider.allCases) { provider in
-                    Toggle(isOn: visibility(for: provider)) {
+                    LabeledContent {
+                        HStack(spacing: 14) {
+                            Toggle("Popover", isOn: popoverVisibility(for: provider))
+                                .disabled(!model.canHideFromPopover(provider))
+                                .accessibilityLabel("Show \(provider.title) in the popover")
+                                .accessibilityHint(popoverHint(for: provider))
+                            Toggle("Menu bar", isOn: menuBarVisibility(for: provider))
+                                .disabled(!model.canHideFromMenuBar(provider))
+                                .accessibilityLabel("Show \(provider.title) in the menu bar")
+                                .accessibilityHint(menuBarHint(for: provider))
+                        }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .font(AppTheme.font(size: 11))
+                    } label: {
                         Label {
                             Text(provider.title)
                                 .font(AppTheme.font(size: 13, weight: .medium))
@@ -23,14 +37,28 @@ struct SettingsView: View {
                             SettingsProviderIcon(provider: provider)
                         }
                     }
-                    .toggleStyle(.switch)
-                    .disabled(isLastEnabled(provider))
-                    .accessibilityHint(hint(for: provider))
                 }
             } header: {
                 SettingsSectionHeader(title: "Tracked plans")
             } footer: {
-                Text("Enabled plans appear in the menu bar and refresh every 3 minutes. Server retry delays may take longer.")
+                Text("The popover shows and refreshes each plan turned on for it. The menu bar shows the plans you pick there.")
+            }
+
+            Section {
+                Toggle(isOn: $model.claudeQuotaCheckEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Use a tiny Claude request when Anthropic pauses usage updates")
+                            .font(AppTheme.font(size: 13, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Sends a one-token request at most every 15 minutes. It counts toward your Claude plan.")
+                            .font(AppTheme.font(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+            } header: {
+                SettingsSectionHeader(title: "Claude")
             }
 
             Section {
@@ -165,22 +193,30 @@ struct SettingsView: View {
         )
     }
 
-    private func visibility(for provider: LimitBucket.Provider) -> Binding<Bool> {
+    private func popoverVisibility(for provider: LimitBucket.Provider) -> Binding<Bool> {
+        Binding(
+            get: { model.isVisibleInPopover(provider) },
+            set: { model.setVisibleInPopover(provider, visible: $0) }
+        )
+    }
+
+    private func menuBarVisibility(for provider: LimitBucket.Provider) -> Binding<Bool> {
         Binding(
             get: { model.isVisibleInMenuBar(provider) },
             set: { model.setVisibleInMenuBar(provider, visible: $0) }
         )
     }
 
-    private func isLastEnabled(_ provider: LimitBucket.Provider) -> Bool {
-        model.isVisibleInMenuBar(provider) && !model.canHideMenuBarProvider
+    private func popoverHint(for provider: LimitBucket.Provider) -> String {
+        model.canHideFromPopover(provider)
+            ? "Show and refresh \(provider.title) in the popover"
+            : "At least one plan must stay in the menu bar"
     }
 
-    private func hint(for provider: LimitBucket.Provider) -> String {
-        if isLastEnabled(provider) {
-            return "At least one plan must stay in the menu bar"
-        }
-        return "Show and refresh \(provider.title)"
+    private func menuBarHint(for provider: LimitBucket.Provider) -> String {
+        model.canHideFromMenuBar(provider)
+            ? "Show \(provider.title) in the menu bar"
+            : "At least one plan must stay in the menu bar"
     }
 }
 

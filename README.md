@@ -9,11 +9,23 @@ usage limits: **percentage remaining** and time until reset.
 </p>
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
-Codex primary window, Claude Code's **Current session** bar, then Cursor's
-**Cursor Models** pool (Cursor Grok and Composer). OpenCode's
+Codex window with the least left (5-hour or weekly), Claude's binding limit,
+then Cursor's **Cursor Models** pool (Cursor Grok and Composer). OpenCode's
 **Current session** and Command Code's **Current session** windows can be turned
-on in Settings. Settings let you pick which plans appear. The popover breaks
-down every window on each side.
+on in Settings. The popover breaks down every window on each side.
+
+Claude's menu bar value is the first available of: the limit Anthropic marks as
+active, **Current session**, **Current week (all models)**, then the most used
+per-model weekly limit. Plans without a 5-hour window, such as verified Ultra
+accounts, therefore show their weekly percentage instead of `--%`. Usage credits
+never drive the menu bar. VoiceOver names the window, for example "Claude weekly
+limit, 25 percent left". A window whose reset time passed after the last fetch
+shows as full and "Reset, waiting for new data" until fresh data arrives.
+
+Settings has two switches per plan: **Popover** (the plan is fetched and has a
+section) and **Menu bar** (a subset of the popover plans). Hiding a plan from
+the menu bar no longer stops fetching it. A plan shown in the popover without a
+usable sign-in shows one line saying how to sign in.
 
 `MenuBarController` owns a variable-length `NSStatusItem` and a borderless
 `NSPanel` that hosts `UsageMenuView`. `MenuBarLabelImage` composes the selected
@@ -61,13 +73,19 @@ instances.
 - **Settings…** → **Launch at login** to start Usage Bar when you log in.
 - **Settings…** → **Updates** to check GitHub or turn on automatic installs.
   When a newer release exists, an **Update** button also appears in the popover.
-  Automatic checks are on by default; automatic installation requires opt-in.
+  Automatic checks are on by default (once a day at launch and at most every
+  6 hours when the popover opens); automatic installation requires opt-in. A
+  failed automatic install waits before retrying the same version.
+- Press ⌘Q while the popover is open to close it; quit Usage Bar with the power
+  button in the popover.
 
 You need a Codex CLI login (`codex login`) for ChatGPT limits, a Claude Code
 login for Anthropic limits, a signed-in Cursor app for Cursor limits, an
 `opencode-go` API key (`/connect` → OpenCode Go) for OpenCode limits, and a
-Command Code login (`cmd login`) for Command Code limits. Missing accounts
-are hidden, not errors.
+Command Code login (`cmd login`) for Command Code limits. On first launch the
+popover and menu bar show the plans whose sign-in Usage Bar finds (Codex and
+Claude when it finds none). A plan you turn on without a sign-in shows how to
+sign in.
 
 ### From source
 
@@ -97,36 +115,62 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 
 ### Codex
 
-- Reads `~/.codex/auth.json` (the same file the Codex CLI uses) to get the
-  ChatGPT `access_token` and `account_id`.
+- Reads `$CODEX_HOME/auth.json` when `CODEX_HOME` is set, otherwise
+  `~/.codex/auth.json` (the same file the Codex CLI uses), to get the ChatGPT
+  `access_token` and `account_id`. Usage Bar never renews the Codex token: when
+  its expiry has passed, the section says "Codex sign-in expired. Open Codex to
+  renew it." without calling the server.
 - Queries the official endpoint `https://chatgpt.com/backend-api/wham/usage`
   (the same one `codex /status` uses).
-- Shows the primary window ("weekly", "5h", … depending on the duration the
-  backend returns, same heuristic as the CLI) and the secondary window when
-  present. When ChatGPT returns a Spark extra limit, the popover adds a
-  **Spark** bar after those windows. Spark stays out of the menu bar, and the
-  bar is hidden when the response has no matching Spark entry. Selected Plus
-  and Pro accounts may also receive **Luna Reserve**, a separate GPT-5.6 Luna
-  allowance available after regular usage is exhausted. Usage Bar adds its
-  bar only when ChatGPT returns that allowance, and keeps it out of the menu
-  bar percentage.
+- Shows the primary window (**Current Session**, **Weekly Limit**, … depending
+  on the duration the backend returns, same heuristic as the CLI) and the
+  secondary window when present. Pro accounts may have only a weekly window.
+- Every extra limit ChatGPT returns in `additional_rate_limits` gets its own
+  row named after the limit. **Credits** shows the balance (or "Unlimited"),
+  and a workspace spending cap shows as **Monthly Credit Limit**. These rows
+  stay out of the menu bar.
 
 ### Claude Code
 
 - Reads the OAuth token from the macOS keychain through `/usr/bin/security`,
   exactly the way Claude Code writes it — that is what avoids a keychain
   authorization prompt on every launch. Falls back to
-  `~/.claude/.credentials.json`. No token is ever copied elsewhere.
-- When that token has expired, renews it the way Claude Code does, through
-  `https://platform.claude.com/v1/oauth/token`, and saves it back to the same
-  keychain entry or file. It first takes Claude Code's own refresh locks, so the
-  two never renew at the same time, and it changes only the token fields.
-- Queries `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code
-  uses for its `/usage` command.
-- Mirrors Claude Code's three built-in bars: **Current session**,
-  **All models** and **‹model›** (the pinned per-model limit, e.g. Fable),
-  each with its reset time. The menu bar shows **Current session**.
-- If there is no Claude Code session, the section is simply hidden.
+  `~/.claude/.credentials.json`. No token is ever copied elsewhere. Every
+  `security` call has a time limit, so a locked keychain cannot stall refreshes.
+- When that token has expired, or the usage endpoint rejects it, renews it once
+  the way Claude Code does, through `https://platform.claude.com/v1/oauth/token`,
+  and saves it back to the same keychain entry or file. It first takes Claude
+  Code's own refresh locks, re-reads the entry just before writing, keeps a
+  newer token Claude Code wrote meanwhile, and changes only the token fields.
+- Usage comes from three sources, in this order:
+  1. **Claude Code's saved copy**: `cachedUsageUtilization` in `~/.claude.json`,
+     when it is at most one hour old, belongs to the signed-in account and is
+     newer than Usage Bar's own data. No network request.
+  2. **The usage endpoint** `https://api.anthropic.com/api/oauth/usage`, called
+     with Claude Code's request shape. Background refresh runs at most every
+     15 minutes. Opening the popover refetches only when the data is older than
+     5 minutes and the last call was at least a minute ago; the refresh button
+     follows the same one-minute floor.
+  3. **Optional quota check** (Settings → Claude, off by default): while
+     Anthropic pauses the usage endpoint, Usage Bar can send, at most every
+     15 minutes, the same one-token request Claude Code sends at startup and
+     read the session and weekly limits from its response headers. That request
+     counts toward your Claude plan. It cannot see per-model weekly limits, so
+     those rows keep their last values.
+- When the usage endpoint answers 429, Usage Bar pauses it until `Retry-After`,
+  or 5, 15, 30 then 60 minutes on repeated 429s, never more than an hour. The
+  pause is stored per Claude account and survives a restart; the refresh button
+  does not skip it. The Claude section keeps the last values and says
+  "Anthropic paused usage updates. Showing values from ‹time›. Next try at
+  ‹time›."
+- Mirrors Claude Code's `/usage` rows: **Current session** (only when the plan
+  has a 5-hour window), **Current week (all models)** and
+  **Current week (‹model›)** for per-model weekly limits such as Fable. Other
+  limit kinds Anthropic adds appear with a readable name. **Usage credits**
+  (spent / monthly limit) and Claude credit windows appear when enabled.
+- The plan badge comes from Anthropic's profile (for example **Claude Ultra**),
+  checked at most once a day, else from the sign-in's plan fields.
+- If there is no Claude Code session, the section says how to sign in.
 
 ### Cursor
 
@@ -145,7 +189,7 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   That bar is hidden for pooled Enterprise seats and accounts without an
   included Bot limit. A Grok Bot fetch failure leaves the monthly bars intact.
   The menu bar shows the Cursor Models pool.
-- If there is no Cursor session, the section is simply hidden.
+- If there is no Cursor session, the section says how to sign in.
 
 ### OpenCode
 
@@ -159,7 +203,8 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 - Mirrors the three Go windows: **Current session** ($12), **Weekly** ($30) and
   **Monthly** ($60), each with its reset time. The menu bar shows the current
   session window.
-- If there is no `opencode-go` key, the section is simply hidden.
+- If there is no `opencode-go` key, the menu bar segment stays hidden and the
+  popover section says how to add one.
 
 ### Command Code
 
@@ -174,32 +219,42 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   current session window. Pay-as-you-go Provider accounts have no rolling
   windows, so the section stays hidden — the same treatment as OpenCode Zen.
 - Plan badge: **Go**, **Goat**, **Pro**, **Max 10x**, **Max 20x**, **Team Pro**.
-- If there is no Command Code key, the section is simply hidden.
+- If there is no Command Code key, the menu bar segment stays hidden and the
+  popover section says how to sign in.
 
 All accounts are queried in parallel: a slow backend does not block the others,
 and an error on one side does not wipe out the other sides' bars.
 
 ### Going easy on the endpoints
 
-Each enabled provider refreshes independently, three minutes after its previous
-request completes. Opening the menu fetches only data that is due. Disabling a
-plan in **Tracked plans** stops new usage requests for it; requests already in
-flight may finish. Normal polling pauses during sleep and resumes with one due
-request per endpoint after wake.
+Each provider shown in the popover refreshes on its own schedule after its
+previous request completes: Codex every 3 minutes, Claude every 15 minutes,
+Cursor, OpenCode and Command Code every 5 minutes. Opening the popover fetches
+only data that is due (Claude: see above). Requests go through a session with
+no URL cache and no cookies, so a cached reply is never replayed. Polling stops
+during sleep and in-flight replies are dropped. After wake or a network change,
+Usage Bar waits until macOS reports a working network before fetching, and a
+network failure in the first minute after wake is retried quietly instead of
+shown.
 
 - The last values and each endpoint's successful fetch time are persisted in
-  `UserDefaults`, so the menu can show saved data while a refresh is pending.
-- **Refresh usage** can bypass the normal three-minute interval, but never an
-  active rate-limit delay. Requests to the same endpoint cannot overlap.
+  `UserDefaults`, so the popover can show saved data while a refresh is pending.
+  Saved rows whose window ended long ago are dropped on launch.
+- **Refresh usage** can bypass the normal interval (Claude: at most once a
+  minute), but never an active rate-limit pause. Requests to the same endpoint
+  cannot overlap.
 - All providers respect HTTP 429 with progressive backoff (5 → 15 → 30 → 60 min)
-  and any longer `Retry-After` deadline. These delays survive an app restart.
+  or the server's `Retry-After`. Every pause is capped at 60 minutes, survives
+  an app restart and expires on its own.
   Cursor's monthly usage and Grok Bot have independent schedules and delays.
 - Command Code caches account and subscription details for up to 30 minutes,
   expiring sooner at the known billing-period end. Credits remain live; the
   optional summary has its own retry delay and its amounts are never cached.
 
-Each section's timestamp belongs to its own data. Failed or overdue reads show
-**Saved data** without making another provider appear fresh. Older saved data
+The popover footer shows when data last arrived ("Updated 2 min ago").
+Each section's timestamp belongs to its own data. Failed reads, or data older
+than twice its refresh interval, show **Saved data** without making another
+provider appear fresh. Older saved data
 without a reliable per-provider timestamp stays marked as pending until its
 first successful refresh.
 
@@ -253,6 +308,9 @@ open. Missing reset times are omitted until a response supplies a reliable date.
   Code renews it, so Claude Code keeps working with the new token. If the
   renewal is refused, the section shows "Claude Code sign-in expired" until
   you run `claude`, then `/login`.
+- With the optional Claude quota check turned on, Usage Bar also calls
+  `api.anthropic.com/v1/messages` with a one-token request while the usage
+  endpoint is paused.
 - The Cursor token is read from Cursor's local session store. If it has expired,
   the section shows "Cursor token expired" until the next time Cursor opens.
 - The `opencode-go` key is read from OpenCode's local `auth.json`. If it is

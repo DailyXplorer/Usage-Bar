@@ -70,11 +70,9 @@ struct UsageMenuView: View {
     }
 
     private var hasAnyBucket: Bool {
-        (model.isVisibleInMenuBar(.codex) && !model.buckets.isEmpty)
-            || (model.isVisibleInMenuBar(.claude) && !model.claudeBuckets.isEmpty)
-            || (model.isVisibleInMenuBar(.cursor) && !model.cursorBuckets.isEmpty)
-            || (model.isVisibleInMenuBar(.opencode) && !model.opencodeBuckets.isEmpty)
-            || (model.isVisibleInMenuBar(.commandcode) && !model.commandcodeBuckets.isEmpty)
+        LimitBucket.Provider.allCases.contains {
+            model.isVisibleInPopover($0) && !model.buckets(for: $0).isEmpty
+        }
     }
 
     @ViewBuilder
@@ -101,59 +99,16 @@ struct UsageMenuView: View {
 
     private var providerContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if model.isVisibleInMenuBar(.codex) {
+            ForEach(LimitBucket.Provider.allCases.filter(model.isVisibleInPopover)) { provider in
                 ProviderSection(
-                    provider: .codex,
-                    plan: model.planType,
-                    buckets: model.buckets,
-                    message: model.sectionMessage(for: .codex),
-                    freshness: model.freshnessMessage(for: .codex, at: displayDate),
-                    date: displayDate
-                )
-            }
-
-            if model.isVisibleInMenuBar(.claude) {
-                ProviderSection(
-                    provider: .claude,
-                    plan: model.claudePlan,
-                    buckets: model.claudeBuckets,
-                    message: model.sectionMessage(for: .claude),
-                    freshness: model.freshnessMessage(for: .claude, at: displayDate),
-                    date: displayDate
-                )
-            }
-
-            if model.isVisibleInMenuBar(.cursor) {
-                ProviderSection(
-                    provider: .cursor,
-                    plan: model.cursorPlan,
-                    buckets: model.cursorBuckets,
-                    message: model.sectionMessage(for: .cursor),
-                    freshness: model.freshnessMessage(for: .cursor, at: displayDate),
+                    provider: provider,
+                    plan: model.plan(for: provider),
+                    buckets: model.buckets(for: provider),
+                    message: model.popoverMessage(for: provider),
+                    freshness: model.freshnessMessage(for: provider, at: displayDate),
                     date: displayDate,
-                    supplementalMessage: model.grokBotMessage(at: displayDate)
-                )
-            }
-
-            if model.showsOpenCode {
-                ProviderSection(
-                    provider: .opencode,
-                    plan: model.opencodePlan,
-                    buckets: model.opencodeBuckets,
-                    message: model.sectionMessage(for: .opencode),
-                    freshness: model.freshnessMessage(for: .opencode, at: displayDate),
-                    date: displayDate
-                )
-            }
-
-            if model.showsCommandCode {
-                ProviderSection(
-                    provider: .commandcode,
-                    plan: model.commandcodePlan,
-                    buckets: model.commandcodeBuckets,
-                    message: model.sectionMessage(for: .commandcode),
-                    freshness: model.freshnessMessage(for: .commandcode, at: displayDate),
-                    date: displayDate
+                    fetchedAt: model.dataDate(for: provider),
+                    supplementalMessage: provider == .cursor ? model.grokBotMessage(at: displayDate) : nil
                 )
             }
         }
@@ -164,7 +119,7 @@ struct UsageMenuView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Text("Refreshes every 3 min")
+            Text(model.updatedText(at: displayDate))
             .font(AppTheme.font(size: 10.5))
             .appSecondaryLabelStyle()
             .monospacedDigit()
@@ -226,6 +181,7 @@ private struct ProviderSection: View {
     let message: String?
     let freshness: String?
     let date: Date
+    let fetchedAt: Date?
     var supplementalMessage: String? = nil
 
     var body: some View {
@@ -242,7 +198,11 @@ private struct ProviderSection: View {
             .padding(.horizontal, 2)
 
             ForEach(buckets) { bucket in
-                LimitCard(bucket: bucket, date: date)
+                if bucket.isValueOnly {
+                    ValueRow(bucket: bucket)
+                } else {
+                    LimitCard(bucket: bucket, date: date, fetchedAt: fetchedAt)
+                }
             }
 
             if let message {
@@ -280,15 +240,47 @@ private struct PlanBadge: View {
     }
 }
 
+private struct ValueRow: View {
+    let bucket: LimitBucket
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(bucket.displayName)
+                .font(AppTheme.font(size: 12, weight: .semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if let detail = bucket.detail {
+                Text(detail)
+                    .font(AppTheme.font(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([bucket.displayName, bucket.detail].compactMap { $0 }.joined(separator: ", "))
+    }
+}
+
 private struct LimitCard: View {
     let bucket: LimitBucket
     let date: Date
+    let fetchedAt: Date?
+
+    private var hasReset: Bool {
+        bucket.hasReset(at: date, since: fetchedAt)
+    }
+
+    private var shown: LimitBucket {
+        bucket.resetApplied(at: date, since: fetchedAt)
+    }
 
     private var color: Color {
-        if bucket.reached {
+        if shown.reached {
             return .red
         }
-        return UsageModel.color(forPercentUsed: bucket.usedPercent)
+        return UsageModel.color(forPercentUsed: shown.usedPercent)
     }
 
     var body: some View {
@@ -303,9 +295,9 @@ private struct LimitCard: View {
                 trailingCaption
             }
 
-            UsageProgressBar(value: bucket.remainingPercent, color: color)
+            UsageProgressBar(value: shown.remainingPercent, color: color)
 
-            Text("\(bucket.remainingPercent)% Left")
+            Text("\(shown.remainingPercent)% Left")
                 .font(AppTheme.font(size: 11, weight: .medium))
                 .monospacedDigit()
                 .contentTransition(.numericText())
@@ -323,7 +315,12 @@ private struct LimitCard: View {
 
     @ViewBuilder
     private var trailingCaption: some View {
-        if bucket.reached {
+        if hasReset {
+            Text(Self.resetCaption)
+                .font(AppTheme.font(size: 10.5))
+                .appSecondaryLabelStyle()
+                .lineLimit(1)
+        } else if bucket.reached {
             Text("Limit reached")
                 .font(AppTheme.font(size: 10.5))
                 .foregroundStyle(.red)
@@ -336,6 +333,8 @@ private struct LimitCard: View {
         }
     }
 
+    static let resetCaption = "Reset, waiting for new data"
+
     private var resetText: String? {
         let duration = bucket.remainingResetSeconds(at: date) ?? 0
         guard duration > 0 else { return nil }
@@ -343,8 +342,10 @@ private struct LimitCard: View {
     }
 
     private var accessibilityText: String {
-        var parts = ["\(bucket.displayName), \(bucket.remainingPercent) percent left"]
-        if bucket.reached {
+        var parts = ["\(bucket.displayName), \(shown.remainingPercent) percent left"]
+        if hasReset {
+            parts.append(Self.resetCaption)
+        } else if bucket.reached {
             parts.append("limit reached")
         } else if let resetText {
             parts.append(resetText)

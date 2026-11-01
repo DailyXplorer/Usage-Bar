@@ -174,46 +174,69 @@ struct GitHubRelease: Decodable, Equatable, Sendable {
 }
 
 enum UpdateError: LocalizedError, Equatable {
-    case network(String)
-    case httpStatus(Int)
+    case network
+    case unexpectedResponse
+    case rateLimited(until: Date)
     case noReleases
     case missingAsset
     case missingChecksum
     case untrustedAsset
+    case downloadFailed
     case invalidChecksum
     case checksumMismatch
     case extractFailed
     case invalidAppBundle
     case invalidCodeSignature
     case quarantineRemovalFailed
+    case destinationNotWritable
+    case installFailed
 
     var errorDescription: String? {
         switch self {
-        case .network(let message):
-            return "Network error: \(message)"
-        case .httpStatus(let code):
-            return "GitHub returned HTTP \(code)."
+        case .network:
+            return "Usage Bar could not reach GitHub. Check your internet connection and try again."
+        case .unexpectedResponse:
+            return "GitHub sent an unexpected reply. Try again later."
+        case .rateLimited:
+            return "GitHub is limiting update checks. Try again later."
         case .noReleases:
-            return "No GitHub release is published yet."
-        case .missingAsset:
-            return "This GitHub release has no \(AppDistribution.assetName) yet."
-        case .missingChecksum:
-            return "This GitHub release has no \(AppDistribution.checksumAssetName) yet."
+            return "No Usage Bar release is published yet."
+        case .missingAsset, .missingChecksum:
+            return "The latest release is not ready to install yet. Try again later."
         case .untrustedAsset:
-            return "This update did not come from the expected Usage Bar release."
+            return "This update did not come from the official Usage Bar release, so it was not installed."
+        case .downloadFailed:
+            return "The update could not be downloaded. Check your internet connection and try again."
         case .invalidChecksum:
-            return "The update checksum is invalid."
+            return "The update could not be verified. Try again later."
         case .checksumMismatch:
-            return "The downloaded update did not match its checksum."
+            return "The downloaded update was damaged. Try again."
         case .extractFailed:
-            return "Could not unpack the downloaded app."
+            return "The downloaded update could not be opened. Try again."
         case .invalidAppBundle:
-            return "The download was not a Usage Bar app."
+            return "The download was not a Usage Bar app, so it was not installed."
         case .invalidCodeSignature:
-            return "The downloaded app has an invalid code signature."
+            return "The downloaded app failed its signature check, so it was not installed."
         case .quarantineRemovalFailed:
-            return "Could not prepare the downloaded app for launch."
+            return "The downloaded app could not be prepared for launch. Try again."
+        case .destinationNotWritable:
+            return "Usage Bar does not have permission to replace itself in Applications. Install the update with the Usage Bar installer."
+        case .installFailed:
+            return "The update could not be installed. Try again."
         }
+    }
+
+    static func rateLimitMessage(until: Date, now: Date) -> String {
+        let minutes = max(1, Int((until.timeIntervalSince(now) / 60).rounded(.up)))
+        let unit = minutes == 1 ? "minute" : "minutes"
+        return "GitHub is limiting update checks. Try again in \(minutes) \(unit)."
+    }
+
+    static func plain(_ error: Error, fallback: UpdateError) -> UpdateError {
+        if let error = error as? UpdateError {
+            return error
+        }
+        return fallback
     }
 }
 
@@ -225,6 +248,8 @@ enum AppBundleReplacement {
     ) throws {
         let parent = destination.deletingLastPathComponent()
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        removeLeftovers(of: destination, fileManager: fileManager)
+        defer { removeLeftovers(of: destination, fileManager: fileManager) }
 
         let staging = parent.appendingPathComponent(
             ".\(destination.lastPathComponent).\(UUID().uuidString).staging"
@@ -246,7 +271,6 @@ enum AppBundleReplacement {
                     backupItemName: backupName,
                     options: [.usingNewMetadataOnly, .withoutDeletingBackupItem]
                 )
-                try? fileManager.removeItem(at: backup)
             } catch {
                 if !fileManager.fileExists(atPath: destination.path),
                    fileManager.fileExists(atPath: backup.path) {
@@ -258,6 +282,65 @@ enum AppBundleReplacement {
             try fileManager.moveItem(at: staging, to: destination)
         }
     }
+
+    static func checkCanReplace(_ destination: URL, fileManager: FileManager = .default) throws {
+        let parent = destination.deletingLastPathComponent()
+        let probe = parent.appendingPathComponent(
+            ".\(destination.lastPathComponent).\(UUID().uuidString).probe"
+        )
+        do {
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+            try Data().write(to: probe, options: .withoutOverwriting)
+            try fileManager.removeItem(at: probe)
+        } catch {
+            throw UpdateError.destinationNotWritable
+        }
+        guard fileManager.fileExists(atPath: destination.path) else { return }
+        let contents = destination.appendingPathComponent("Contents", isDirectory: true)
+        guard fileManager.isWritableFile(atPath: destination.path),
+              !fileManager.fileExists(atPath: contents.path)
+                || fileManager.isWritableFile(atPath: contents.path) else {
+            throw UpdateError.destinationNotWritable
+        }
+    }
+
+    static func clearQuarantine(at url: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        process.arguments = ["-dr", "com.apple.quarantine", url.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw UpdateError.quarantineRemovalFailed
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw UpdateError.quarantineRemovalFailed
+        }
+    }
+
+    static func bundleVersion(at url: URL) -> AppVersion? {
+        let infoURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: infoURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let info = plist as? [String: Any],
+              let version = info["CFBundleShortVersionString"] as? String else {
+            return nil
+        }
+        return AppVersion(version)
+    }
+
+    private static func removeLeftovers(of destination: URL, fileManager: FileManager) {
+        let parent = destination.deletingLastPathComponent()
+        let prefix = ".\(destination.lastPathComponent)."
+        guard let names = try? fileManager.contentsOfDirectory(atPath: parent.path) else { return }
+        for name in names where name.hasPrefix(prefix)
+            && (name.hasSuffix(".previous") || name.hasSuffix(".staging") || name.hasSuffix(".probe")) {
+            try? fileManager.removeItem(at: parent.appendingPathComponent(name))
+        }
+    }
 }
 
 enum UpdatePreferences {
@@ -265,8 +348,21 @@ enum UpdatePreferences {
     static let installsKey = "automaticallyInstallUpdates"
     static let lastCheckKey = "lastUpdateCheckAt"
     static let lastAttemptKey = "lastUpdateCheckAttemptAt"
+    static let rateLimitedUntilKey = "updateCheckRateLimitedUntil"
+    static let failedInstallVersionKey = "failedUpdateInstallVersion"
+    static let failedInstallAtKey = "failedUpdateInstallAt"
+    static let failedInstallCountKey = "failedUpdateInstallCount"
     static let checkInterval: TimeInterval = 24 * 60 * 60
     static let retryInterval: TimeInterval = 15 * 60
+    static let menuCheckInterval: TimeInterval = 6 * 60 * 60
+    static let maximumRateLimitWait: TimeInterval = 60 * 60
+    static let installBackoffBase: TimeInterval = 24 * 60 * 60
+    static let maximumInstallBackoff: TimeInterval = 7 * 24 * 60 * 60
+
+    static func installBackoff(afterFailures count: Int) -> TimeInterval {
+        let doublings = max(0, min(count - 1, 8))
+        return min(installBackoffBase * pow(2, Double(doublings)), maximumInstallBackoff)
+    }
 }
 
 enum UpdateState: Equatable {

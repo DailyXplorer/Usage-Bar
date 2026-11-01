@@ -22,8 +22,9 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let snapshot = UsageSnapshot(
             codexBuckets: [
                 LimitBucket(
-                    kind: .lunaReserve,
-                    name: CodexLimits.lunaReserveDisplayName,
+                    kind: .additional,
+                    scope: "additional.model_x.primary",
+                    name: "Model X Weekly Limit",
                     usedPercent: 0,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 600,
@@ -53,7 +54,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                     kind: .rolling,
                     name: "Current Session",
                     usedPercent: 4,
-                    resetAt: Date(timeIntervalSince1970: 1_786_634_858),
+                    resetAt: Date().addingTimeInterval(600),
                     resetAfterSeconds: 600,
                     limitWindowSeconds: 18_000,
                     reached: false
@@ -66,7 +67,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                     kind: .rolling,
                     name: "Current Session",
                     usedPercent: 13,
-                    resetAt: Date(timeIntervalSince1970: 1_786_638_458),
+                    resetAt: Date().addingTimeInterval(600),
                     resetAfterSeconds: 600,
                     limitWindowSeconds: CommandCodeLimits.rollingWindowSeconds,
                     reached: false
@@ -79,8 +80,8 @@ final class UsageSnapshotStoreTests: XCTestCase {
 
         let loaded = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertEqual(loaded.codexPlan, "prolite")
-        XCTAssertEqual(loaded.codexBuckets.map(\.kind), [.lunaReserve])
-        XCTAssertEqual(loaded.codexBuckets.map(\.name), [CodexLimits.lunaReserveDisplayName])
+        XCTAssertEqual(loaded.codexBuckets.map(\.kind), [.additional])
+        XCTAssertEqual(loaded.codexBuckets.map(\.name), ["Model X Weekly Limit"])
         XCTAssertEqual(loaded.claudePlan, "max")
         XCTAssertEqual(loaded.claudeBuckets.count, 1)
         XCTAssertEqual(loaded.claudeBuckets[0].remainingPercent, 99)
@@ -123,14 +124,103 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded.claudePlan, "max")
     }
 
-    func testMenuBarPreferencesDefaultToCodexAndClaude() throws {
+    func testFreshInstallShowsDetectedProvidersOrCodexAndClaude() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
         defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
 
-        XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .claude])
+        let fallback = ProviderPreferences.load(from: defaults, detected: { [] })
+        XCTAssertEqual(fallback.popover, [.codex, .claude])
+        XCTAssertEqual(fallback.menuBar, [.codex, .claude])
 
-        MenuBarPreferences.save([.cursor, .codex], to: defaults)
-        XCTAssertEqual(MenuBarPreferences.load(from: defaults), [.codex, .cursor])
+        defaults.removePersistentDomain(forName: #function)
+        let claudeOnly = ProviderPreferences.load(from: defaults, detected: { [.claude] })
+        XCTAssertEqual(claudeOnly.popover, [.claude])
+        XCTAssertEqual(claudeOnly.menuBar, [.claude])
+    }
+
+    func testOldMenuBarSettingMigratesToPopoverPlusDetectedProviders() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+        defaults.set(["codex"], forKey: ProviderPreferences.menuBarKey)
+
+        let migrated = ProviderPreferences.load(from: defaults, detected: { [.claude, .cursor] })
+
+        XCTAssertEqual(migrated.menuBar, [.codex])
+        XCTAssertEqual(migrated.popover, [.codex, .claude, .cursor])
+        XCTAssertEqual(defaults.stringArray(forKey: ProviderPreferences.popoverKey), ["codex", "claude", "cursor"])
+        let reloaded = ProviderPreferences.load(from: defaults, detected: { [] })
+        XCTAssertEqual(reloaded, migrated)
+    }
+
+    func testMenuBarStaysASubsetOfThePopover() {
+        var preferences = ProviderPreferences(popover: [.codex], menuBar: [.codex])
+
+        preferences.setMenuBar(.claude, visible: true)
+        XCTAssertEqual(preferences.popover, [.codex, .claude])
+        XCTAssertEqual(preferences.menuBar, [.codex, .claude])
+
+        preferences.setMenuBar(.claude, visible: false)
+        XCTAssertEqual(preferences.popover, [.codex, .claude])
+        XCTAssertEqual(preferences.menuBar, [.codex])
+
+        preferences.setPopover(.codex, visible: false)
+        XCTAssertEqual(preferences.popover, [.claude])
+        XCTAssertEqual(preferences.menuBar, [.claude])
+    }
+
+    func testUnknownBucketKindDropsOnlyThatBucketAndKeepsThePause() throws {
+        let blockedUntil = Date(timeIntervalSince1970: 1_786_400_600)
+        let json = """
+        {"fetchedAt": 0,
+         "codexBuckets": [
+           {"provider":"codex","kind":"spark","name":"Spark","usedPercent":3,"reached":false},
+           {"provider":"codex","kind":"primary","name":"Weekly Limit","usedPercent":40,"reached":false}
+         ],
+         "refreshStates": {
+           "claude": {"backoff": {"attempt": 2, "blockedUntil": \(blockedUntil.timeIntervalSinceReferenceDate)}},
+           "codex": {"backoff": "broken"}
+         }}
+        """
+        let snapshot = try JSONDecoder().decode(UsageSnapshot.self, from: Data(json.utf8))
+
+        XCTAssertEqual(snapshot.codexBuckets.map(\.kind), [.primary])
+        XCTAssertEqual(snapshot.refreshStates["claude"]?.backoff.blockedUntil, blockedUntil)
+        XCTAssertEqual(snapshot.refreshStates["claude"]?.backoff.attempt, 2)
+    }
+
+    func testRestoreCapsAPersistedPauseAtOneHour() {
+        let now = Date(timeIntervalSince1970: 1_786_400_000)
+        var state = UsageRefreshState()
+        state.throttle("Paused", retryAfter: nil, at: now, interval: 900)
+        let farFuture = try? JSONDecoder().decode(
+            ThrottleBackoff.self,
+            from: Data(#"{"attempt":4,"blockedUntil":\#(now.addingTimeInterval(36_000).timeIntervalSinceReferenceDate)}"#.utf8)
+        )
+        state.backoff = farFuture ?? state.backoff
+
+        let restored = UsageSnapshot(fetchedAt: now, refreshStates: ["claude": state]).refreshed(now: now)
+
+        XCTAssertEqual(restored.refreshStates["claude"]?.backoff.blockedUntil, now.addingTimeInterval(3_600))
+    }
+
+    func testRestoreDropsBucketsWhoseWindowEndedLongAgo() {
+        let now = Date(timeIntervalSince1970: 1_786_400_000)
+        let ancient = LimitBucket(
+            provider: .opencode, kind: .rolling, name: "Rolling", usedPercent: 50,
+            resetAt: now.addingTimeInterval(-60 * 24 * 3600), resetAfterSeconds: 0,
+            limitWindowSeconds: 18_000, reached: false
+        )
+        let recent = LimitBucket(
+            provider: .opencode, kind: .weekly, name: "Weekly", usedPercent: 50,
+            resetAt: now.addingTimeInterval(-3600), resetAfterSeconds: 0,
+            limitWindowSeconds: 604_800, reached: false
+        )
+
+        let restored = UsageSnapshot(opencodeBuckets: [ancient, recent], fetchedAt: now).refreshed(now: now)
+
+        XCTAssertEqual(restored.opencodeBuckets.map(\.kind), [.weekly])
     }
 
     func testRefreshRewritesLegacyCodexTitles() {
@@ -203,9 +293,9 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
 
         XCTAssertEqual(refreshed.claudeBuckets.map(\.name), [
-            "Current Session",
-            "All Models",
-            "Fable",
+            "Current session",
+            "Current week (all models)",
+            "Current week (Fable)",
         ])
     }
 
@@ -329,16 +419,16 @@ final class UsageSnapshotStoreTests: XCTestCase {
 
         let model = UsageModel(defaults: defaults)
         XCTAssertEqual(model.claudeBuckets.map(\.name), [
-            "Current Session",
-            "All Models",
-            "Fable",
+            "Current session",
+            "Current week (all models)",
+            "Current week (Fable)",
         ])
 
         let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertEqual(persisted.claudeBuckets.map(\.name), [
-            "Current Session",
-            "All Models",
-            "Fable",
+            "Current session",
+            "Current week (all models)",
+            "Current week (Fable)",
         ])
         XCTAssertEqual(persisted.fetchedAt, fetchedAt)
         XCTAssertEqual(persisted.claudePlan, "max")
@@ -359,7 +449,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                         kind: .rolling,
                         name: "Rolling 5h",
                         usedPercent: 4,
-                        resetAt: Date(timeIntervalSince1970: 1_786_634_858),
+                        resetAt: Date().addingTimeInterval(600),
                         resetAfterSeconds: 600,
                         limitWindowSeconds: OpenCodeLimits.rollingWindowSeconds,
                         reached: false
@@ -396,7 +486,7 @@ final class UsageSnapshotStoreTests: XCTestCase {
                         kind: .rolling,
                         name: "Rolling 5h",
                         usedPercent: 13,
-                        resetAt: Date(timeIntervalSince1970: 1_786_638_458),
+                        resetAt: Date().addingTimeInterval(600),
                         resetAfterSeconds: 600,
                         limitWindowSeconds: CommandCodeLimits.rollingWindowSeconds,
                         reached: false
@@ -456,6 +546,18 @@ final class UsageSnapshotStoreTests: XCTestCase {
         backoff.reset()
         XCTAssertFalse(backoff.isBlocked)
         XCTAssertNil(backoff.blockedUntil)
+    }
+
+    func testRetryAfterIsHonouredButNeverLongerThanOneHour() {
+        let now = Date(timeIntervalSince1970: 1_786_400_000)
+        var backoff = ThrottleBackoff()
+
+        backoff.recordThrottle(now: now, retryAfter: now.addingTimeInterval(120))
+        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(120))
+
+        backoff.reset()
+        backoff.recordThrottle(now: now, retryAfter: now.addingTimeInterval(99_999_999))
+        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(3_600))
     }
 
     func testBackoffCapsAtTheLongestStep() {

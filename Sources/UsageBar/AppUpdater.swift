@@ -8,25 +8,72 @@ protocol GitHubReleasing: Sendable {
 }
 
 protocol AppUpdateInstalling: Sendable {
+    func checkCanInstall() throws
     func install(fromAppBundle url: URL) throws
     func relaunch() throws
 }
 
+extension AppUpdateInstalling {
+    func checkCanInstall() throws {}
+}
+
 enum AppRelaunchCommand {
     static let script = """
-    while /bin/kill -0 "$1" >/dev/null 2>&1; do
+    pid="$1"
+    app="$2"
+    name="$3"
+    log="$4"
+    while /bin/kill -0 "$pid" >/dev/null 2>&1; do
       /bin/sleep 0.2
     done
-    /usr/bin/open "$2"
+    note() {
+      /bin/mkdir -p "$(/usr/bin/dirname "$log")" >/dev/null 2>&1
+      echo "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ) $1" >> "$log" 2>/dev/null
+    }
+    started() {
+      checks=0
+      while [ "$checks" -lt 50 ]; do
+        if /usr/bin/pgrep -x "$name" >/dev/null 2>&1; then
+          return 0
+        fi
+        checks=$((checks + 1))
+        /bin/sleep 0.2
+      done
+      return 1
+    }
+    for attempt in 1 2; do
+      /usr/bin/open "$app" >/dev/null 2>&1
+      status=$?
+      if [ "$status" -eq 0 ] && started; then
+        exit 0
+      fi
+      note "Relaunch attempt $attempt did not start Usage Bar (open exit status $status)."
+      /bin/sleep 1
+    done
+    note "Usage Bar was updated but did not restart. Open it from Applications."
+    exit 1
     """
 
-    static func arguments(processIdentifier: Int32, appURL: URL) -> [String] {
+    static var logURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/UsageBar", isDirectory: true)
+            .appendingPathComponent("updater.log")
+    }
+
+    static func arguments(
+        processIdentifier: Int32,
+        appURL: URL,
+        executableName: String = AppDistribution.executableName,
+        logURL: URL = AppRelaunchCommand.logURL
+    ) -> [String] {
         [
             "-c",
             script,
             "UsageBar updater",
             String(processIdentifier),
             appURL.path,
+            executableName,
+            logURL.path,
         ]
     }
 
@@ -80,12 +127,14 @@ enum UpdateChecksum {
 }
 
 struct GitHubReleaseService: GitHubReleasing {
-    var session: URLSession = .shared
+    var session: URLSession = ProviderSession.shared
     var endpoint: URL = AppDistribution.latestReleaseURL
+    var now: @Sendable () -> Date = { Date() }
 
     func latestRelease() async throws -> GitHubRelease {
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = 20
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("UsageBar", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
@@ -94,33 +143,61 @@ struct GitHubReleaseService: GitHubReleasing {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw UpdateError.network(error.localizedDescription)
+            throw UpdateError.network
         }
 
         guard let http = response as? HTTPURLResponse else {
-            throw UpdateError.network("invalid response")
+            throw UpdateError.unexpectedResponse
         }
         if http.statusCode == 404 {
             throw UpdateError.noReleases
         }
+        if let until = Self.rateLimitEnd(of: http, now: now()) {
+            throw UpdateError.rateLimited(until: until)
+        }
         guard http.statusCode == 200 else {
-            throw UpdateError.httpStatus(http.statusCode)
+            throw UpdateError.unexpectedResponse
         }
 
         do {
             return try JSONDecoder().decode(GitHubRelease.self, from: data)
         } catch {
-            throw UpdateError.network(error.localizedDescription)
+            throw UpdateError.unexpectedResponse
         }
+    }
+
+    static func rateLimitEnd(of response: HTTPURLResponse, now: Date) -> Date? {
+        guard response.statusCode == 403 || response.statusCode == 429 else { return nil }
+        let latest = now.addingTimeInterval(UpdatePreferences.maximumRateLimitWait)
+        if let retryAfter = response.value(forHTTPHeaderField: "Retry-After")
+            .flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }), retryAfter >= 0 {
+            return min(now.addingTimeInterval(TimeInterval(max(retryAfter, 1))), latest)
+        }
+        if response.value(forHTTPHeaderField: "X-RateLimit-Remaining")?
+            .trimmingCharacters(in: .whitespaces) == "0" {
+            if let reset = response.value(forHTTPHeaderField: "X-RateLimit-Reset")
+                .flatMap({ Double($0.trimmingCharacters(in: .whitespaces)) }), reset.isFinite {
+                return min(max(Date(timeIntervalSince1970: reset), now.addingTimeInterval(60)), latest)
+            }
+            return now.addingTimeInterval(60)
+        }
+        if response.statusCode == 429 {
+            return now.addingTimeInterval(60)
+        }
+        return nil
     }
 }
 
 struct AppUpdateInstaller: AppUpdateInstalling {
     var destination: URL = AppDistribution.installURL
 
+    func checkCanInstall() throws {
+        try AppBundleReplacement.checkCanReplace(destination)
+    }
+
     func install(fromAppBundle url: URL) throws {
         try verifyBundle(at: url)
-        try clearQuarantine(at: url)
+        try AppBundleReplacement.clearQuarantine(at: url)
         try AppBundleReplacement.install(from: url, to: destination)
     }
 
@@ -183,23 +260,12 @@ struct AppUpdateInstaller: AppUpdateInstalling {
             throw UpdateError.invalidCodeSignature
         }
     }
+}
 
-    private func clearQuarantine(at url: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-        process.arguments = ["-dr", "com.apple.quarantine", url.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            throw UpdateError.quarantineRemovalFailed
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw UpdateError.quarantineRemovalFailed
-        }
-    }
+enum UpdateCheckTrigger {
+    case launch
+    case menu
+    case manual
 }
 
 @MainActor
@@ -233,7 +299,7 @@ final class AppUpdater: ObservableObject {
         installer: any AppUpdateInstalling = AppUpdateInstaller(),
         unpacker: AppUpdateInstaller = AppUpdateInstaller(),
         defaults: UserDefaults = .standard,
-        session: URLSession = .shared,
+        session: URLSession = AppUpdater.downloadSession,
         makeWorkDirectory: @escaping () -> URL = {
             FileManager.default.temporaryDirectory
                 .appendingPathComponent("UsageBarUpdate-\(UUID().uuidString)", isDirectory: true)
@@ -254,6 +320,12 @@ final class AppUpdater: ObservableObject {
         automaticallyChecks = defaults.object(forKey: UpdatePreferences.checksKey) as? Bool ?? true
         automaticallyInstalls = defaults.object(forKey: UpdatePreferences.installsKey) as? Bool ?? false
     }
+
+    nonisolated static let downloadSession: URLSession = {
+        let configuration = ProviderSession.configuration
+        configuration.timeoutIntervalForResource = 10 * 60
+        return URLSession(configuration: configuration)
+    }()
 
     var isBusy: Bool {
         switch state {
@@ -309,7 +381,7 @@ final class AppUpdater: ObservableObject {
 
     func startAutomaticChecks() {
         guard automaticallyChecks else { return }
-        checkForUpdates(installIfAvailable: automaticallyInstalls)
+        checkForUpdates(trigger: .launch, installIfAvailable: automaticallyInstalls)
     }
 
     func checkWhenMenuAppears() {
@@ -318,7 +390,7 @@ final class AppUpdater: ObservableObject {
         case .available, .checking, .downloading, .installing:
             return
         case .idle, .upToDate, .failed:
-            checkForUpdates(force: true, installIfAvailable: automaticallyInstalls)
+            checkForUpdates(trigger: .menu, installIfAvailable: automaticallyInstalls)
         }
     }
 
@@ -327,18 +399,34 @@ final class AppUpdater: ObservableObject {
             install(release)
             return
         }
-        checkForUpdates(force: true, installIfAvailable: false)
+        checkForUpdates(trigger: .manual, installIfAvailable: false)
     }
 
-    func checkForUpdates(force: Bool = false, installIfAvailable: Bool = false) {
+    func checkForUpdates(trigger: UpdateCheckTrigger = .launch, installIfAvailable: Bool = false) {
         if isBusy { return }
         let checkDate = now()
-        if !force {
+        if let until = defaults.object(forKey: UpdatePreferences.rateLimitedUntilKey) as? Date,
+           checkDate < until {
+            if trigger == .manual {
+                state = .failed(UpdateError.rateLimitMessage(until: until, now: checkDate))
+            }
+            return
+        }
+        let lastAttempt = defaults.object(forKey: UpdatePreferences.lastAttemptKey) as? Date
+        switch trigger {
+        case .manual:
+            break
+        case .menu:
+            if let lastAttempt,
+               checkDate.timeIntervalSince(lastAttempt) < UpdatePreferences.menuCheckInterval {
+                return
+            }
+        case .launch:
             if let lastCheck = defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date,
                checkDate.timeIntervalSince(lastCheck) < UpdatePreferences.checkInterval {
                 return
             }
-            if let lastAttempt = defaults.object(forKey: UpdatePreferences.lastAttemptKey) as? Date,
+            if let lastAttempt,
                checkDate.timeIntervalSince(lastAttempt) < UpdatePreferences.retryInterval {
                 return
             }
@@ -358,6 +446,15 @@ final class AppUpdater: ObservableObject {
         }
     }
 
+    func isInstallBackingOff(for version: String) -> Bool {
+        guard defaults.string(forKey: UpdatePreferences.failedInstallVersionKey) == version,
+              let failedAt = defaults.object(forKey: UpdatePreferences.failedInstallAtKey) as? Date else {
+            return false
+        }
+        let failures = defaults.integer(forKey: UpdatePreferences.failedInstallCountKey)
+        return now().timeIntervalSince(failedAt) < UpdatePreferences.installBackoff(afterFailures: failures)
+    }
+
     private func performCheck(installIfAvailable: Bool) async {
         state = .checking
         do {
@@ -366,6 +463,7 @@ final class AppUpdater: ObservableObject {
                 state = .idle
                 return
             }
+            defaults.removeObject(forKey: UpdatePreferences.rateLimitedUntilKey)
             if AppVersion(release.versionString) <= AppVersion(currentVersion) {
                 recordSuccessfulCheck()
                 state = .upToDate
@@ -383,7 +481,7 @@ final class AppUpdater: ObservableObject {
                 state = .failed(UpdateError.untrustedAsset.localizedDescription)
                 return
             }
-            if installIfAvailable {
+            if installIfAvailable, !isInstallBackingOff(for: release.versionString) {
                 if await performInstall(release) {
                     recordSuccessfulCheck()
                 }
@@ -396,7 +494,13 @@ final class AppUpdater: ObservableObject {
                 state = .idle
                 return
             }
-            state = .failed(error.localizedDescription)
+            let failure = UpdateError.plain(error, fallback: .unexpectedResponse)
+            if case .rateLimited(let until) = failure {
+                defaults.set(until, forKey: UpdatePreferences.rateLimitedUntilKey)
+                state = .failed(UpdateError.rateLimitMessage(until: until, now: now()))
+                return
+            }
+            state = .failed(failure.localizedDescription)
         }
     }
 
@@ -413,27 +517,46 @@ final class AppUpdater: ObservableObject {
             state = .failed(UpdateError.untrustedAsset.localizedDescription)
             return false
         }
+        do {
+            try installer.checkCanInstall()
+        } catch {
+            recordFailedInstall(of: release)
+            state = .failed(UpdateError.plain(error, fallback: .destinationNotWritable).localizedDescription)
+            return false
+        }
         state = .downloading
         do {
-            let (checksumData, checksumResponse) = try await session.data(
-                from: checksumAsset.browserDownloadURL
-            )
+            let checksumData: Data
+            let checksumResponse: URLResponse
+            do {
+                (checksumData, checksumResponse) = try await session.data(
+                    from: checksumAsset.browserDownloadURL
+                )
+            } catch {
+                throw UpdateError.downloadFailed
+            }
             if Task.isCancelled {
                 state = .idle
                 return false
             }
             guard let checksumHTTP = checksumResponse as? HTTPURLResponse,
                   checksumHTTP.statusCode == 200 else {
-                throw UpdateError.network("checksum download failed")
+                throw UpdateError.downloadFailed
             }
-            let (tempURL, response) = try await session.download(from: asset.browserDownloadURL)
+            let tempURL: URL
+            let response: URLResponse
+            do {
+                (tempURL, response) = try await session.download(from: asset.browserDownloadURL)
+            } catch {
+                throw UpdateError.downloadFailed
+            }
             defer { try? FileManager.default.removeItem(at: tempURL) }
             if Task.isCancelled {
                 state = .idle
                 return false
             }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw UpdateError.network("download failed")
+                throw UpdateError.downloadFailed
             }
             state = .installing
             let workDirectory = makeWorkDirectory()
@@ -466,6 +589,7 @@ final class AppUpdater: ObservableObject {
                 state = .idle
                 return false
             }
+            clearFailedInstall()
             try installer.relaunch()
             return true
         } catch {
@@ -473,12 +597,29 @@ final class AppUpdater: ObservableObject {
                 state = .idle
                 return false
             }
-            state = .failed(error.localizedDescription)
+            recordFailedInstall(of: release)
+            state = .failed(UpdateError.plain(error, fallback: .installFailed).localizedDescription)
             return false
         }
     }
 
     private func recordSuccessfulCheck() {
         defaults.set(now(), forKey: UpdatePreferences.lastCheckKey)
+    }
+
+    private func recordFailedInstall(of release: GitHubRelease) {
+        let version = release.versionString
+        let previous = defaults.string(forKey: UpdatePreferences.failedInstallVersionKey) == version
+            ? defaults.integer(forKey: UpdatePreferences.failedInstallCountKey)
+            : 0
+        defaults.set(version, forKey: UpdatePreferences.failedInstallVersionKey)
+        defaults.set(now(), forKey: UpdatePreferences.failedInstallAtKey)
+        defaults.set(previous + 1, forKey: UpdatePreferences.failedInstallCountKey)
+    }
+
+    private func clearFailedInstall() {
+        defaults.removeObject(forKey: UpdatePreferences.failedInstallVersionKey)
+        defaults.removeObject(forKey: UpdatePreferences.failedInstallAtKey)
+        defaults.removeObject(forKey: UpdatePreferences.failedInstallCountKey)
     }
 }

@@ -19,15 +19,18 @@ final class RetryAfterTests: XCTestCase {
         }
     }
 
-    func testServerDeadlineAndRepeatedThrottleNeverShortenExistingCooldown() {
+    func testServerDeadlineIsCappedAndRepeatedThrottleNeverShortensTheCooldown() {
         let now = Date(timeIntervalSince1970: 0)
         var backoff = ThrottleBackoff()
         backoff.recordThrottle(now: now, retryAfter: now.addingTimeInterval(7200))
-        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(7200))
+        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(3600))
         backoff.recordThrottle(now: now.addingTimeInterval(1), retryAfter: now)
-        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(7200))
+        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(3600))
         backoff.reset()
-        backoff.recordThrottle(now: now, retryAfter: now.addingTimeInterval(1))
+        backoff.recordThrottle(now: now, retryAfter: now)
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(300))
+        backoff.reset()
+        backoff.recordThrottle(now: now, retryAfter: now.addingTimeInterval(30))
+        XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(30))
     }
 }

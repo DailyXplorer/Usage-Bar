@@ -106,7 +106,7 @@ version that already has a zip attached.
 
 `.github/workflows/release.yml` then:
 
-1. Builds with `USAGEBAR_VERSION` from the tag.
+1. Runs `swift test`, then builds with `USAGEBAR_VERSION` from the tag.
 2. Creates the GitHub Release.
 3. Attaches `.build/UsageBar.app.zip` and its `.sha256` file.
 4. Generates notes from PRs merged since the previous tag (`generate_release_notes`).
@@ -122,10 +122,10 @@ broken. If you must, generate both files together and keep the exact
 
 - New installs: inspected installer script or the zip from that release, into
   Applications.
-- Existing installs: GitHub check each time the menu opens, plus a throttled
-  daily check on launch (auto-install requires opt-in), or the
-  **Check for Updates** / **Install x.y.z** button, with those PR notes in
-  Settings.
+- Existing installs: a GitHub check at most every 6 hours when the popover
+  opens, plus a throttled daily check on launch (auto-install requires opt-in
+  and backs off per version after a failure), or the **Check for Updates** /
+  **Install x.y.z** button, with those PR notes in Settings.
 
 ## Layout agents should know
 
@@ -143,6 +143,12 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/LaunchAtLogin.swift` | Login item; copies to Applications if needed |
 | `Sources/UsageBar/MenuBarController.swift` | Variable status item, panel, and dismissal lifecycle |
 | `Sources/UsageBar/MenuBarPanelPlacement.swift` | Pure panel placement across screens |
+| `Sources/UsageBar/UsageRefreshState.swift` | Per-endpoint cadence (`RefreshPolicy`), pauses, fetch routing |
+| `Sources/UsageBar/ProviderSession.swift` | Ephemeral, cache-free `URLSession` for every provider request |
+| `Sources/UsageBar/ClaudeUsageService.swift` | Claude sources: Claude Code's saved copy, usage endpoint, profile, quota check |
+| `Sources/UsageBar/ClaudeCredentialStore.swift` | Claude sign-in read, renewal and write-back |
+| `Sources/UsageBar/Subprocess.swift` | Time-limited subprocess runner (`/usr/bin/security`) |
+| `docs/DECISIONS.md` | Product rules (D1–D14, D19) the code must keep |
 
 The `.notFound` login-item fallback writes a LaunchAgent for the next login but
 does not bootstrap it in the current session. Usage Bar is already running when
@@ -152,6 +158,12 @@ the toggle is enabled, so bootstrapping would risk a duplicate menu bar process.
 button must receive one compact template image from `MenuBarLabelImage`. Do not
 reserve hidden percentage text, set a numeric status item length, or replace
 the AppKit status item with `MenuBarExtra`.
+
+Every provider request goes through `ProviderSession.shared` (no URL cache, no
+cookies). Refresh cadence lives in `UsageEndpoint.policy`; read
+[docs/DECISIONS.md](docs/DECISIONS.md) (D3, D4, D9, D10) before changing it.
+Usage Bar renews only the Claude token, through `ClaudeCredentialStore`; it
+never renews Codex, Cursor or other tokens.
 
 ## Out of scope unless asked
 

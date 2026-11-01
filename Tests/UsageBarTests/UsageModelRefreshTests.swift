@@ -60,7 +60,7 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertEqual(scheduled, [120])
         XCTAssertEqual(displayBeforeReset, "75%")
         XCTAssertTrue(redrawnAtReset)
-        XCTAssertEqual(model.menuBarClaudeDisplay, MenuBarSegment.placeholder)
+        XCTAssertEqual(model.menuBarClaudeDisplay, "100%")
     }
 
     @MainActor
@@ -184,7 +184,7 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertTrue(startedCodex)
         XCTAssertTrue(receivedClaude)
 
-        model.setVisibleInMenuBar(.codex, visible: false)
+        model.setVisibleInPopover(.codex, visible: false)
         model.refreshNow(force: true)
         await Task.yield()
 
@@ -285,7 +285,7 @@ final class UsageModelRefreshTests: XCTestCase {
         defer { fixture.clear() }
         let oldDate = fixedNow().addingTimeInterval(-60)
         var previous = UsageRefreshState()
-        previous.succeed(at: oldDate)
+        previous.succeed(at: oldDate, interval: UsageEndpoint.codex.policy.interval)
         let saved = LimitBucket(
             kind: .primary, name: "Current Session", usedPercent: 70,
             resetAt: nil, resetAfterSeconds: nil, limitWindowSeconds: 18_000, reached: false
@@ -315,7 +315,7 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertEqual(model.refreshStates[.codex]?.lastSuccess, oldDate)
         XCTAssertEqual(model.refreshStates[.claude]?.lastSuccess, fixedNow())
         XCTAssertEqual(model.buckets.first?.usedPercent, 70)
-        XCTAssertEqual(model.lastUpdated, oldDate)
+        XCTAssertEqual(model.lastUpdated, fixedNow())
         XCTAssertTrue(model.freshnessMessage(for: .codex, at: fixedNow())?.hasPrefix("Saved data") == true)
     }
 
@@ -358,7 +358,7 @@ final class UsageModelRefreshTests: XCTestCase {
         let defaults = fixture.defaults
         var state = UsageRefreshState()
         let completedAt = fixedNow()
-        state.succeed(at: completedAt)
+        state.succeed(at: completedAt, interval: UsageEndpoint.codex.policy.interval)
         UsageSnapshotStore.save(
             UsageSnapshot(
                 fetchedAt: completedAt,
@@ -379,7 +379,7 @@ final class UsageModelRefreshTests: XCTestCase {
         XCTAssertTrue(
             model.freshnessMessage(
                 for: .codex,
-                at: completedAt.addingTimeInterval(UsageRefreshState.interval + 2)
+                at: completedAt.addingTimeInterval(UsageEndpoint.codex.policy.staleAfter + 2)
             )?.hasPrefix("Saved data from") == true
         )
     }
@@ -438,7 +438,7 @@ final class UsageModelRefreshTests: XCTestCase {
         let scheduledRefresh = await sleeper.waitForDelays(1)
         let delays = await sleeper.delays()
         XCTAssertTrue(scheduledRefresh)
-        XCTAssertEqual(delays, [UsageRefreshState.interval])
+        XCTAssertEqual(delays, [UsageEndpoint.codex.policy.interval])
 
         clock.advance(by: 179)
         model.refreshNow()
@@ -571,6 +571,302 @@ final class UsageModelRefreshTests: XCTestCase {
     }
 
     @MainActor
+    func testHidingFromTheMenuBarKeepsFetchingForThePopover() async {
+        let fixture = TestDefaultsFixture(providers: [.codex, .claude])
+        defer { fixture.clear() }
+        let calls = EndpointCallLog()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                await calls.record(endpoint)
+                return endpoint == .claude ? try testClaudeResult() : testCodexResult()
+            },
+            now: fixedNow,
+            automaticallySchedules: false
+        )
+
+        model.setVisibleInMenuBar(.claude, visible: false)
+        model.refreshNow(force: true)
+
+        let fetchedBoth = await calls.waitForCount(2)
+        let claudeCalls = await calls.count(for: .claude)
+        XCTAssertTrue(fetchedBoth)
+        XCTAssertEqual(claudeCalls, 1)
+        XCTAssertFalse(model.isVisibleInMenuBar(.claude))
+        XCTAssertTrue(model.isVisibleInPopover(.claude))
+    }
+
+    @MainActor
+    func testClaudePauseKeepsValuesAndSaysWhenItTriesAgain() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let clock = TestClock(fixedNow())
+        let calls = EndpointCallLog()
+        let responses = ResultQueue([
+            .success(try testClaudeResult()),
+            .failure(ClaudeUsageError.throttled(retryAfter: nil)),
+        ])
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                await calls.record(endpoint)
+                if endpoint == .claudeWhilePaused {
+                    return .claude(ClaudeFetch(usage: nil, source: .claudeCode, dataDate: fixedNow()))
+                }
+                return try await responses.next()
+            },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+
+        model.refreshNow(force: true)
+        let firstDone = await waitUntil { model.refreshStates[.claude]?.lastSuccess != nil && !model.isLoading }
+        clock.advance(by: 120)
+        model.refreshNow(force: true)
+        let paused = await waitUntil { model.claudePausedUntil(at: clock.date) != nil && !model.isLoading }
+
+        XCTAssertTrue(firstDone)
+        XCTAssertTrue(paused)
+        XCTAssertEqual(model.claudeBuckets.map(\.usedPercent), [25])
+        let time = UsageModel.clockText(fixedNow(), relativeTo: clock.date)
+        let next = UsageModel.clockText(clock.date.addingTimeInterval(300), relativeTo: clock.date)
+        XCTAssertEqual(
+            model.sectionMessage(for: .claude),
+            "Anthropic paused usage updates. Showing values from \(time). Next try at \(next)."
+        )
+        XCTAssertNil(model.freshnessMessage(for: .claude, at: clock.date))
+
+        clock.advance(by: 120)
+        model.refreshNow(force: true)
+        await Task.yield()
+        let endpointCalls = await calls.count(for: .claude)
+        XCTAssertEqual(endpointCalls, 2)
+    }
+
+    @MainActor
+    func testWhilePausedTheQuotaCheckFollowsTheSetting() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let contexts = ContextLog()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher(fetch: { endpoint, context in
+                await contexts.record(endpoint, context)
+                if endpoint == .claude {
+                    throw ClaudeUsageError.throttled(retryAfter: fixedNow().addingTimeInterval(1800))
+                }
+                return .claude(ClaudeFetch(usage: nil, source: .claudeCode, dataDate: fixedNow()))
+            }),
+            now: fixedNow,
+            automaticallySchedules: false
+        )
+
+        model.refreshNow(force: true)
+        let paused = await waitUntil { model.claudePausedUntil(at: fixedNow()) != nil && !model.isLoading }
+        model.refreshNow()
+        let fallbackRan = await contexts.waitForCount(2)
+        let first = await contexts.entries()
+
+        XCTAssertTrue(paused)
+        XCTAssertTrue(fallbackRan)
+        XCTAssertEqual(first.map(\.0), [.claude, .claudeWhilePaused])
+        XCTAssertEqual(first.last?.1.claudeQuotaCheck, false)
+        XCTAssertFalse(model.claudeQuotaCheckEnabled)
+    }
+
+    @MainActor
+    func testQuotaCheckResultUpdatesTheSessionAndKeepsModelRows() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let full = try ClaudeFixtures.decode(ClaudeFixtures.withSession)
+        let probe = try XCTUnwrap(ClaudeUnifiedHeaders.response(from: [
+            "anthropic-ratelimit-unified-5h-utilization": "0.5",
+            "anthropic-ratelimit-unified-5h-reset": "1788010000",
+        ], scopedModelName: nil))
+        let responses = ResultQueue([
+            .success(.claude(ClaudeFetch(usage: full, source: .usageEndpoint, dataDate: fixedNow()))),
+            .failure(ClaudeUsageError.throttled(retryAfter: nil)),
+        ])
+        let clock = TestClock(fixedNow())
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                if endpoint == .claudeWhilePaused {
+                    return .claude(ClaudeFetch(usage: probe, source: .quotaCheck, dataDate: fixedNow()))
+                }
+                return try await responses.next()
+            },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+
+        model.refreshNow(force: true)
+        _ = await waitUntil { !model.claudeBuckets.isEmpty && !model.isLoading }
+        clock.advance(by: 61)
+        model.refreshNow(force: true)
+        _ = await waitUntil { model.claudePausedUntil(at: clock.date) != nil && !model.isLoading }
+        model.refreshNow()
+        let probed = await waitUntil { model.claudeBuckets.first?.usedPercent == 50 }
+
+        XCTAssertTrue(probed)
+        XCTAssertEqual(model.claudeBuckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
+    }
+
+    @MainActor
+    func testAnotherClaudeAccountLiftsThePause() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let usage = try ClaudeFixtures.decode(ClaudeFixtures.withSession)
+        let responses = ResultQueue([
+            .success(.claude(ClaudeFetch(usage: usage, source: .usageEndpoint, dataDate: fixedNow(), accountKey: "first"))),
+            .failure(ClaudeUsageError.throttled(retryAfter: nil)),
+        ])
+        let clock = TestClock(fixedNow())
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                if endpoint == .claudeWhilePaused {
+                    return .claude(ClaudeFetch(usage: nil, source: .claudeCode, dataDate: fixedNow(), accountKey: "second"))
+                }
+                return try await responses.next()
+            },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+
+        model.refreshNow(force: true)
+        _ = await waitUntil { !model.claudeBuckets.isEmpty && !model.isLoading }
+        clock.advance(by: 61)
+        model.refreshNow(force: true)
+        let paused = await waitUntil { model.claudePausedUntil(at: clock.date) != nil && !model.isLoading }
+        let pausedFor = model.refreshStates[.claude]?.backoff.scope
+        model.refreshNow()
+        let lifted = await waitUntil { model.claudePausedUntil(at: clock.date) == nil }
+
+        XCTAssertTrue(paused)
+        XCTAssertEqual(pausedFor, "first")
+        XCTAssertTrue(lifted)
+    }
+
+    @MainActor
+    func testEmptyClaudeResponseSaysSo() async throws {
+        let fixture = TestDefaultsFixture(providers: [.claude])
+        defer { fixture.clear() }
+        let empty = try ClaudeFixtures.decode(#"{"five_hour":null,"seven_day":null}"#)
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { _ in .claude(ClaudeFetch(usage: empty, source: .usageEndpoint, dataDate: fixedNow())) },
+            now: fixedNow,
+            automaticallySchedules: false
+        )
+
+        model.refreshNow(force: true)
+        let received = await waitUntil { model.claudeAvailable && !model.isLoading }
+
+        XCTAssertTrue(received)
+        XCTAssertEqual(model.sectionMessage(for: .claude), "Claude returned no limits.")
+    }
+
+    @MainActor
+    func testNetworkErrorRightAfterWakeStaysHiddenAndRetriesSoon() async {
+        let fixture = TestDefaultsFixture(providers: [.codex])
+        defer { fixture.clear() }
+        let clock = TestClock(fixedNow())
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { _ in throw UsageError.network("offline") },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+        model.start()
+        _ = await waitUntil { !model.isLoading }
+        let errorBeforeSleep = model.errorMessage
+        model.setSleeping(true)
+        clock.advance(by: 61)
+        model.setSleeping(false)
+        let failed = await waitUntil { !model.isLoading && model.refreshStates[.codex]?.nextRefresh == clock.date.addingTimeInterval(15) }
+
+        XCTAssertTrue(failed)
+        XCTAssertEqual(model.errorMessage, errorBeforeSleep)
+        model.stop()
+    }
+
+    @MainActor
+    func testNoFetchStartsWhileTheNetworkIsDown() async {
+        let fixture = TestDefaultsFixture(providers: [.codex])
+        defer { fixture.clear() }
+        let calls = EndpointCallLog()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { endpoint in
+                await calls.record(endpoint)
+                return testCodexResult()
+            },
+            now: fixedNow,
+            automaticallySchedules: false
+        )
+        model.setNetworkAvailable(false)
+        model.start()
+        await Task.yield()
+        let offlineCalls = await calls.count(for: .codex)
+
+        model.setNetworkAvailable(true)
+        let fetched = await calls.waitForCount(1)
+
+        XCTAssertEqual(offlineCalls, 0)
+        XCTAssertTrue(fetched)
+        model.stop()
+    }
+
+    @MainActor
+    func testSleepDropsTheResultOfAnInFlightRequest() async {
+        let fixture = TestDefaultsFixture(providers: [.codex])
+        defer { fixture.clear() }
+        let slowFetch = SuspendedCodexFetch()
+        let model = UsageModel(
+            defaults: fixture.defaults,
+            fetcher: UsageFetcher { _ in try await slowFetch.fetch() },
+            now: fixedNow,
+            automaticallySchedules: false
+        )
+        model.start()
+        _ = await slowFetch.waitForStarts(1)
+
+        model.setSleeping(true)
+        await slowFetch.release()
+        await Task.yield()
+
+        XCTAssertFalse(model.isLoading)
+        XCTAssertNil(model.refreshStates[.codex]?.lastSuccess)
+        model.stop()
+    }
+
+    @MainActor
+    func testPopoverAsksToSignInWhenAProviderHasNoKey() {
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: fixedNow(),
+            menuBarProviders: [.codex],
+            popoverProviders: [.codex, .opencode],
+            opencodeAvailable: false
+        )
+
+        XCTAssertNil(model.sectionMessage(for: .opencode))
+        XCTAssertEqual(model.popoverMessage(for: .opencode), OpenCodeUsageError.notSignedIn.localizedDescription)
+        XCTAssertFalse(model.showsOpenCode)
+    }
+
+    @MainActor
+    func testFooterSaysHowLongAgoTheLastUpdateWas() {
+        let model = UsageModel(previewBuckets: [], planType: "pro", lastUpdated: fixedNow())
+
+        XCTAssertEqual(model.updatedText(at: fixedNow().addingTimeInterval(20)), "Updated just now")
+        XCTAssertEqual(model.updatedText(at: fixedNow().addingTimeInterval(130)), "Updated 2 min ago")
+        XCTAssertEqual(model.updatedText(at: fixedNow().addingTimeInterval(7_300)), "Updated 2 h ago")
+    }
+
+    @MainActor
     private func waitUntil(_ condition: @escaping () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(testWaitTimeout)
         while Date() < deadline {
@@ -596,7 +892,7 @@ private final class TestDefaultsFixture {
         suiteName = "UsageModelRefreshTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
-        MenuBarPreferences.save(providers, to: defaults)
+        ProviderPreferences(popover: providers, menuBar: providers).save(to: defaults)
     }
 
     func clear() {
@@ -619,22 +915,12 @@ private final class TestClock {
 
 private func testCodexResult() -> UsageFetchResult {
     .codex(
-        UsageResponse(
-            planType: "pro",
-            rateLimit: RateLimitStatus(
-                allowed: true,
-                limitReached: false,
-                primaryWindow: RateLimitWindow(
-                    usedPercent: 10,
-                    limitWindowSeconds: 18_000,
-                    resetAfterSeconds: 600,
-                    resetAt: nil
-                ),
-                secondaryWindow: nil
-            ),
-            rateLimitReachedType: nil,
-            rateLimitResetCredits: nil,
-            additionalRateLimits: nil
+        try! JSONDecoder().decode(
+            UsageResponse.self,
+            from: Data("""
+            {"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,
+             "primary_window":{"used_percent":10,"limit_window_seconds":18000}}}
+            """.utf8)
         )
     )
 }
@@ -647,15 +933,7 @@ private func testClaudeResult(resetsAt: Date? = nil) throws -> UsageFetchResult 
         {"five_hour":{"utilization":25\(reset)}}
         """.utf8)
     )
-    return .claude(
-        response,
-        ClaudeCredentials(
-            accessToken: "token",
-            subscriptionType: "max",
-            rateLimitTier: nil,
-            expiresAt: nil
-        )
-    )
+    return .claude(ClaudeFetch(usage: response, source: .usageEndpoint, dataDate: fixedNow(), plan: "max"))
 }
 
 private func testCursorResult() throws -> UsageFetchResult {
@@ -819,5 +1097,39 @@ private actor ControlledSleeper {
     private func removeContinuation(_ identifier: Int) -> CheckedContinuation<Void, Error>? {
         pendingOrder.removeAll { $0 == identifier }
         return continuations.removeValue(forKey: identifier)
+    }
+}
+
+private actor ResultQueue {
+    private var results: [Result<UsageFetchResult, Error>]
+
+    init(_ results: [Result<UsageFetchResult, Error>]) {
+        self.results = results
+    }
+
+    func next() throws -> UsageFetchResult {
+        guard !results.isEmpty else { return testCodexResult() }
+        return try results.removeFirst().get()
+    }
+}
+
+private actor ContextLog {
+    private var recorded: [(UsageEndpoint, UsageFetchContext)] = []
+
+    func record(_ endpoint: UsageEndpoint, _ context: UsageFetchContext) {
+        recorded.append((endpoint, context))
+    }
+
+    func entries() -> [(UsageEndpoint, UsageFetchContext)] {
+        recorded
+    }
+
+    func waitForCount(_ expected: Int) async -> Bool {
+        let deadline = Date().addingTimeInterval(testWaitTimeout)
+        while Date() < deadline {
+            if recorded.count >= expected { return true }
+            await Task.yield()
+        }
+        return recorded.count >= expected
     }
 }

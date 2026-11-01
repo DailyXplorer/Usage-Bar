@@ -1,45 +1,17 @@
+import CryptoKit
 import Foundation
-
-struct ClaudeCredentials {
-    let accessToken: String
-    let subscriptionType: String?
-    let rateLimitTier: String?
-    let expiresAt: Date?
-    var refreshToken: String? = nil
-    var scopes: [String] = []
-
-    var planToken: String? {
-        guard let subscriptionType, !subscriptionType.isEmpty else { return nil }
-        guard subscriptionType.lowercased() == "max" else { return subscriptionType }
-        guard let multiplier = Self.maxMultiplier(from: rateLimitTier) else {
-            return subscriptionType
-        }
-        return "max_\(multiplier)"
-    }
-
-    func isExpired(at now: Date) -> Bool {
-        guard let expiresAt else { return false }
-        return expiresAt <= now
-    }
-
-    private static func maxMultiplier(from rateLimitTier: String?) -> String? {
-        guard let rateLimitTier, !rateLimitTier.isEmpty else { return nil }
-        let normalized = rateLimitTier.lowercased()
-        if normalized.contains("20x") { return "20x" }
-        if normalized.contains("5x") { return "5x" }
-        return nil
-    }
-}
 
 enum ClaudeUsageError: LocalizedError {
     case notSignedIn
     case tokenExpired
     case refreshInProgress
     case credentialsNotSaved
+    case keychainUnavailable
+    case forbidden
     case throttled(retryAfter: Date?)
-    case network(String)
-    case httpStatus(Int)
-    case decoding(String)
+    case network
+    case server
+    case decoding
 
     var errorDescription: String? {
         switch self {
@@ -48,258 +20,312 @@ enum ClaudeUsageError: LocalizedError {
         case .tokenExpired:
             return "Claude Code sign-in expired. Run `claude`, then `/login`."
         case .refreshInProgress:
-            return "Claude Code is refreshing its sign-in. Retrying shortly."
+            return "Claude Code is renewing its sign-in. Trying again shortly."
         case .credentialsNotSaved:
-            return "Could not save the refreshed Claude Code sign-in."
+            return "Could not save the renewed Claude Code sign-in. Run `claude` once to renew it."
+        case .keychainUnavailable:
+            return "Could not read the Claude Code sign-in from the Keychain. Trying again shortly."
+        case .forbidden:
+            return "This Claude Code sign-in cannot read usage. Run `claude`, then `/login`."
         case .throttled:
-            return "Claude usage endpoint is rate limited. Waiting before retrying."
-        case .network(let message):
-            return "Network error: \(message)"
-        case .httpStatus(let code):
-            return "Claude returned HTTP \(code). Open Claude Code to refresh the session."
-        case .decoding(let message):
-            return "Unreadable Claude response: \(message)"
+            return "Anthropic paused usage updates. Trying again later."
+        case .network:
+            return "Could not reach Anthropic. Check your internet connection."
+        case .server:
+            return "Anthropic is not responding right now. Trying again shortly."
+        case .decoding:
+            return "Claude sent usage data in an unknown format. Check for a Usage Bar update."
         }
     }
 }
 
-actor ClaudeUsageService {
-    private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let keychainService = "Claude Code-credentials"
-    private static let claudeDirectory = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".claude")
-    private static let credentialsFile = claudeDirectory.appendingPathComponent(".credentials.json")
-    private static let refreshLock = ClaudeRefreshLock(claudeDirectory: claudeDirectory)
-    private static let expiryMargin: TimeInterval = 60
-
-    func fetchUsage() async throws -> (usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
-        var credentials = try Self.loadStoredCredentials().credentials
-        if credentials.isExpired(at: Date().addingTimeInterval(Self.expiryMargin)) {
-            credentials = try await refreshCredentials()
-        }
-
-        var request = URLRequest(url: Self.endpoint)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 20
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            throw ClaudeUsageError.network(error.localizedDescription)
-        }
-
-        guard let http = response as? HTTPURLResponse else {
-            throw ClaudeUsageError.network("invalid response")
-        }
-        guard http.statusCode == 200 else {
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw ClaudeUsageError.tokenExpired
-            }
-            if http.statusCode == 429 {
-                throw ClaudeUsageError.throttled(retryAfter: RetryAfter.date(from: http))
-            }
-            throw ClaudeUsageError.httpStatus(http.statusCode)
-        }
-
-        do {
-            return (try JSONDecoder().decode(ClaudeUsageResponse.self, from: data), credentials)
-        } catch {
-            throw ClaudeUsageError.decoding(error.localizedDescription)
-        }
+struct ClaudeFetch {
+    enum Source: String {
+        case usageEndpoint, claudeCode, quotaCheck
     }
 
-    private func refreshCredentials() async throws -> ClaudeCredentials {
-        var hold = Self.refreshLock.acquire()
-        for _ in 0..<5 where hold == nil {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            hold = Self.refreshLock.acquire()
-        }
-        guard let hold else { throw ClaudeUsageError.refreshInProgress }
-        defer { hold.release() }
+    var usage: ClaudeUsageResponse?
+    var source: Source
+    var dataDate: Date
+    var plan: String?
+    var accountKey: String?
+}
 
-        let stored = try Self.loadStoredCredentials()
-        guard stored.credentials.isExpired(at: Date().addingTimeInterval(Self.expiryMargin)) else {
-            return stored.credentials
-        }
-        guard let refreshToken = stored.credentials.refreshToken,
-              stored.source == .file || Self.keychainAccount() != nil else {
-            throw ClaudeUsageError.tokenExpired
-        }
+struct ClaudeCredentialProvider: Sendable {
+    var usable: @Sendable () async throws -> ClaudeCredentials
+    var afterRejection: @Sendable (ClaudeCredentials) async throws -> ClaudeCredentials
 
-        var request = URLRequest(url: ClaudeTokenRefresh.endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try ClaudeTokenRefresh.requestBody(
-            refreshToken: refreshToken,
-            scopes: stored.credentials.scopes
-        )
-
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request, delegate: ClaudeTokenRedirectGuard())
-        } catch {
-            throw ClaudeUsageError.network(error.localizedDescription)
-        }
-        guard let http = response as? HTTPURLResponse else {
-            throw ClaudeUsageError.network("invalid response")
-        }
-        guard http.statusCode == 200 else {
-            if http.statusCode == 429 {
-                throw ClaudeUsageError.throttled(retryAfter: RetryAfter.date(from: http))
-            }
-            if [400, 401, 403].contains(http.statusCode) {
-                if let current = Self.loadStoredCredentials(from: stored.source)?.credentials,
-                   current.refreshToken != refreshToken,
-                   !current.isExpired(at: Date().addingTimeInterval(Self.expiryMargin)) {
-                    return current
-                }
-                throw ClaudeUsageError.tokenExpired
-            }
-            throw ClaudeUsageError.httpStatus(http.statusCode)
-        }
-
-        let grant: ClaudeTokenGrant
-        do {
-            grant = try JSONDecoder().decode(ClaudeTokenGrant.self, from: data)
-        } catch {
-            throw ClaudeUsageError.decoding(error.localizedDescription)
-        }
-        let updated = try ClaudeTokenRefresh.storedCredentials(stored.data, applying: grant, now: Date())
-        guard Self.loadStoredCredentials(from: stored.source)?.credentials.refreshToken == refreshToken else {
-            return try Self.loadStoredCredentials().credentials
-        }
-        try Self.save(updated, to: stored.source)
-        return try Self.parseCredentials(updated)
-    }
-
-    private enum CredentialSource {
-        case keychain
-        case file
-    }
-
-    private struct StoredCredentials {
-        let data: Data
-        let source: CredentialSource
-        let credentials: ClaudeCredentials
-    }
-
-    private struct CredentialsFile: Decodable {
-        struct OAuth: Decodable {
-            let accessToken: String?
-            let refreshToken: String?
-            let expiresAt: Double?
-            let scopes: [String]?
-            let subscriptionType: String?
-            let rateLimitTier: String?
-        }
-
-        let claudeAiOauth: OAuth?
-    }
-
-    private static func loadStoredCredentials() throws -> StoredCredentials {
-        guard let stored = loadStoredCredentials(from: .keychain) ?? loadStoredCredentials(from: .file) else {
-            throw ClaudeUsageError.notSignedIn
-        }
-        return stored
-    }
-
-    private static func loadStoredCredentials(from source: CredentialSource) -> StoredCredentials? {
-        let data: Data?
-        switch source {
-        case .keychain:
-            data = keychainData()
-        case .file:
-            data = try? Data(contentsOf: credentialsFile)
-        }
-        guard let data, let credentials = try? parseCredentials(data) else { return nil }
-        return StoredCredentials(data: data, source: source, credentials: credentials)
-    }
-
-    private static func parseCredentials(_ data: Data) throws -> ClaudeCredentials {
-        guard let oauth = try? JSONDecoder().decode(CredentialsFile.self, from: data).claudeAiOauth,
-              let accessToken = oauth.accessToken, !accessToken.isEmpty else {
-            throw ClaudeUsageError.notSignedIn
-        }
-        return ClaudeCredentials(
-            accessToken: accessToken,
-            subscriptionType: oauth.subscriptionType,
-            rateLimitTier: oauth.rateLimitTier,
-            expiresAt: oauth.expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) },
-            refreshToken: oauth.refreshToken,
-            scopes: oauth.scopes ?? []
+    static func store(_ store: ClaudeCredentialStore) -> ClaudeCredentialProvider {
+        ClaudeCredentialProvider(
+            usable: { try await store.usableCredentials() },
+            afterRejection: { try await store.credentialsAfterRejection(of: $0) }
         )
     }
+}
 
-    private static func save(_ data: Data, to source: CredentialSource) throws {
-        switch source {
-        case .keychain:
-            try saveKeychainData(data)
-        case .file:
-            let permissions = (try? FileManager.default.attributesOfItem(atPath: credentialsFile.path))?[.posixPermissions] ?? 0o600
-            try data.write(to: credentialsFile, options: [.atomic])
-            try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: credentialsFile.path)
+struct ClaudeCodeState {
+    static let cacheLifetime: TimeInterval = 60 * 60
+
+    var accountKey: String?
+    var cachedUsage: ClaudeUsageResponse?
+    var cachedAt: Date?
+
+    static func read(from url: URL) -> ClaudeCodeState {
+        guard let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ClaudeCodeState()
         }
-        guard let saved = loadStoredCredentials(from: source)?.credentials,
-              saved.accessToken == (try parseCredentials(data)).accessToken else {
-            throw ClaudeUsageError.credentialsNotSaved
+        let account = (root["oauthAccount"] as? [String: Any])?["accountUuid"] as? String
+        var state = ClaudeCodeState(accountKey: account.flatMap(ClaudeAccountKey.make))
+        guard let cache = root["cachedUsageUtilization"] as? [String: Any],
+              let cacheAccount = cache["accountUuid"] as? String,
+              cacheAccount == account,
+              let fetchedAtMs = (cache["fetchedAtMs"] as? NSNumber)?.doubleValue,
+              let utilization = cache["utilization"],
+              JSONSerialization.isValidJSONObject(utilization),
+              let body = try? JSONSerialization.data(withJSONObject: utilization),
+              let usage = try? JSONDecoder().decode(ClaudeUsageResponse.self, from: body) else {
+            return state
         }
+        state.cachedUsage = usage
+        state.cachedAt = Date(timeIntervalSince1970: fetchedAtMs / 1000)
+        return state
     }
 
-    private static func keychainData() -> Data? {
-        security(["find-generic-password", "-s", keychainService, "-w"]).flatMap { $0.isEmpty ? nil : $0 }
-    }
-
-    private static func keychainAccount() -> String? {
-        security(["find-generic-password", "-s", keychainService]).flatMap {
-            ClaudeKeychainCommand.account(fromAttributes: String(decoding: $0, as: UTF8.self))
-        }
-    }
-
-    private static func security(_ arguments: [String]) -> Data? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = arguments
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
+    func usableCache(now: Date, newerThan ownDataDate: Date?) -> (usage: ClaudeUsageResponse, date: Date)? {
+        guard let cachedUsage, let cachedAt,
+              now.timeIntervalSince(cachedAt) <= Self.cacheLifetime,
+              cachedAt <= now.addingTimeInterval(60),
+              cachedAt > (ownDataDate ?? .distantPast) else {
             return nil
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return process.terminationStatus == 0 ? data : nil
+        return (cachedUsage, min(cachedAt, now))
+    }
+}
+
+enum ClaudeAccountKey {
+    static func make(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        return SHA256.hash(data: Data(identifier.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum ClaudeRequests {
+    static let claudeCodeVersion = "2.1.316"
+    static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
+    static let messagesURL = URL(string: "https://api.anthropic.com/v1/messages")!
+    static let quotaCheckModel = "claude-haiku-4-5-20251001"
+
+    static func usage(accessToken: String) -> URLRequest {
+        var request = URLRequest(url: usageURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("claude-cli/\(claudeCodeVersion) (external, cli)", forHTTPHeaderField: "User-Agent")
+        return request
     }
 
-    private static func saveKeychainData(_ data: Data) throws {
-        guard let account = keychainAccount() else {
-            throw ClaudeUsageError.credentialsNotSaved
+    static func profile(accessToken: String) -> URLRequest {
+        var request = URLRequest(url: profileURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("claude-code/\(claudeCodeVersion)", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    static func quotaCheck(accessToken: String) -> URLRequest {
+        var request = URLRequest(url: messagesURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("cli", forHTTPHeaderField: "x-app")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("claude-cli/\(claudeCodeVersion) (external, cli)", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "model": quotaCheckModel,
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "quota"]],
+        ] as [String: Any])
+        return request
+    }
+}
+
+struct ClaudeProfilePlanCache: Codable {
+    static let key = "claudeProfilePlan"
+    static let lifetime: TimeInterval = 24 * 60 * 60
+    static let retryAfterFailure: TimeInterval = 60 * 60
+
+    var accountKey: String?
+    var planName: String?
+    var checkedAt: Date
+
+    static func load(from defaults: UserDefaults) -> ClaudeProfilePlanCache? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(ClaudeProfilePlanCache.self, from: $0) }
+    }
+
+    func save(to defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.key)
+    }
+
+    func isCurrent(for accountKey: String?, at now: Date) -> Bool {
+        guard self.accountKey == accountKey, checkedAt <= now else { return false }
+        let lifetime = planName == nil ? Self.retryAfterFailure : Self.lifetime
+        return now.timeIntervalSince(checkedAt) < lifetime
+    }
+}
+
+actor ClaudeUsageService {
+    private let credentials: ClaudeCredentialProvider
+    private let session: URLSession
+    private let claudeCodeFile: URL
+    private let defaults: UserDefaults
+    private let now: @Sendable () -> Date
+
+    init(
+        credentials: ClaudeCredentialProvider = .store(ClaudeCredentialStore()),
+        session: URLSession = ProviderSession.shared,
+        claudeCodeFile: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json"),
+        defaults: UserDefaults = .standard,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.credentials = credentials
+        self.session = session
+        self.claudeCodeFile = claudeCodeFile
+        self.defaults = defaults
+        self.now = now
+    }
+
+    func fetchUsage(ownDataDate: Date?) async throws -> ClaudeFetch {
+        let local = ClaudeCodeState.read(from: claudeCodeFile)
+        if let cached = local.usableCache(now: now(), newerThan: ownDataDate) {
+            return ClaudeFetch(
+                usage: cached.usage,
+                source: .claudeCode,
+                dataDate: cached.date,
+                plan: await cachedPlan(accountKey: local.accountKey),
+                accountKey: local.accountKey
+            )
         }
-        let invocation = ClaudeKeychainCommand.save(data, account: account, service: keychainService)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = invocation.arguments
-        let input = Pipe()
-        process.standardInput = invocation.input == nil ? FileHandle.nullDevice : input
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let (data, http, credentials) = try await send(ClaudeRequests.usage)
+        guard http.statusCode == 200 else {
+            throw Self.error(for: http)
+        }
+        let usage: ClaudeUsageResponse
         do {
-            try process.run()
+            usage = try JSONDecoder().decode(ClaudeUsageResponse.self, from: data)
         } catch {
-            throw ClaudeUsageError.credentialsNotSaved
+            throw ClaudeUsageError.decoding
         }
-        if let stdin = invocation.input {
-            _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-            try? input.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
-            try? input.fileHandleForWriting.close()
+        let accountKey = local.accountKey ?? Self.accountKey(for: credentials)
+        return ClaudeFetch(
+            usage: usage,
+            source: .usageEndpoint,
+            dataDate: now(),
+            plan: await plan(for: credentials, accountKey: accountKey),
+            accountKey: accountKey
+        )
+    }
+
+    func fetchWhilePaused(ownDataDate: Date?, quotaCheck: Bool, scopedModelName: String?) async throws -> ClaudeFetch {
+        let local = ClaudeCodeState.read(from: claudeCodeFile)
+        if let cached = local.usableCache(now: now(), newerThan: ownDataDate) {
+            return ClaudeFetch(usage: cached.usage, source: .claudeCode, dataDate: cached.date, accountKey: local.accountKey)
         }
-        process.waitUntilExit()
+        guard quotaCheck else {
+            return ClaudeFetch(usage: nil, source: .claudeCode, dataDate: now(), accountKey: local.accountKey)
+        }
+        let (_, http, credentials) = try await send(ClaudeRequests.quotaCheck)
+        let accountKey = local.accountKey ?? Self.accountKey(for: credentials)
+        guard let usage = ClaudeUnifiedHeaders.response(from: http.allHeaderFields, scopedModelName: scopedModelName) else {
+            if http.statusCode == 200 {
+                return ClaudeFetch(usage: nil, source: .quotaCheck, dataDate: now(), accountKey: accountKey)
+            }
+            throw Self.error(for: http)
+        }
+        return ClaudeFetch(usage: usage, source: .quotaCheck, dataDate: now(), accountKey: accountKey)
+    }
+
+    private func send(
+        _ makeRequest: (String) -> URLRequest
+    ) async throws -> (Data, HTTPURLResponse, ClaudeCredentials) {
+        var current = try await credentials.usable()
+        var (data, http) = try await perform(makeRequest(current.accessToken))
+        if http.statusCode == 401 {
+            current = try await credentials.afterRejection(current)
+            (data, http) = try await perform(makeRequest(current.accessToken))
+            if http.statusCode == 401 {
+                throw ClaudeUsageError.tokenExpired
+            }
+        }
+        return (data, http, current)
+    }
+
+    private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw ClaudeUsageError.network
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeUsageError.network
+        }
+        return (data, http)
+    }
+
+    private func cachedPlan(accountKey: String?) async -> String? {
+        if let cache = ClaudeProfilePlanCache.load(from: defaults),
+           cache.isCurrent(for: accountKey, at: now()),
+           let planName = cache.planName {
+            return planName
+        }
+        return try? await credentials.usable().planToken
+    }
+
+    private func plan(for credentials: ClaudeCredentials, accountKey: String?) async -> String? {
+        let date = now()
+        let fallback = credentials.planToken
+        if let cache = ClaudeProfilePlanCache.load(from: defaults), cache.isCurrent(for: accountKey, at: date) {
+            return cache.planName ?? fallback
+        }
+        var planName: String?
+        if let (data, http) = try? await perform(ClaudeRequests.profile(accessToken: credentials.accessToken)),
+           http.statusCode == 200,
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let organization = root["organization"] as? [String: Any],
+           let name = organization["plan_display_name"] as? String,
+           !name.trimmingCharacters(in: .whitespaces).isEmpty {
+            planName = name.trimmingCharacters(in: .whitespaces)
+        }
+        ClaudeProfilePlanCache(accountKey: accountKey, planName: planName, checkedAt: date).save(to: defaults)
+        return planName ?? fallback
+    }
+
+    private static func accountKey(for credentials: ClaudeCredentials) -> String? {
+        ClaudeAccountKey.make(credentials.refreshToken ?? credentials.accessToken)
+    }
+
+    private static func error(for http: HTTPURLResponse) -> ClaudeUsageError {
+        switch http.statusCode {
+        case 401:
+            return .tokenExpired
+        case 403:
+            return .forbidden
+        case 429:
+            return .throttled(retryAfter: RetryAfter.date(from: http))
+        default:
+            return .server
+        }
     }
 }
