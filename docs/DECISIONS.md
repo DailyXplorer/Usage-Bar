@@ -61,7 +61,10 @@ bypass it. While paused, the Claude section keeps the last values and says
 From `GET /api/oauth/profile` → `organization.plan_display_name` (for example
 "Ultra", shown as "Claude Ultra"), requested with Claude Code's profile request
 shape and cached for 24 hours. Otherwise the label derived from the sign-in's
-`subscriptionType` and `rateLimitTier`.
+`subscriptionType` and `rateLimitTier`. When Claude Code's saved copy or the
+quota check supplies the usage, the stored profile name for that account is
+used without a profile request; without one, the sign-in is read (never
+renewed) for its label.
 
 ## D6 Claude usage credits
 

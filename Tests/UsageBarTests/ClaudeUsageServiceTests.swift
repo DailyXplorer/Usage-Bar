@@ -71,19 +71,22 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertEqual(fetch.plan, "max_20x")
     }
 
-    func testRecentClaudeCodeCopyForTheSameAccountAvoidsTheNetworkAndTheSignIn() async throws {
+    func testRecentClaudeCodeCopyForTheSameAccountAvoidsTheNetworkAndRenewal() async throws {
         try writeClaudeCodeState(account: "account-1", cacheAccount: "account-1", fetchedAt: now.addingTimeInterval(-600))
         let reads = Counter()
+        let renewals = Counter()
 
-        let fetch = try await service(reads: reads).fetchUsage(ownDataDate: now.addingTimeInterval(-1_200))
+        let fetch = try await service(renewals: renewals, reads: reads).fetchUsage(ownDataDate: now.addingTimeInterval(-1_200))
 
         XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
         let readCount = await reads.value
+        let renewalCount = await renewals.value
         XCTAssertEqual(readCount, 0)
+        XCTAssertEqual(renewalCount, 0)
         XCTAssertEqual(fetch.source, .claudeCode)
         XCTAssertEqual(fetch.dataDate, now.addingTimeInterval(-600))
         XCTAssertEqual(fetch.accountKey, ClaudeAccountKey.make("account-1"))
-        XCTAssertNil(fetch.plan)
+        XCTAssertEqual(fetch.plan, "max_20x")
         XCTAssertEqual(fetch.usage.map { ClaudeLimits.buckets(from: $0, now: now).map(\.kind) }, [.weeklyAll, .weeklyScoped, .spendLimit])
     }
 
@@ -102,6 +105,27 @@ final class ClaudeUsageServiceTests: XCTestCase {
         let readCount = await reads.value
         XCTAssertEqual(readCount, 0)
         XCTAssertEqual(fetch.plan, "Ultra")
+    }
+
+    func testClaudeCodeCopyAfterAnAccountSwitchShowsTheNewSignInPlan() async throws {
+        try writeClaudeCodeState(account: "account-2", cacheAccount: "account-2", fetchedAt: now.addingTimeInterval(-600))
+        ClaudeProfilePlanCache(
+            accountKey: ClaudeAccountKey.make("account-1"),
+            planName: "Ultra",
+            checkedAt: now.addingTimeInterval(-3600)
+        ).save(to: defaults)
+        let renewals = Counter()
+
+        let fetch = try await service(renewals: renewals).fetchUsage(ownDataDate: nil)
+        let paused = try await service(renewals: renewals)
+            .fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+
+        XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
+        let renewalCount = await renewals.value
+        XCTAssertEqual(renewalCount, 0)
+        XCTAssertEqual(fetch.plan, "max_20x")
+        XCTAssertEqual(paused.source, .claudeCode)
+        XCTAssertEqual(paused.plan, "max_20x")
     }
 
     func testClaudeCodeCopyIsIgnoredWhenOldForeignOrOlderThanOurs() async throws {
@@ -222,7 +246,8 @@ final class ClaudeUsageServiceTests: XCTestCase {
                 afterRejection: { _ in
                     await renewals.increment()
                     return Self.credentials("token-2")
-                }
+                },
+                withoutRenewal: { Self.credentials("token-1") }
             ),
             session: URLSession(configuration: configuration),
             claudeCodeFile: directory.appendingPathComponent(".claude.json"),

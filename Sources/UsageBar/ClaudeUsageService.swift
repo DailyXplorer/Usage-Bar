@@ -54,11 +54,13 @@ struct ClaudeFetch {
 struct ClaudeCredentialProvider: Sendable {
     var usable: @Sendable () async throws -> ClaudeCredentials
     var afterRejection: @Sendable (ClaudeCredentials) async throws -> ClaudeCredentials
+    var withoutRenewal: @Sendable () async throws -> ClaudeCredentials
 
     static func store(_ store: ClaudeCredentialStore) -> ClaudeCredentialProvider {
         ClaudeCredentialProvider(
             usable: { try await store.usableCredentials() },
-            afterRejection: { try await store.credentialsAfterRejection(of: $0) }
+            afterRejection: { try await store.credentialsAfterRejection(of: $0) },
+            withoutRenewal: { try await store.currentCredentials() }
         )
     }
 }
@@ -213,7 +215,7 @@ actor ClaudeUsageService {
                 usage: cached.usage,
                 source: .claudeCode,
                 dataDate: cached.date,
-                plan: storedPlan(accountKey: local.accountKey),
+                plan: await localPlan(accountKey: local.accountKey),
                 accountKey: local.accountKey
             )
         }
@@ -240,7 +242,13 @@ actor ClaudeUsageService {
     func fetchWhilePaused(ownDataDate: Date?, quotaCheck: Bool, scopedModelName: String?) async throws -> ClaudeFetch {
         let local = ClaudeCodeState.read(from: claudeCodeFile)
         if let cached = local.usableCache(now: now(), newerThan: ownDataDate) {
-            return ClaudeFetch(usage: cached.usage, source: .claudeCode, dataDate: cached.date, accountKey: local.accountKey)
+            return ClaudeFetch(
+                usage: cached.usage,
+                source: .claudeCode,
+                dataDate: cached.date,
+                plan: await localPlan(accountKey: local.accountKey),
+                accountKey: local.accountKey
+            )
         }
         guard quotaCheck else {
             return ClaudeFetch(usage: nil, source: .claudeCode, dataDate: now(), accountKey: local.accountKey)
@@ -253,7 +261,13 @@ actor ClaudeUsageService {
             }
             throw Self.error(for: http)
         }
-        return ClaudeFetch(usage: usage, source: .quotaCheck, dataDate: now(), accountKey: accountKey)
+        return ClaudeFetch(
+            usage: usage,
+            source: .quotaCheck,
+            dataDate: now(),
+            plan: await localPlan(accountKey: accountKey, signedIn: credentials),
+            accountKey: accountKey
+        )
     }
 
     private func send(
@@ -284,11 +298,16 @@ actor ClaudeUsageService {
         return (data, http)
     }
 
-    private func storedPlan(accountKey: String?) -> String? {
-        guard let cache = ClaudeProfilePlanCache.load(from: defaults), cache.accountKey == accountKey else {
-            return nil
+    private func localPlan(accountKey: String?, signedIn: ClaudeCredentials? = nil) async -> String? {
+        if let cache = ClaudeProfilePlanCache.load(from: defaults),
+           cache.accountKey == accountKey,
+           let planName = cache.planName {
+            return planName
         }
-        return cache.planName
+        if let signedIn {
+            return signedIn.planToken
+        }
+        return try? await credentials.withoutRenewal().planToken
     }
 
     private func plan(for credentials: ClaudeCredentials, accountKey: String?) async -> String? {

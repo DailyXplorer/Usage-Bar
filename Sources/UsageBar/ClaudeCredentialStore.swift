@@ -317,7 +317,7 @@ actor ClaudeCredentialStore {
             && !isStale(credentials, rejectedAccessToken: nil)
     }
 
-    private func currentCredentials() async throws -> ClaudeCredentials {
+    func currentCredentials() async throws -> ClaudeCredentials {
         do {
             return effectiveCredentials(try await loadStored())
         } catch ClaudeUsageError.notSignedIn {
