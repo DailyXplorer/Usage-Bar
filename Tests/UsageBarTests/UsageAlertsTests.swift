@@ -67,6 +67,36 @@ final class UsageAlertsTests: XCTestCase {
         XCTAssertTrue(quiet.ledger.records.isEmpty)
     }
 
+    func testABillingCycleOfAnotherLengthIsStillTheSameWindow() {
+        let day = 86_400
+        func cursorModels(used: Int, cycleDays: Int, resetAt: Date) -> LimitBucket {
+            LimitBucket(provider: .cursor, kind: .cursorModels, name: "Cursor Models", usedPercent: used, resetAt: resetAt,
+                        resetAfterSeconds: Int(resetAt.timeIntervalSince(now)), limitWindowSeconds: cycleDays * day,
+                        reached: false)
+        }
+        let januaryEnd = now.addingTimeInterval(TimeInterval(day))
+        let februaryEnd = januaryEnd.addingTimeInterval(TimeInterval(28 * day))
+        let marchEnd = februaryEnd.addingTimeInterval(TimeInterval(31 * day))
+
+        let january = evaluate([cursorModels(used: 85, cycleDays: 31, resetAt: januaryEnd)], ledger: UsageAlertLedger())
+        let february = evaluate(
+            [cursorModels(used: 90, cycleDays: 28, resetAt: februaryEnd)],
+            ledger: january.ledger,
+            at: januaryEnd.addingTimeInterval(60)
+        )
+        let march = evaluate(
+            [cursorModels(used: 4, cycleDays: 31, resetAt: marchEnd)],
+            ledger: february.ledger,
+            at: februaryEnd.addingTimeInterval(60)
+        )
+
+        XCTAssertEqual(january.alerts.map(\.title), ["Cursor Cursor Models monthly limit: 15% left"])
+        XCTAssertEqual(february.alerts.map(\.kind), [.reset, .low])
+        XCTAssertEqual(february.alerts.first?.title, "Cursor Cursor Models monthly limit has reset")
+        XCTAssertEqual(march.alerts.map(\.kind), [.reset])
+        XCTAssertTrue(march.ledger.records.isEmpty)
+    }
+
     func testAnIdleWindowWithoutAResetTimeAfterItsPeriodCountsAsReset() {
         let firstReset = now.addingTimeInterval(3_600)
         let warned = evaluate([session(used: 85, resetAt: firstReset)], ledger: UsageAlertLedger())

@@ -81,6 +81,8 @@ final class ModelsTests: XCTestCase {
             WindowLabels.label(forWindowSeconds: 30 * 24 * 60 * 60, isSecondary: false),
             "Monthly Limit"
         )
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 28 * 24 * 60 * 60, isSecondary: false), "Monthly Limit")
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 31 * 24 * 60 * 60, isSecondary: false), "Monthly Limit")
     }
 
     func testEveryWindowLabelUsesTitleCase() {

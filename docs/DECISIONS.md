@@ -282,6 +282,9 @@ Go limits are per model and change over time.
   (Cursor's additional usage and Command Code org limits are spend limits).
 - One notification per window, threshold and reset period. The record is kept
   in `UserDefaults` across relaunches and dropped once its period has passed.
+  A window is identified by provider, row and length class (5 hours, day,
+  week, calendar month of 28 to 31 days, year), never the exact length, so a
+  billing cycle of another length is still the same window.
   A reset time that drifts by less than 30 minutes is the same period. Lowering
   the threshold can warn again at the new one; raising it does not repeat a
   warning.
