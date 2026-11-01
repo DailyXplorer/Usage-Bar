@@ -1,13 +1,13 @@
 import Foundation
 
 enum UsageEndpoint: String, Codable, CaseIterable {
-    case codex, claude, claudeWhilePaused, cursor, cursorGrokBot, opencode, commandcode
+    case codex, claude, claudeWhilePaused, cursor, opencode, commandcode
 
     var provider: LimitBucket.Provider {
         switch self {
         case .codex: return .codex
         case .claude, .claudeWhilePaused: return .claude
-        case .cursor, .cursorGrokBot: return .cursor
+        case .cursor: return .cursor
         case .opencode: return .opencode
         case .commandcode: return .commandcode
         }
@@ -21,7 +21,7 @@ enum UsageEndpoint: String, Codable, CaseIterable {
             return RefreshPolicy(interval: 15 * 60, manualGap: 60, refreshOnOpenAfter: 5 * 60)
         case .claudeWhilePaused:
             return RefreshPolicy(interval: 15 * 60, manualGap: nil, minimumGap: 15 * 60)
-        case .cursor, .cursorGrokBot, .opencode, .commandcode:
+        case .cursor, .opencode, .commandcode:
             return RefreshPolicy(interval: 5 * 60)
         }
     }
@@ -120,8 +120,7 @@ struct UsageFetchContext {
 enum UsageFetchResult {
     case codex(UsageResponse)
     case claude(ClaudeFetch)
-    case cursor(CursorUsageResponse, CursorCredentials)
-    case cursorGrokBot(CursorGrokBotFetchResult, CursorCredentials)
+    case cursor(CursorUsageSnapshot)
     case opencode(OpenCodeUsageResponse)
     case commandcode(CommandCodeUsageSnapshot)
 }
@@ -140,9 +139,9 @@ struct UsageFetcher {
     static var live: UsageFetcher {
         let codex = UsageService()
         let claude = ClaudeUsageService()
-        let cursor = CursorUsageService(session: ProviderSession.shared)
+        let cursor = CursorUsageService()
         let opencode = OpenCodeUsageService()
-        let commandcode = CommandCodeUsageService(session: ProviderSession.shared)
+        let commandcode = CommandCodeUsageService()
         return UsageFetcher { endpoint, context in
             switch endpoint {
             case .codex:
@@ -156,11 +155,7 @@ struct UsageFetcher {
                     scopedModelName: context.claudeScopedModelName
                 ))
             case .cursor:
-                let (usage, credentials) = try await cursor.fetchPeriodUsage()
-                return .cursor(usage, credentials)
-            case .cursorGrokBot:
-                let (usage, credentials) = try await cursor.fetchGrokBotUsage()
-                return .cursorGrokBot(usage, credentials)
+                return .cursor(try await cursor.fetchUsage())
             case .opencode:
                 return .opencode(try await opencode.fetchUsage().usage)
             case .commandcode:

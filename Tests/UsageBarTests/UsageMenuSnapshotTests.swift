@@ -92,7 +92,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     usedPercent: 19,
                     resetAt: Date(timeIntervalSince1970: 1_786_363_200),
                     resetAfterSeconds: 86_400,
-                    limitWindowSeconds: CursorLimits.grokBotWindowSeconds,
+                    limitWindowSeconds: CursorLimits.weekSeconds,
                     reached: false
                 ),
             ],

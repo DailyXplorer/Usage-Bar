@@ -108,7 +108,7 @@ struct UsageMenuView: View {
                     freshness: model.freshnessMessage(for: provider, at: displayDate),
                     date: displayDate,
                     fetchedAt: model.dataDate(for: provider),
-                    supplementalMessage: provider == .cursor ? model.grokBotMessage(at: displayDate) : nil
+                    supplementalMessage: provider == .cursor && !model.cursorBuckets.isEmpty ? model.cursorNotice : nil
                 )
             }
         }

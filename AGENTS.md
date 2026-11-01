@@ -148,7 +148,9 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/ClaudeUsageService.swift` | Claude sources: Claude Code's saved copy, usage endpoint, profile, quota check |
 | `Sources/UsageBar/ClaudeCredentialStore.swift` | Claude sign-in read, renewal and write-back |
 | `Sources/UsageBar/Subprocess.swift` | Time-limited subprocess runner (`/usr/bin/security`) |
-| `docs/DECISIONS.md` | Product rules (D1–D14, D19) the code must keep |
+| `Sources/UsageBar/CursorCredentials.swift` | Cursor sign-in sources: editor store, Safe Storage decryption, Settings token |
+| `Sources/UsageBar/ProviderIO.swift` | Off-main blocking reads with a deadline; read-only SQLite |
+| `docs/DECISIONS.md` | Product rules (D1–D19) the code must keep; read before changing provider behaviour |
 
 The `.notFound` login-item fallback writes a LaunchAgent for the next login but
 does not bootstrap it in the current session. Usage Bar is already running when
@@ -159,10 +161,8 @@ button must receive one compact template image from `MenuBarLabelImage`. Do not
 reserve hidden percentage text, set a numeric status item length, or replace
 the AppKit status item with `MenuBarExtra`.
 
-Codex, Claude, Cursor and Command Code requests go through
-`ProviderSession.shared` (no URL cache, no cookies); `OpenCodeUsageService`
-still uses `URLSession.shared`. A new provider request must use
-`ProviderSession.shared`. Refresh cadence lives in `UsageEndpoint.policy`; read
+Every provider request goes through `ProviderSession.shared` (no URL cache, no
+cookies). A new provider request must use it too. Refresh cadence lives in `UsageEndpoint.policy`; read
 [docs/DECISIONS.md](docs/DECISIONS.md) (D3, D4, D9, D10) before changing it.
 Usage Bar renews only the Claude token, through `ClaudeCredentialStore`; it
 never renews Codex, Cursor or other tokens.
