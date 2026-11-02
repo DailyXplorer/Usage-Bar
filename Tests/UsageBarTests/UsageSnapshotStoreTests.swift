@@ -306,10 +306,44 @@ final class UsageSnapshotStoreTests: XCTestCase {
         let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
 
         XCTAssertEqual(refreshed.claudeBuckets.map(\.name), [
-            "Current session",
-            "Current week (all models)",
-            "Current week (Fable)",
+            "Current Session",
+            "Current Week (All Models)",
+            "Current Week (Fable)",
         ])
+    }
+
+    func testRefreshRewritesSentenceCaseRowNamesInTitleCase() {
+        func saved(_ provider: LimitBucket.Provider, _ kind: LimitBucket.Kind, _ name: String, scope: String? = nil) -> LimitBucket {
+            LimitBucket(
+                provider: provider,
+                kind: kind,
+                scope: scope,
+                name: name,
+                usedPercent: 10,
+                resetAt: nil,
+                resetAfterSeconds: nil,
+                limitWindowSeconds: nil,
+                reached: false
+            )
+        }
+        let snapshot = UsageSnapshot(
+            claudeBuckets: [saved(.claude, .spendLimit, "Usage credits", scope: "extra_usage")],
+            cursorBuckets: [
+                saved(.cursor, .weekly, "Weekly usage"),
+                saved(.cursor, .spendLimit, "Additional usage"),
+            ],
+            commandcodeBuckets: [
+                saved(.commandcode, .spendLimit, "Org-wide spend limit"),
+                saved(.commandcode, .spendLimit, "Model X spend limit"),
+            ],
+            fetchedAt: Date(timeIntervalSince1970: 1_786_400_000)
+        )
+
+        let refreshed = snapshot.refreshed(now: Date(timeIntervalSince1970: 1_786_400_000))
+
+        XCTAssertEqual(refreshed.claudeBuckets.map(\.name), ["Usage Credits"])
+        XCTAssertEqual(refreshed.cursorBuckets.map(\.name), ["Weekly Usage", "Additional Usage"])
+        XCTAssertEqual(refreshed.commandcodeBuckets.map(\.name), ["Org-Wide Spend Limit", "Model X Spend Limit"])
     }
 
     func testRefreshRewritesLegacyOpenCodeRollingTitle() {
@@ -432,16 +466,16 @@ final class UsageSnapshotStoreTests: XCTestCase {
 
         let model = UsageModel(defaults: defaults)
         XCTAssertEqual(model.claudeBuckets.map(\.name), [
-            "Current session",
-            "Current week (all models)",
-            "Current week (Fable)",
+            "Current Session",
+            "Current Week (All Models)",
+            "Current Week (Fable)",
         ])
 
         let persisted = try XCTUnwrap(UsageSnapshotStore.load(from: defaults))
         XCTAssertEqual(persisted.claudeBuckets.map(\.name), [
-            "Current session",
-            "Current week (all models)",
-            "Current week (Fable)",
+            "Current Session",
+            "Current Week (All Models)",
+            "Current Week (Fable)",
         ])
         XCTAssertEqual(persisted.fetchedAt, fetchedAt)
         XCTAssertEqual(persisted.claudePlan, "max")

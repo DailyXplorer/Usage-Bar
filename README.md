@@ -10,15 +10,15 @@ usage limits: **percentage remaining** and time until reset.
 
 In the menu bar: `‹ChatGPT logo› 99% ‹Claude logo› 99% ‹Cursor logo› 99%` — the
 Codex window with the least left (5-hour or weekly), Claude's binding limit,
-then Cursor's **Weekly usage** (the **Cursor Models** pool on legacy Cursor
+then Cursor's **Weekly Usage** (the **Cursor Models** pool on legacy Cursor
 plans). OpenCode's
-**Current session** and Command Code's **Current session** windows can be turned
+**Current Session** and Command Code's **Current Session** windows can be turned
 on in Settings. The popover breaks down every window on each side.
 
 Claude's menu bar value is the first available of: the limit Anthropic marks as
-active, **Current session**, **Current week (all models)**, then the most used
+active, **Current Session**, **Current Week (All Models)**, then the most used
 per-model weekly limit. Plans without a 5-hour window, such as verified Ultra
-accounts, therefore show their weekly percentage instead of `--%`. Usage credits
+accounts, therefore show their weekly percentage instead of `--%`. Usage Credits
 never drive the menu bar. VoiceOver names the window, for example "Claude weekly
 limit, 25 percent left". A window whose reset time passed after the last fetch
 shows as full and "Reset, waiting for new data" until fresh data arrives.
@@ -180,11 +180,12 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   "Anthropic paused usage updates. Showing values from ‹time›. Next try at
   ‹time›." Times read like "at 00:19" in your 12- or 24-hour format, with
   "tomorrow" or a short weekday when they are not today.
-- Mirrors Claude Code's `/usage` rows: **Current session** (only when the plan
-  has a 5-hour window), **Current week (all models)** and
-  **Current week (‹model›)** for per-model weekly limits such as Fable. Other
-  limit kinds Anthropic adds appear with a readable name. **Usage credits**
-  (spent / monthly limit) and Claude credit windows appear when enabled.
+- Mirrors Claude Code's `/usage` rows in Title Case: **Current Session** (only
+  when the plan has a 5-hour window), **Current Week (All Models)** and
+  **Current Week (‹model›)** for per-model weekly limits such as Fable. Other
+  limit kinds Anthropic adds appear with a readable name. **Usage Credits**
+  (for example `$12.50 / $50.00 spent`) and Claude credit windows appear when
+  enabled.
 - The plan badge comes from Anthropic's profile (for example **Claude Ultra**),
   checked at most once a day, else from the sign-in's plan fields. When the
   usage comes from Claude Code's saved copy or the quota check, the badge uses the profile name
@@ -197,10 +198,10 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
 Cursor and Grok share one account since The X Subscription. Usage Bar supports
 both account shapes:
 
-- **Unified accounts** (Cursor and Grok combined): one **Weekly usage** bar for
+- **Unified accounts** (Cursor and Grok combined): one **Weekly Usage** bar for
   the shared weekly pool, with its reset time and the plan name as the badge.
   When the account has a monthly additional-usage limit, an
-  **Additional usage** row shows `$used / $limit`. The menu bar shows the weekly
+  **Additional Usage** row shows `$used / $limit spent`. The menu bar shows the weekly
   pool. While Cursor is still merging the accounts, the section says
   **Account merge in progress** instead of showing an empty bar.
 - **Legacy Cursor plans**: **Cursor Models** (Cursor Grok and Composer) and
@@ -243,7 +244,7 @@ Grok token. When no source works, the section says how to sign in.
   `auth.json` in the same folders. No key is ever copied or rewritten.
 - Queries `https://opencode.ai/zen/go/v1/usage`, the official Go quota endpoint,
   with the same Bearer key the TUI already uses.
-- Mirrors the three Go windows: **Current session** (5 hours), **Weekly** and
+- Mirrors the three Go windows: **Current Session** (5 hours), **Weekly** and
   **Monthly**, each with its reset time. The menu bar shows the current
   session window.
 - If there is no `opencode-go` key, the menu bar segment stays hidden and the
@@ -257,13 +258,13 @@ Grok token. When no source works, the section says how to sign in.
 - Queries the same `/alpha` endpoints the CLI `/usage` view uses on
   `api.commandcode.ai`: `whoami?limits=1` → `billing/subscriptions` →
   `billing/credits` → `usage/summary`.
-- Shows **Current session** (5-hour cap) and **Weekly** when the plan has
+- Shows **Current Session** (5-hour cap) and **Weekly** when the plan has
   rolling windows, and **Monthly** with the CLI's formula: your remaining
   monthly, purchased and free credits against the plan's monthly credits
   (or credits spent plus what is left when the subscription is not active).
   The menu bar shows the current session window.
 - Organization spend caps appear as extra rows, for example
-  **Org-wide spend limit** with `$spent of $limit/mo`.
+  **Org-Wide Spend Limit** with `$spent / $limit spent this month`.
 - Plan badge, as in the CLI: **Go**, **GOAT**, **Pro**, **Provider**, **Max**,
   **Ultra**, **Teams Pro**.
 - If there is no Command Code key, the menu bar segment stays hidden and the
@@ -307,10 +308,10 @@ notifies at most once per threshold and reset period, remembered in
 data, a paused provider, and a window waiting for fresh data after its reset
 never do.
 
-The popover footer shows when data last arrived ("Updated 2 min ago").
-Each section's timestamp belongs to its own data. Failed reads, or data older
-than twice its refresh interval, show **Saved data** without making another
-provider appear fresh. Older saved data
+The popover footer shows when data last arrived ("Updated 2 min ago"). A
+section adds its own line only when its data is not fresh: failed reads, or
+data older than twice its refresh interval, show **Saved data from ‹time›**
+without making another provider appear fresh. Older saved data
 without a reliable per-provider timestamp stays marked as pending until its
 first successful refresh.
 

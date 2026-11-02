@@ -69,7 +69,7 @@ struct UsageSnapshot: Codable {
         var copy = self
         copy.codexBuckets = Self.current(codexBuckets.map(CodexLimits.relabeled), now: now)
         copy.claudeBuckets = Self.current(claudeBuckets.map(ClaudeLimits.relabeled), now: now)
-        copy.cursorBuckets = Self.current(cursorBuckets, now: now)
+        copy.cursorBuckets = Self.current(cursorBuckets.map(CursorLimits.relabeled), now: now)
         copy.opencodeBuckets = Self.current(opencodeBuckets.map(OpenCodeLimits.relabeled), now: now)
         copy.opencodePlan = OpenCodeLimits.plan(for: copy.opencodeBuckets)
         copy.commandcodeBuckets = Self.current(commandcodeBuckets.map(CommandCodeLimits.relabeled), now: now)

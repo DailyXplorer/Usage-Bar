@@ -14,8 +14,10 @@ a session row and shows an error only when the response holds no window at all
 `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`,
 `seven_day_oauth_apps` and `seven_day_cowork` are the fallback when `limits`
 gives no usable entry. Unknown `kind` values are kept and get a readable label
-from their kind or group. Labels follow Claude Code's `/usage`: "Current
-session", "Current week (all models)", "Current week (‹model display name›)".
+from their kind or group. Labels follow Claude Code's `/usage` wording in the
+app's Title Case: "Current Session", "Current Week (All Models)", "Current Week
+(‹model display name›)". A name the server provides, such as a model display
+name, keeps its own spelling inside the label.
 Decoding is lenient: a malformed entry drops only that entry.
 
 ### D2 Claude menu bar value
@@ -76,10 +78,11 @@ renewed) for its label.
 
 ### D6 Claude usage credits
 
-"Usage credits" (`extra_usage`, when `is_enabled`: spent / monthly limit in the
+"Usage Credits" (`extra_usage`, when `is_enabled`: spent / monthly limit in the
 account currency, amounts in minor units) and the credit windows `cinder_cove`
 and `wattle_ember` appear as rows in the Claude section when present. They never
-drive the menu bar.
+drive the menu bar. Their amounts read "$12.50 / $50.00 spent", the one format
+every money row uses for every provider.
 
 ### D7 Claude token renewal
 
@@ -108,7 +111,11 @@ Codex every 3 minutes; Claude per D3; Cursor, OpenCode Go and Command Code every
 5 minutes. After wake or a network change, fetching waits until the network path
 is satisfied, and a network error in the first seconds after wake is never
 shown. The popover footer states the last update time ("Updated 2 min ago"),
-not a fixed interval.
+not a fixed interval. A provider section adds its own freshness line only when
+it tells more than the footer: its data is older than twice its refresh
+interval or its last attempt failed ("Saved data from …"), it has only saved
+data with no successful refresh yet, or it is paused (the pause line). While
+every provider is fresh, only the footer states the time.
 
 ### D10 Server pauses expire
 
@@ -164,13 +171,13 @@ new process started and retries once.
 Cursor and Grok accounts can be combined into one plan (The X Subscription).
 `GetSandUsageStatus.isUnified` tells the two account shapes apart.
 
-- Unified account (`isUnified == true`): one **Weekly usage** bar from
+- Unified account (`isUnified == true`): one **Weekly Usage** bar from
   `usagePercent`, reset at `nextResetTimestampUtc`, with `cursorPlanName` as
   the plan badge. This bar is the Cursor value in the menu bar. **Cursor
   Models**, **Other Models** and a separate **Grok Bot** bar are not shown.
   When `GetCurrentPeriodUsage.spendLimitUsage.individualLimit` is above zero,
-  an **Additional usage** row shows `individualUsed / individualLimit` in
-  dollars, reset at the end of the billing cycle. A pooled Enterprise
+  an **Additional Usage** row shows `individualUsed / individualLimit` in
+  dollars ("$12.00 / $50.00 spent"), reset at the end of the billing cycle. A pooled Enterprise
   allowance or a missing percentage shows no weekly bar.
 - Pending account merge (`unifyPendingMerge` present on an account that is not
   unified): the section says "Account merge in progress" instead of a 0 % bar.
@@ -255,7 +262,8 @@ Go limits are per model and change over time.
   rolling window, monthly pool or org limit keeps its section (per D8) and says
   that Command Code returned no limits.
 - `whoami?limits=1` runs on every refresh, and each `orgLimits` entry becomes a
-  spend-limit row (`$spent of $limit` with its interval). The 5-hour and weekly
+  spend-limit row ("$5.50 / $20.00 spent this month", the period taken from its
+  interval). The 5-hour and weekly
   windows are hidden when `windowLimits.limited` is false; the monthly pool
   still shows.
 

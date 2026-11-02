@@ -305,6 +305,9 @@ enum CommandCodeLimits {
             nextName = weeklyDisplayName
         case .monthly:
             nextName = monthlyDisplayName
+        case .spendLimit where bucket.name.hasSuffix(" spend limit"):
+            nextName = String(bucket.name.dropLast(" spend limit".count))
+                .replacingOccurrences(of: "Org-wide", with: "Org-Wide") + " Spend Limit"
         default:
             return bucket
         }
@@ -389,7 +392,7 @@ enum CommandCodeLimits {
         if limit.scope == "model" {
             name = limit.modelLabel ?? limit.model ?? "Model"
         } else {
-            name = "Org-wide"
+            name = "Org-Wide"
         }
         let reached = limit.exceeded == true || limit.limit <= 0
         let usedPercent = limit.limit <= 0 ? 100 : clampPercent(min(100, max(0, limit.spent) / limit.limit * 100))
@@ -398,26 +401,22 @@ enum CommandCodeLimits {
             provider: .commandcode,
             kind: .spendLimit,
             scope: "spend-limit-\(index)-\(limit.scope ?? "org")-\(limit.model ?? "")",
-            name: "\(name) spend limit",
+            name: "\(name) Spend Limit",
             usedPercent: reached ? 100 : usedPercent,
             resetAt: resetAt,
             resetAfterSeconds: secondsUntil(resetAt, from: now),
             limitWindowSeconds: nil,
             reached: reached,
-            detail: "\(credits(limit.spent)) of \(credits(limit.limit))\(intervalSuffix(limit.resetInterval))"
+            detail: MoneyText.spent(limit.spent, of: limit.limit, period: period(limit.resetInterval))
         )
     }
 
-    private static func credits(_ value: Double) -> String {
-        String(format: "$%.2f", value)
-    }
-
-    private static func intervalSuffix(_ interval: String?) -> String {
+    private static func period(_ interval: String?) -> String? {
         switch interval?.lowercased() {
-        case "daily", "day": return "/day"
-        case "weekly", "week": return "/week"
-        case "monthly", "month": return "/mo"
-        default: return ""
+        case "daily", "day": return "today"
+        case "weekly", "week": return "this week"
+        case "monthly", "month": return "this month"
+        default: return nil
         }
     }
 

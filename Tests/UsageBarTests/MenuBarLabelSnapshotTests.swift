@@ -56,11 +56,11 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
             lastUpdated: Date(),
             claudeBuckets: [
                 LimitBucket(
-                    provider: .claude, kind: .weeklyAll, name: "Current week (all models)", usedPercent: 75,
+                    provider: .claude, kind: .weeklyAll, name: "Current Week (All Models)", usedPercent: 75,
                     resetAt: nil, resetAfterSeconds: nil, limitWindowSeconds: 604_800, reached: false, isActive: true
                 ),
                 LimitBucket(
-                    provider: .claude, kind: .weeklyScoped, name: "Current week (Fable)", usedPercent: 0,
+                    provider: .claude, kind: .weeklyScoped, name: "Current Week (Fable)", usedPercent: 0,
                     resetAt: nil, resetAfterSeconds: nil, limitWindowSeconds: 604_800, reached: false
                 ),
             ],
@@ -236,7 +236,7 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         LimitBucket(
             provider: .claude,
             kind: .session,
-            name: "Current session",
+            name: "Current Session",
             usedPercent: 0,
             resetAt: nil,
             resetAfterSeconds: nil,

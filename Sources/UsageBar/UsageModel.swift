@@ -936,7 +936,7 @@ final class UsageModel: ObservableObject {
         if !isRecent(provider, at: date) {
             return "Saved data from \(ClockText.from(lastSuccess, relativeTo: date))"
         }
-        return "Updated \(ClockText.at(lastSuccess, relativeTo: date))"
+        return nil
     }
 
     func hasFreshData(for provider: LimitBucket.Provider, at date: Date) -> Bool {

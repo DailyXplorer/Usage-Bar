@@ -154,16 +154,16 @@ final class CursorLimitsTests: XCTestCase {
         XCTAssertNil(result.notice)
 
         let weekly = result.buckets[0]
-        XCTAssertEqual(weekly.name, "Weekly usage")
+        XCTAssertEqual(weekly.name, "Weekly Usage")
         XCTAssertEqual(weekly.usedPercent, 38)
         XCTAssertEqual(weekly.resetAt, ISODate.parse("2026-11-04T09:00:00Z"))
         XCTAssertEqual(weekly.limitWindowSeconds, CursorLimits.weekSeconds)
         XCTAssertEqual(weekly.resetAfterSeconds, 5 * 24 * 60 * 60)
 
         let additional = result.buckets[1]
-        XCTAssertEqual(additional.name, "Additional usage")
+        XCTAssertEqual(additional.name, "Additional Usage")
         XCTAssertEqual(additional.usedPercent, 24)
-        XCTAssertEqual(additional.detail, "$12.00 / $50.00")
+        XCTAssertEqual(additional.detail, "$12.00 / $50.00 spent")
         XCTAssertEqual(additional.resetAt, Date(timeIntervalSince1970: 1_793_520_000))
     }
 

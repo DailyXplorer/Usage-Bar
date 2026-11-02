@@ -298,8 +298,9 @@ final class UsageModelRefreshTests: XCTestCase {
             automaticallySchedules: false
         )
 
-        XCTAssertTrue(
-            model.freshnessMessage(for: .codex, at: completedAt)?.hasPrefix("Updated at") == true
+        XCTAssertNil(model.freshnessMessage(for: .codex, at: completedAt))
+        XCTAssertNil(
+            model.freshnessMessage(for: .codex, at: completedAt.addingTimeInterval(UsageEndpoint.codex.policy.staleAfter))
         )
         XCTAssertTrue(
             model.freshnessMessage(
