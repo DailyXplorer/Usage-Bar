@@ -37,6 +37,42 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertTrue(fixture.panel.isKeyWindow)
     }
 
+    func testCommandQClosesThePanelInsteadOfQuitting() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanUp() }
+
+        fixture.panel.orderFrontRegardless()
+        fixture.panel.makeKey()
+        XCTAssertTrue(waitUntil { fixture.panel.isKeyWindow })
+
+        let quit = try XCTUnwrap(keyEvent("q", modifiers: .command, window: fixture.panel))
+        XCTAssertTrue(fixture.panel.performKeyEquivalent(with: quit))
+        XCTAssertTrue(waitUntil { !fixture.panel.isVisible })
+    }
+
+    func testOnlyCommandQIsTreatedAsQuit() throws {
+        XCTAssertTrue(MenuBarPanel.isQuitShortcut(try XCTUnwrap(keyEvent("q", modifiers: .command))))
+        XCTAssertTrue(MenuBarPanel.isQuitShortcut(try XCTUnwrap(keyEvent("Q", modifiers: [.command, .capsLock]))))
+        XCTAssertFalse(MenuBarPanel.isQuitShortcut(try XCTUnwrap(keyEvent("q", modifiers: []))))
+        XCTAssertFalse(MenuBarPanel.isQuitShortcut(try XCTUnwrap(keyEvent("q", modifiers: [.command, .option]))))
+        XCTAssertFalse(MenuBarPanel.isQuitShortcut(try XCTUnwrap(keyEvent("w", modifiers: .command))))
+    }
+
+    private func keyEvent(_ characters: String, modifiers: NSEvent.ModifierFlags, window: NSWindow? = nil) -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: window?.windowNumber ?? 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: 12
+        )
+    }
+
     private func makeFixture() throws -> Fixture {
         AppTheme.loadFont()
         let application = NSApplication.shared

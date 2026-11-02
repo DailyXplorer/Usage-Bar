@@ -3,7 +3,12 @@ import SwiftUI
 
 @MainActor
 final class UsageModel: ObservableObject {
-    @Published private(set) var buckets: [LimitBucket] = []
+    static let claudeQuotaCheckKey = "claudeQuotaCheck"
+    static let wakeGrace: TimeInterval = 60
+
+    @Published private(set) var buckets: [LimitBucket] = [] {
+        didSet { scheduleResetRedraw() }
+    }
     @Published private(set) var planType: String?
     @Published private(set) var reached: Bool = false
     @Published private(set) var resetCredits: Int = 0
@@ -13,30 +18,61 @@ final class UsageModel: ObservableObject {
     @Published var menuPresented = false
 
     @Published private(set) var claudeBuckets: [LimitBucket] = [] {
-        didSet { scheduleClaudeSessionRedraw() }
+        didSet { scheduleResetRedraw() }
     }
     @Published private(set) var claudePlan: String?
     @Published private(set) var claudeErrorMessage: String?
     @Published private(set) var claudeAvailable = false
+    @Published var claudeQuotaCheckEnabled: Bool {
+        didSet {
+            defaults.set(claudeQuotaCheckEnabled, forKey: Self.claudeQuotaCheckKey)
+            if claudeQuotaCheckEnabled, started {
+                refreshNow()
+            }
+        }
+    }
 
-    @Published private(set) var cursorBuckets: [LimitBucket] = []
+    @Published private(set) var cursorBuckets: [LimitBucket] = [] {
+        didSet { scheduleResetRedraw() }
+    }
     @Published private(set) var cursorPlan: String?
     @Published private(set) var cursorErrorMessage: String?
     @Published private(set) var cursorAvailable = false
 
-    @Published private(set) var opencodeBuckets: [LimitBucket] = []
+    @Published private(set) var opencodeBuckets: [LimitBucket] = [] {
+        didSet { scheduleResetRedraw() }
+    }
     @Published private(set) var opencodePlan: String?
     @Published private(set) var opencodeErrorMessage: String?
     @Published private(set) var opencodeAvailable = false
 
-    @Published private(set) var commandcodeBuckets: [LimitBucket] = []
+    @Published private(set) var commandcodeBuckets: [LimitBucket] = [] {
+        didSet { scheduleResetRedraw() }
+    }
     @Published private(set) var commandcodePlan: String?
     @Published private(set) var commandcodeErrorMessage: String?
     @Published private(set) var commandcodeAvailable = false
 
-    @Published private(set) var menuBarProviders: Set<LimitBucket.Provider>
+    @Published private(set) var providers: ProviderPreferences
 
     @Published private(set) var refreshStates: [UsageEndpoint: UsageRefreshState] = [:]
+
+    var menuBarProviders: Set<LimitBucket.Provider> {
+        providers.menuBar
+    }
+
+    var popoverProviders: Set<LimitBucket.Provider> {
+        providers.popover
+    }
+
+    private struct Request {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
+    private enum RefreshTrigger {
+        case scheduled, opened, manual
+    }
 
     private let fetcher: UsageFetcher
     private let now: () -> Date
@@ -45,16 +81,20 @@ final class UsageModel: ObservableObject {
     private let automaticallySchedules: Bool
     private let defaults: UserDefaults
     private var refreshTask: Task<Void, Never>?
-    private var claudeSessionRedraw: Task<Void, Never>?
-    private var requests: [UsageEndpoint: Task<Void, Never>] = [:]
+    private var resetRedraw: Task<Void, Never>?
+    private var requests: [UsageEndpoint: Request] = [:]
     private var started = false
     private var sleeping = false
+    private var networkAvailable = true
+    private var wokeAt: Date?
+    private var claudeAccountKey: String?
 
     init(
         defaults: UserDefaults = .standard,
         fetcher: UsageFetcher = .live,
         now: @escaping () -> Date = Date.init,
         automaticallySchedules: Bool = true,
+        detectedProviders: @escaping () -> Set<LimitBucket.Provider> = ProviderCredentialDetector.detected,
         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { delay in
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -64,7 +104,8 @@ final class UsageModel: ObservableObject {
         self.now = now
         self.sleep = sleep
         self.automaticallySchedules = automaticallySchedules
-        menuBarProviders = MenuBarPreferences.load(from: defaults)
+        providers = ProviderPreferences.load(from: defaults, detected: detectedProviders)
+        claudeQuotaCheckEnabled = defaults.bool(forKey: Self.claudeQuotaCheckKey)
         restoreSnapshot()
     }
 
@@ -88,6 +129,7 @@ final class UsageModel: ObservableObject {
         refreshStates = Dictionary(uniqueKeysWithValues: snapshot.refreshStates.compactMap { key, value in
             UsageEndpoint(rawValue: key).map { ($0, value) }
         })
+        claudeAccountKey = refreshStates[.claude]?.backoff.scope
         updateLastUpdated()
         errorMessage = refreshStates[.codex]?.lastError
         claudeErrorMessage = refreshStates[.claude]?.lastError
@@ -120,30 +162,51 @@ final class UsageModel: ObservableObject {
     }
 
     var canHideMenuBarProvider: Bool {
-        menuBarProviders.count > 1
+        providers.menuBar.count > 1
     }
 
     func isVisibleInMenuBar(_ provider: LimitBucket.Provider) -> Bool {
-        menuBarProviders.contains(provider)
+        providers.menuBar.contains(provider)
+    }
+
+    func isVisibleInPopover(_ provider: LimitBucket.Provider) -> Bool {
+        providers.popover.contains(provider)
+    }
+
+    func canHideFromMenuBar(_ provider: LimitBucket.Provider) -> Bool {
+        !isVisibleInMenuBar(provider) || canHideMenuBarProvider
+    }
+
+    func canHideFromPopover(_ provider: LimitBucket.Provider) -> Bool {
+        guard isVisibleInPopover(provider) else { return true }
+        return providers.popover.count > 1 && canHideFromMenuBar(provider)
     }
 
     func setVisibleInMenuBar(_ provider: LimitBucket.Provider, visible: Bool) {
-        var next = menuBarProviders
-        if visible {
-            next.insert(provider)
-        } else {
-            next.remove(provider)
-            if next.isEmpty { return }
-        }
-        let changed = next != menuBarProviders
-        menuBarProviders = next
-        MenuBarPreferences.save(next, to: defaults)
-        guard changed else { return }
+        guard visible || canHideFromMenuBar(provider) else { return }
+        var next = providers
+        next.setMenuBar(provider, visible: visible)
+        apply(next)
+    }
+
+    func setVisibleInPopover(_ provider: LimitBucket.Provider, visible: Bool) {
+        guard visible || canHideFromPopover(provider) else { return }
+        var next = providers
+        next.setPopover(provider, visible: visible)
+        apply(next)
+    }
+
+    private func apply(_ next: ProviderPreferences) {
+        guard next != providers else { return }
+        let added = next.popover.subtracting(providers.popover)
+        providers = next
+        next.save(to: defaults)
         updateLastUpdated()
-        if visible, started {
-            refresh(endpoints: UsageEndpoint.allCases.filter { $0.provider == provider }, force: true)
+        if started, !added.isEmpty {
+            refresh(endpoints: UsageEndpoint.allCases.filter { added.contains($0.provider) }, trigger: .manual)
         }
         scheduleNextRefresh()
+        scheduleResetRedraw()
     }
 
 #if DEBUG
@@ -160,11 +223,13 @@ final class UsageModel: ObservableObject {
         commandcodeBuckets: [LimitBucket] = [],
         commandcodePlan: String? = nil,
         menuBarProviders: Set<LimitBucket.Provider> = [.codex, .claude],
+        popoverProviders: Set<LimitBucket.Provider>? = nil,
         defaults: UserDefaults = .standard,
         errorMessage: String? = nil,
         cursorAvailable: Bool? = nil,
         opencodeAvailable: Bool? = nil,
         commandcodeAvailable: Bool? = nil,
+        claudePausedUntil: Date? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.defaults = defaults
@@ -174,6 +239,7 @@ final class UsageModel: ObservableObject {
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
         automaticallySchedules = true
+        claudeQuotaCheckEnabled = false
         buckets = previewBuckets
         self.planType = planType
         self.lastUpdated = lastUpdated
@@ -189,36 +255,74 @@ final class UsageModel: ObservableObject {
         self.commandcodeBuckets = commandcodeBuckets
         self.commandcodePlan = commandcodePlan
         self.commandcodeAvailable = commandcodeAvailable ?? !commandcodeBuckets.isEmpty
-        self.menuBarProviders = menuBarProviders
+        providers = ProviderPreferences(
+            popover: (popoverProviders ?? menuBarProviders).union(menuBarProviders),
+            menuBar: menuBarProviders
+        )
         self.errorMessage = errorMessage
-        for endpoint in UsageEndpoint.allCases {
+        for endpoint in UsageEndpoint.allCases where endpoint != .claudeWhilePaused {
             var state = UsageRefreshState()
-            state.succeed(at: lastUpdated)
+            state.succeed(at: lastUpdated, interval: endpoint.policy.interval)
             refreshStates[endpoint] = state
+        }
+        if let claudePausedUntil {
+            var state = refreshStates[.claude] ?? UsageRefreshState()
+            let pausedAt = now()
+            state.throttle(
+                ClaudeUsageError.throttled(retryAfter: nil).localizedDescription,
+                retryAfter: claudePausedUntil,
+                at: pausedAt,
+                interval: UsageEndpoint.claude.policy.interval
+            )
+            refreshStates[.claude] = state
         }
     }
 #endif
 
-    var claudeSession: LimitBucket? {
-        claudeBuckets.first { $0.kind == .session && !$0.hasReset(at: now()) }
+    private func displayed(_ provider: LimitBucket.Provider) -> [LimitBucket] {
+        let date = now()
+        let fetchedAt = dataDate(for: provider)
+        return buckets(for: provider).filter(\.drivesMenuBar).map { $0.resetApplied(at: date, since: fetchedAt) }
+    }
+
+    var claudeMenuBarBucket: LimitBucket? {
+        let candidates = displayed(.claude)
+        return candidates.first(where: \.isActive)
+            ?? candidates.first { $0.kind == .session }
+            ?? candidates.first { $0.kind == .weeklyAll }
+            ?? candidates.filter { $0.kind == .weeklyScoped }.max { $0.usedPercent < $1.usedPercent }
+            ?? candidates.first
     }
 
     var menuBarClaudeText: String? {
-        guard let bucket = claudeSession else { return nil }
-        return "\(bucket.remainingPercent)%"
+        claudeMenuBarBucket.map { "\($0.remainingPercent)%" }
     }
 
     var menuBarClaudeDisplay: String {
-        menuBarClaudeText ?? MenuBarSegment.placeholder
+        menuBarClaudeText ?? placeholder(for: .claude)
     }
 
     var menuBarClaudeAccessibilityText: String? {
-        guard let bucket = claudeSession else { return nil }
-        return "Claude Code current session, \(bucket.remainingPercent) percent left"
+        guard let bucket = claudeMenuBarBucket else { return nil }
+        return "Claude \(Self.windowPhrase(for: bucket)), \(bucket.remainingPercent) percent left"
+    }
+
+    private static func windowPhrase(for bucket: LimitBucket) -> String {
+        switch bucket.kind {
+        case .session:
+            return "session limit"
+        case .weeklyAll:
+            return "weekly limit"
+        case .weeklyScoped:
+            let model = ClaudeLimits.scopedModel(fromStoredName: bucket.name)
+            return model.map { "weekly \($0) limit" } ?? "weekly model limit"
+        default:
+            return "\(bucket.name) limit"
+        }
     }
 
     var cursorModels: LimitBucket? {
-        cursorBuckets.first { $0.kind == .cursorModels }
+        displayed(.cursor).first { $0.kind == .cursorModels }
     }
 
     var menuBarCursorText: String? {
@@ -227,7 +331,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarCursorDisplay: String {
-        menuBarCursorText ?? MenuBarSegment.placeholder
+        menuBarCursorText ?? placeholder(for: .cursor)
     }
 
     var menuBarCursorAccessibilityText: String? {
@@ -236,7 +340,7 @@ final class UsageModel: ObservableObject {
     }
 
     var opencodeRolling: LimitBucket? {
-        opencodeBuckets.first { $0.kind == .rolling }
+        displayed(.opencode).first { $0.kind == .rolling }
     }
 
     var menuBarOpenCodeText: String? {
@@ -245,7 +349,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarOpenCodeDisplay: String {
-        menuBarOpenCodeText ?? MenuBarSegment.placeholder
+        menuBarOpenCodeText ?? placeholder(for: .opencode)
     }
 
     var menuBarOpenCodeAccessibilityText: String? {
@@ -258,7 +362,7 @@ final class UsageModel: ObservableObject {
     }
 
     var commandcodeRolling: LimitBucket? {
-        commandcodeBuckets.first { $0.kind == .rolling }
+        displayed(.commandcode).first { $0.kind == .rolling }
     }
 
     var menuBarCommandCodeText: String? {
@@ -267,7 +371,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarCommandCodeDisplay: String {
-        menuBarCommandCodeText ?? MenuBarSegment.placeholder
+        menuBarCommandCodeText ?? placeholder(for: .commandcode)
     }
 
     var menuBarCommandCodeAccessibilityText: String? {
@@ -279,9 +383,16 @@ final class UsageModel: ObservableObject {
         isVisibleInMenuBar(.commandcode) && (commandcodeAvailable || commandcodeErrorMessage != nil)
     }
 
+    private func placeholder(for provider: LimitBucket.Provider) -> String {
+        guard !isLoading(for: provider), buckets(for: provider).isEmpty, errorMessage(for: provider) != nil else {
+            return MenuBarSegment.placeholder
+        }
+        return MenuBarSegment.unavailable
+    }
+
     var menuBarSegments: [MenuBarSegment] {
         LimitBucket.Provider.allCases.compactMap { provider in
-            guard menuBarProviders.contains(provider) else { return nil }
+            guard providers.menuBar.contains(provider) else { return nil }
             switch provider {
             case .codex:
                 return MenuBarSegment(
@@ -321,17 +432,17 @@ final class UsageModel: ObservableObject {
 
     var menuBarAccessibilityLabel: String {
         var parts: [String] = []
-        if menuBarProviders.contains(.codex) {
+        if providers.menuBar.contains(.codex) {
             parts.append("Codex limits, \(menuBarAccessibilityText)")
         }
-        if menuBarProviders.contains(.claude), let claude = menuBarClaudeAccessibilityText {
+        if providers.menuBar.contains(.claude), let claude = menuBarClaudeAccessibilityText {
             parts.append(claude)
-        } else if menuBarProviders.contains(.claude) {
-            parts.append("Claude Code unavailable")
+        } else if providers.menuBar.contains(.claude) {
+            parts.append("Claude unavailable")
         }
-        if menuBarProviders.contains(.cursor), let cursor = menuBarCursorAccessibilityText {
+        if providers.menuBar.contains(.cursor), let cursor = menuBarCursorAccessibilityText {
             parts.append(cursor)
-        } else if menuBarProviders.contains(.cursor) {
+        } else if providers.menuBar.contains(.cursor) {
             parts.append("Cursor unavailable")
         }
         if showsOpenCode, let opencode = menuBarOpenCodeAccessibilityText {
@@ -348,13 +459,7 @@ final class UsageModel: ObservableObject {
     }
 
     var menuBarText: String {
-        if isLoading(for: .codex) && buckets.isEmpty {
-            return MenuBarSegment.placeholder
-        }
-        if errorMessage != nil && buckets.isEmpty {
-            return "!%"
-        }
-        guard let bucket = codexMenuBarBucket else { return MenuBarSegment.placeholder }
+        guard let bucket = codexMenuBarBucket else { return placeholder(for: .codex) }
         return "\(bucket.remainingPercent)%"
     }
 
@@ -367,14 +472,10 @@ final class UsageModel: ObservableObject {
         return "\(bucket.remainingPercent) percent left"
     }
 
-    var menuBarColor: Color {
-        guard let bucket = codexMenuBarBucket else { return .primary }
-        return Self.color(forPercentUsed: bucket.usedPercent)
-    }
-
     private var codexMenuBarBucket: LimitBucket? {
-        buckets.first { $0.kind == .primary }
-            ?? buckets.first { $0.kind == .secondary }
+        displayed(.codex)
+            .filter { $0.kind == .primary || $0.kind == .secondary }
+            .min { $0.remainingPercent < $1.remainingPercent }
     }
 
     static func color(forPercentUsed used: Int) -> Color {
@@ -387,10 +488,6 @@ final class UsageModel: ObservableObject {
         return .green
     }
 
-    var primaryLimitReached: Bool {
-        codexMenuBarBucket?.reached ?? false
-    }
-
     func start() {
         guard !started else { return }
         started = true
@@ -401,7 +498,7 @@ final class UsageModel: ObservableObject {
         started = false
         refreshTask?.cancel()
         refreshTask = nil
-        for request in requests.values { request.cancel() }
+        cancelRequests()
     }
 
     func setSleeping(_ sleeping: Bool) {
@@ -409,50 +506,131 @@ final class UsageModel: ObservableObject {
         if sleeping {
             refreshTask?.cancel()
             refreshTask = nil
-        } else if started {
-            refreshNow()
+            cancelRequests()
+        } else {
+            wokeAt = now()
+            if started {
+                refreshNow()
+            }
         }
     }
 
-    func refreshNow(force: Bool = false) {
-        refresh(endpoints: UsageEndpoint.allCases, force: force)
+    func setNetworkAvailable(_ available: Bool) {
+        let regained = available && !networkAvailable
+        networkAvailable = available
+        guard started else { return }
+        if regained {
+            wokeAt = now()
+            refreshNow()
+        } else if !available {
+            scheduleNextRefresh()
+        }
     }
 
-    private func refresh(endpoints: [UsageEndpoint], force: Bool) {
-        guard !sleeping else { return }
+    private func cancelRequests() {
+        for request in requests.values { request.task.cancel() }
+        requests.removeAll()
+        isLoading = false
+    }
+
+    func refreshNow(force: Bool = false) {
+        refresh(endpoints: UsageEndpoint.allCases, trigger: force ? .manual : .scheduled)
+    }
+
+    func refreshForOpenedPanel() {
+        if sleeping {
+            sleeping = false
+            wokeAt = now()
+        }
+        refresh(endpoints: UsageEndpoint.allCases, trigger: .opened)
+    }
+
+    private func isEnabled(_ endpoint: UsageEndpoint, at date: Date) -> Bool {
+        guard providers.popover.contains(endpoint.provider) else { return false }
+        if endpoint == .claudeWhilePaused {
+            return refreshStates[.claude]?.isPaused(at: date) == true
+        }
+        return true
+    }
+
+    private func refresh(endpoints: [UsageEndpoint], trigger: RefreshTrigger) {
+        guard !sleeping, networkAvailable else { return }
         let date = now()
-        for endpoint in endpoints {
-            guard menuBarProviders.contains(endpoint.provider), requests[endpoint] == nil,
-                  (refreshStates[endpoint] ?? UsageRefreshState()).canStart(at: date, force: force) else {
-                continue
+        for endpoint in endpoints where isEnabled(endpoint, at: date) && requests[endpoint] == nil {
+            let state = refreshStates[endpoint] ?? UsageRefreshState()
+            let policy = endpoint.policy
+            let allowed: Bool
+            switch trigger {
+            case .scheduled:
+                allowed = state.canStart(at: date, force: false, policy: policy)
+            case .manual:
+                allowed = state.canStart(at: date, force: true, policy: policy)
+            case .opened:
+                allowed = state.canStartOnOpen(at: date, policy: policy)
             }
-            let fetch = fetcher.fetch
-            requests[endpoint] = Task { [weak self] in
-                let result: Result<UsageFetchResult, Error>
-                do {
-                    result = .success(try await fetch(endpoint))
-                } catch {
-                    result = .failure(error)
-                }
-                guard let self else { return }
-                self.requests[endpoint] = nil
-                if !Task.isCancelled {
-                    self.receive(result, from: endpoint)
-                }
-                self.isLoading = !self.requests.isEmpty
-                self.scheduleNextRefresh()
-            }
+            guard allowed else { continue }
+            start(endpoint, at: date)
         }
         isLoading = !requests.isEmpty
         scheduleNextRefresh()
     }
 
-    private func scheduleClaudeSessionRedraw() {
-        claudeSessionRedraw?.cancel()
-        guard let resetAt = claudeSession?.resetAt else { return }
+    private func start(_ endpoint: UsageEndpoint, at date: Date) {
+        var state = refreshStates[endpoint] ?? UsageRefreshState()
+        state.begin(at: date)
+        refreshStates[endpoint] = state
+        let context = UsageFetchContext(
+            dataDate: dataDate(for: endpoint.provider),
+            claudeQuotaCheck: claudeQuotaCheckEnabled,
+            claudeScopedModelName: claudeScopedModelName
+        )
+        let fetch = fetcher.fetch
+        let id = UUID()
+        let task = Task { [weak self] in
+            let result: Result<UsageFetchResult, Error>
+            do {
+                result = .success(try await fetch(endpoint, context))
+            } catch {
+                result = .failure(error)
+            }
+            guard let self, self.requests[endpoint]?.id == id else { return }
+            self.requests[endpoint] = nil
+            if !Task.isCancelled {
+                self.receive(result, from: endpoint)
+            }
+            self.isLoading = !self.requests.isEmpty
+            self.scheduleNextRefresh()
+        }
+        requests[endpoint] = Request(id: id, task: task)
+    }
+
+    private var claudeScopedModelName: String? {
+        let scoped = claudeBuckets.filter { $0.kind == .weeklyScoped }
+        guard scoped.count == 1 else { return nil }
+        return ClaudeLimits.scopedModel(fromStoredName: scoped[0].name)
+    }
+
+    func dataDate(for provider: LimitBucket.Provider) -> Date? {
+        UsageEndpoint.allCases
+            .filter { $0.provider == provider }
+            .compactMap { refreshStates[$0]?.lastSuccess }
+            .max()
+    }
+
+    private func scheduleResetRedraw() {
+        resetRedraw?.cancel()
+        resetRedraw = nil
+        let date = now()
+        let resetAt = LimitBucket.Provider.allCases
+            .filter { providers.popover.contains($0) }
+            .flatMap { buckets(for: $0) }
+            .compactMap(\.resetAt)
+            .filter { $0 > date }
+            .min()
+        guard let resetAt else { return }
         let now = now
         let sleep = sleep
-        claudeSessionRedraw = Task { [weak self] in
+        resetRedraw = Task { [weak self] in
             var remaining = resetAt.timeIntervalSince(now())
             while remaining > 0 {
                 do {
@@ -463,20 +641,23 @@ final class UsageModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 remaining = resetAt.timeIntervalSince(now())
             }
-            self?.objectWillChange.send()
+            guard let self else { return }
+            self.objectWillChange.send()
+            self.scheduleResetRedraw()
         }
     }
 
     private func scheduleNextRefresh() {
         refreshTask?.cancel()
         refreshTask = nil
-        guard started, automaticallySchedules, !sleeping else { return }
+        guard started, automaticallySchedules, !sleeping, networkAvailable else { return }
+        let date = now()
         let deadline = UsageEndpoint.allCases
-            .filter { menuBarProviders.contains($0.provider) && requests[$0] == nil }
-            .map { (refreshStates[$0] ?? UsageRefreshState()).nextEligible }
+            .filter { requests[$0] == nil && isEnabled($0, at: date) }
+            .map { (refreshStates[$0] ?? UsageRefreshState()).nextEligible(policy: $0.policy) }
             .min()
-        guard let deadline else { return }
-        let delay = max(0.01, min(3600, deadline.timeIntervalSince(now())))
+        guard let next = deadline else { return }
+        let delay = max(0.01, min(3600, next.timeIntervalSince(date)))
         let sleep = sleep
         refreshTask = Task { [weak self] in
             do {
@@ -491,6 +672,7 @@ final class UsageModel: ObservableObject {
 
     private func receive(_ result: Result<UsageFetchResult, Error>, from endpoint: UsageEndpoint) {
         let date = now()
+        let interval = endpoint.policy.interval
         var state = refreshStates[endpoint] ?? UsageRefreshState()
         switch result {
         case .success(let usage):
@@ -498,51 +680,142 @@ final class UsageModel: ObservableObject {
             case .codex(let response):
                 apply(response)
                 errorMessage = nil
-                state.succeed(at: date)
-            case .claude(let response, let credentials):
-                applyClaude(response, credentials: credentials)
-                claudeErrorMessage = nil
-                state.succeed(at: date)
+                state.succeed(at: date, interval: interval)
+            case .claude(let fetch):
+                receiveClaude(fetch, from: endpoint, state: &state, at: date)
             case .cursor(let response, let credentials):
                 applyCursor(response, grokBot: .unavailable, credentials: credentials)
                 cursorErrorMessage = nil
-                state.succeed(at: date)
+                state.succeed(at: date, interval: interval)
             case .cursorGrokBot(let response, let credentials):
                 applyCursorGrokBot(response, credentials: credentials)
                 switch response {
                 case .refreshed:
-                    state.succeed(at: date)
+                    state.succeed(at: date, interval: interval)
                 case .unavailable:
-                    state.fail("Grok Bot usage is temporarily unavailable.", at: date)
+                    state.fail("Grok Bot usage is temporarily unavailable.", at: date, retryAfter: interval)
                 case .throttled(let retryAfter):
-                    state.throttle("Grok Bot usage is temporarily rate limited.", retryAfter: retryAfter, at: date)
+                    state.throttle(
+                        "Grok Bot usage is temporarily rate limited.",
+                        retryAfter: retryAfter,
+                        at: date,
+                        interval: interval
+                    )
                 }
             case .opencode(let response):
                 applyOpenCode(response)
                 opencodeErrorMessage = nil
-                state.succeed(at: date)
+                state.succeed(at: date, interval: interval)
             case .commandcode(let response):
                 applyCommandCode(response)
                 commandcodeErrorMessage = nil
-                state.succeed(at: date)
+                state.succeed(at: date, interval: interval)
             }
         case .failure(let error):
-            state.fail(error.localizedDescription, at: date)
-            switch error {
-            case UsageError.throttled(let retryAfter),
-                 ClaudeUsageError.throttled(let retryAfter),
-                 CursorUsageError.throttled(let retryAfter),
-                 OpenCodeUsageError.throttled(let retryAfter),
-                 CommandCodeUsageError.throttled(let retryAfter):
-                state.throttle(error.localizedDescription, retryAfter: retryAfter, at: date)
-            default:
-                break
-            }
-            applyError(error, to: endpoint)
+            receiveFailure(error, from: endpoint, state: &state, at: date)
         }
         refreshStates[endpoint] = state
         updateLastUpdated()
         persistSnapshot()
+    }
+
+    private func receiveClaude(
+        _ fetch: ClaudeFetch,
+        from endpoint: UsageEndpoint,
+        state: inout UsageRefreshState,
+        at date: Date
+    ) {
+        let interval = endpoint.policy.interval
+        if let key = fetch.accountKey {
+            if endpoint == .claudeWhilePaused,
+               let pausedFor = refreshStates[.claude]?.backoff.scope, pausedFor != key {
+                var claude = refreshStates[.claude] ?? UsageRefreshState()
+                claude.backoff.reset()
+                claude.nextRefresh = date
+                refreshStates[.claude] = claude
+            }
+            if let previous = claudeAccountKey, previous != key {
+                claudePlan = nil
+            }
+            claudeAccountKey = key
+        }
+        if endpoint == .claude {
+            claudeErrorMessage = nil
+        }
+        guard let usage = fetch.usage else {
+            state.idle(at: date, interval: interval)
+            return
+        }
+        let fresh = ClaudeLimits.buckets(from: usage, now: date)
+        claudeAvailable = true
+        claudePlan = fetch.plan ?? claudePlan
+        claudeBuckets = fetch.source == .quotaCheck
+            ? ClaudeLimits.merged(
+                fresh: fresh,
+                previous: claudeBuckets,
+                now: date,
+                previousFetchedAt: dataDate(for: .claude)
+            )
+            : fresh
+        state.succeed(
+            at: date,
+            dataDate: fetch.dataDate,
+            interval: interval,
+            resetsBackoff: fetch.source == .usageEndpoint
+        )
+    }
+
+    private func receiveFailure(
+        _ error: Error,
+        from endpoint: UsageEndpoint,
+        state: inout UsageRefreshState,
+        at date: Date
+    ) {
+        let interval = endpoint.policy.interval
+        let message = error.localizedDescription
+        if let retryAfter = Self.throttleRetryAfter(error) {
+            let scope = endpoint == .claude ? claudeAccountKey : nil
+            state.throttle(message, retryAfter: retryAfter, at: date, interval: interval, scope: scope)
+            if endpoint == .claude {
+                claudeAvailable = true
+            } else {
+                applyError(error, to: endpoint)
+            }
+            return
+        }
+        if Self.isNetworkFailure(error) {
+            if let wokeAt, date.timeIntervalSince(wokeAt) < Self.wakeGrace {
+                state.fail(state.lastError, at: date, retryAfter: RefreshPolicy.wakeRetry)
+                return
+            }
+            state.fail(message, at: date, retryAfter: min(interval, RefreshPolicy.networkRetry))
+        } else {
+            state.fail(message, at: date, retryAfter: interval)
+        }
+        applyError(error, to: endpoint)
+    }
+
+    private static func throttleRetryAfter(_ error: Error) -> Date?? {
+        switch error {
+        case UsageError.throttled(let retryAfter),
+             ClaudeUsageError.throttled(let retryAfter),
+             CursorUsageError.throttled(let retryAfter),
+             OpenCodeUsageError.throttled(let retryAfter),
+             CommandCodeUsageError.throttled(let retryAfter):
+            return .some(retryAfter)
+        default:
+            return nil
+        }
+    }
+
+    private static func isNetworkFailure(_ error: Error) -> Bool {
+        switch error {
+        case UsageError.network, ClaudeUsageError.network, CursorUsageError.network,
+             OpenCodeUsageError.network, CommandCodeUsageError.network:
+            return true
+        default:
+            return error is URLError
+        }
     }
 
     private func applyError(_ error: Error, to endpoint: UsageEndpoint) {
@@ -560,13 +833,13 @@ final class UsageModel: ObservableObject {
                 reached = false
                 resetCredits = 0
             }
-        case .claude:
+        case .claude, .claudeWhilePaused:
             if case ClaudeUsageError.notSignedIn = error {
                 claudeAvailable = false
                 claudeBuckets = []
                 claudePlan = nil
                 claudeErrorMessage = nil
-            } else {
+            } else if endpoint == .claude {
                 claudeAvailable = true
                 claudeErrorMessage = error.localizedDescription
             }
@@ -608,25 +881,78 @@ final class UsageModel: ObservableObject {
     }
 
     private func updateLastUpdated() {
-        let endpoints = UsageEndpoint.allCases.filter {
-            menuBarProviders.contains($0.provider)
-                && ($0 != .cursorGrokBot || cursorBuckets.contains { $0.kind == .grokBot })
+        lastUpdated = LimitBucket.Provider.allCases
+            .filter { providers.popover.contains($0) }
+            .compactMap { dataDate(for: $0) }
+            .max()
+    }
+
+    func buckets(for provider: LimitBucket.Provider) -> [LimitBucket] {
+        switch provider {
+        case .codex: return buckets
+        case .claude: return claudeBuckets
+        case .cursor: return cursorBuckets
+        case .opencode: return opencodeBuckets
+        case .commandcode: return commandcodeBuckets
         }
-        let dates = endpoints.compactMap { refreshStates[$0]?.lastSuccess }
-        lastUpdated = dates.count == endpoints.count ? dates.min() : nil
+    }
+
+    func plan(for provider: LimitBucket.Provider) -> String? {
+        switch provider {
+        case .codex: return planType
+        case .claude: return claudePlan
+        case .cursor: return cursorPlan
+        case .opencode: return opencodePlan
+        case .commandcode: return commandcodePlan
+        }
+    }
+
+    private func errorMessage(for provider: LimitBucket.Provider) -> String? {
+        switch provider {
+        case .codex: return errorMessage
+        case .claude: return claudeErrorMessage
+        case .cursor: return cursorErrorMessage
+        case .opencode: return opencodeErrorMessage
+        case .commandcode: return commandcodeErrorMessage
+        }
+    }
+
+    func claudePausedUntil(at date: Date) -> Date? {
+        guard let state = refreshStates[.claude], state.isPaused(at: date) else { return nil }
+        return state.backoff.blockedUntil
     }
 
     func freshnessMessage(for provider: LimitBucket.Provider, at date: Date) -> String? {
-        guard let endpoint = UsageEndpoint(rawValue: provider.rawValue),
-              let state = refreshStates[endpoint], let lastSuccess = state.lastSuccess else {
+        if provider == .claude, claudePausedUntil(at: date) != nil {
+            return nil
+        }
+        guard let lastSuccess = dataDate(for: provider) else {
             return "Saved data — refresh pending"
         }
-        let sameDay = Calendar.current.isDate(lastSuccess, inSameDayAs: date)
-        let time = lastSuccess.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened)
-        if state.lastError != nil || date.timeIntervalSince(lastSuccess) > UsageRefreshState.interval + 1 {
+        let primary = UsageEndpoint(rawValue: provider.rawValue)
+        let staleAfter = primary?.policy.staleAfter ?? UsageEndpoint.codex.policy.staleAfter
+        let failed = primary.flatMap { refreshStates[$0]?.lastError } != nil
+        let time = Self.clockText(lastSuccess, relativeTo: date)
+        if failed || date.timeIntervalSince(lastSuccess) > staleAfter {
             return "Saved data from \(time)"
         }
         return "Updated at \(time)"
+    }
+
+    static func clockText(_ date: Date, relativeTo reference: Date) -> String {
+        let sameDay = Calendar.current.isDate(date, inSameDayAs: reference)
+        return date.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened)
+    }
+
+    func updatedText(at date: Date) -> String {
+        guard let lastUpdated else { return "Not updated yet" }
+        let seconds = max(0, date.timeIntervalSince(lastUpdated))
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "Updated just now" }
+        if minutes < 60 { return "Updated \(minutes) min ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "Updated \(hours) h ago" }
+        return "Updated \(lastUpdated.formatted(date: .abbreviated, time: .shortened))"
     }
 
     func grokBotMessage(at date: Date) -> String? {
@@ -634,24 +960,18 @@ final class UsageModel: ObservableObject {
         if let error = state.lastError { return error }
         guard cursorBuckets.contains(where: { $0.kind == .grokBot }),
               let success = state.lastSuccess,
-              date.timeIntervalSince(success) > UsageRefreshState.interval + 1 else { return nil }
+              date.timeIntervalSince(success) > UsageEndpoint.cursorGrokBot.policy.staleAfter else { return nil }
         return "Grok Bot data from \(success.formatted(date: .omitted, time: .shortened))"
     }
 
     private func apply(_ usage: UsageResponse) {
         planType = usage.planType
-        reached = usage.rateLimit?.limitReached ?? false
         resetCredits = usage.rateLimitResetCredits?.applicableAvailableCount
             ?? usage.rateLimitResetCredits?.availableCount
             ?? 0
 
         buckets = CodexLimits.buckets(from: usage, now: now())
-    }
-
-    private func applyClaude(_ usage: ClaudeUsageResponse, credentials: ClaudeCredentials) {
-        claudeAvailable = true
-        claudePlan = credentials.planToken
-        claudeBuckets = ClaudeLimits.buckets(from: usage, now: now())
+        reached = buckets.contains { $0.reached }
     }
 
     private func applyCursor(
@@ -715,9 +1035,14 @@ final class UsageModel: ObservableObject {
             if isLoading || !buckets.isEmpty { return nil }
             return "Codex returned no limits."
         case .claude:
+            let date = now()
+            if let pausedUntil = claudePausedUntil(at: date) {
+                return claudePausedMessage(until: pausedUntil, at: date)
+            }
             if let claudeErrorMessage { return claudeErrorMessage }
-            if claudeAvailable || isLoading { return nil }
-            return "No Claude Code session. Run `claude`, then `/login`."
+            if isLoading { return nil }
+            if !claudeAvailable { return ClaudeUsageError.notSignedIn.localizedDescription }
+            return claudeBuckets.isEmpty ? "Claude returned no limits." : nil
         case .cursor:
             if let cursorErrorMessage { return cursorErrorMessage }
             if isLoading { return nil }
@@ -745,19 +1070,32 @@ final class UsageModel: ObservableObject {
         }
     }
 
-    var visibleEmptyStateMessage: String {
-        let messages = LimitBucket.Provider.allCases
-            .filter(isVisibleInMenuBar)
-            .compactMap { sectionMessage(for: $0) }
-        return messages.first ?? "No usage limits were returned."
+    func popoverMessage(for provider: LimitBucket.Provider) -> String? {
+        if let message = sectionMessage(for: provider) { return message }
+        guard !isLoading(for: provider), buckets(for: provider).isEmpty else { return nil }
+        switch provider {
+        case .opencode where !opencodeAvailable:
+            return OpenCodeUsageError.notSignedIn.localizedDescription
+        case .commandcode where !commandcodeAvailable:
+            return CommandCodeUsageError.notSignedIn.localizedDescription
+        default:
+            return nil
+        }
     }
 
-    func formattedReset(_ bucket: LimitBucket) -> String {
-        guard let seconds = bucket.remainingResetSeconds(at: now()), let resetAt = bucket.resetAt else {
-            return ""
+    private func claudePausedMessage(until pausedUntil: Date, at date: Date) -> String {
+        let next = "Next try at \(Self.clockText(pausedUntil, relativeTo: date))."
+        guard !claudeBuckets.isEmpty, let dataDate = dataDate(for: .claude) else {
+            return "Anthropic paused usage updates. \(next)"
         }
-        let duration = "Resets in \(Self.durationString(seconds: seconds))"
-        return bucket.reached ? duration : duration + " · \(resetAt.formatted(date: .omitted, time: .shortened))"
+        return "Anthropic paused usage updates. Showing values from \(Self.clockText(dataDate, relativeTo: date)). \(next)"
+    }
+
+    var visibleEmptyStateMessage: String {
+        let messages = LimitBucket.Provider.allCases
+            .filter(isVisibleInPopover)
+            .compactMap { popoverMessage(for: $0) }
+        return messages.first ?? "No usage limits were returned."
     }
 
     static func durationString(seconds: Int) -> String {
@@ -772,12 +1110,5 @@ final class UsageModel: ObservableObject {
             return "\(hours)h \(minutes)m"
         }
         return "\(minutes)m"
-    }
-
-    func relativeTimeString(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }

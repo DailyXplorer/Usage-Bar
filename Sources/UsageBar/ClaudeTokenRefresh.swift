@@ -27,6 +27,25 @@ enum ClaudeTokenRefresh {
         "user:file_upload",
     ]
 
+    static let resourceTimeout: TimeInterval = 30
+    static let session: URLSession = {
+        let configuration = ProviderSession.configuration
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = resourceTimeout
+        return URLSession(configuration: configuration)
+    }()
+    static let exchange: ClaudeTokenExchange = { request in
+        try await session.data(for: request, delegate: ClaudeTokenRedirectGuard())
+    }
+
+    static func request(refreshToken: String, scopes: [String]) throws -> URLRequest {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try requestBody(refreshToken: refreshToken, scopes: scopes)
+        return request
+    }
+
     static func requestBody(refreshToken: String, scopes: [String]) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "grant_type": "refresh_token",
@@ -77,22 +96,24 @@ final class ClaudeTokenRedirectGuard: NSObject, URLSessionTaskDelegate {
 }
 
 struct ClaudeKeychainCommand: Equatable {
-    static let stdinLimit = 4032
+    static let lineLimit = 4032
 
     let arguments: [String]
-    let input: String?
+    let input: String
 
-    static func save(_ data: Data, account: String, service: String) -> ClaudeKeychainCommand {
-        let hex = data.map { String(format: "%02x", $0) }.joined()
-        let line = "add-generic-password -U -a \"\(account)\" -s \"\(service)\" -X \"\(hex)\""
-        let quotable = !(account + service).contains { $0 == "\"" || $0 == "\\" }
-        if quotable, line.count <= stdinLimit {
-            return ClaudeKeychainCommand(arguments: ["-i"], input: line + "\n")
+    static func save(_ data: Data, account: String, service: String) -> ClaudeKeychainCommand? {
+        let password: String
+        if data.allSatisfy({ (0x20...0x7e).contains($0) }) {
+            password = "-w " + quoted(String(decoding: data, as: UTF8.self))
+        } else {
+            password = "-X " + quoted(data.map { String(format: "%02x", $0) }.joined())
         }
-        return ClaudeKeychainCommand(
-            arguments: ["add-generic-password", "-U", "-a", account, "-s", service, "-X", hex],
-            input: nil
-        )
+        let line = "add-generic-password -U -a \(quoted(account)) -s \(quoted(service)) \(password)"
+        guard !line.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }),
+              line.utf8.count < lineLimit else {
+            return nil
+        }
+        return ClaudeKeychainCommand(arguments: ["-i"], input: line + "\n")
     }
 
     static func account(fromAttributes attributes: String) -> String? {
@@ -104,6 +125,73 @@ struct ClaudeKeychainCommand: Equatable {
             return account.isEmpty ? nil : account
         }
         return nil
+    }
+
+    private static func quoted(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        return "'" + escaped + "'"
+    }
+}
+
+struct ClaudeKeychain: Sendable {
+    typealias Runner = @Sendable (_ arguments: [String], _ input: Data?) async throws -> Subprocess.Output
+
+    static let service = "Claude Code-credentials"
+    static let itemNotFound: Int32 = 44
+    static let timeout: TimeInterval = 15
+    static let system = ClaudeKeychain { arguments, input in
+        try await Subprocess.run(
+            URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: arguments,
+            input: input,
+            timeout: timeout
+        )
+    }
+
+    let run: Runner
+
+    func read() async throws -> Data? {
+        try await query(["find-generic-password", "-s", Self.service, "-w"]).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    func saveCommand(for data: Data) async throws -> ClaudeKeychainCommand? {
+        let attributes = try await query(["find-generic-password", "-s", Self.service])
+        guard let account = attributes.flatMap({
+            ClaudeKeychainCommand.account(fromAttributes: String(decoding: $0, as: UTF8.self))
+        }) else {
+            return nil
+        }
+        return ClaudeKeychainCommand.save(data, account: account, service: Self.service)
+    }
+
+    func write(_ data: Data) async throws {
+        guard let command = try await saveCommand(for: data) else {
+            throw ClaudeUsageError.credentialsNotSaved
+        }
+        let output: Subprocess.Output
+        do {
+            output = try await run(command.arguments, Data(command.input.utf8))
+        } catch {
+            throw ClaudeUsageError.credentialsNotSaved
+        }
+        guard output.status == 0, !output.timedOut else {
+            throw ClaudeUsageError.credentialsNotSaved
+        }
+    }
+
+    private func query(_ arguments: [String]) async throws -> Data? {
+        let output: Subprocess.Output
+        do {
+            output = try await run(arguments, nil)
+        } catch {
+            throw ClaudeUsageError.keychainUnavailable
+        }
+        guard !output.timedOut else { throw ClaudeUsageError.keychainUnavailable }
+        if output.status == Self.itemNotFound { return nil }
+        guard output.status == 0 else { throw ClaudeUsageError.keychainUnavailable }
+        return output.stdout
     }
 }
 

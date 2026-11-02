@@ -23,7 +23,10 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
         XCTAssertTrue(label.isTemplate)
         XCTAssertGreaterThan(label.size.width, MenuBarLabelImage.iconSize * 2)
 
-        let other = MenuBarLabelImage.make(codex: "12%", claude: "34%")
+        let other = MenuBarLabelImage.make(segments: [
+            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: "12%"),
+            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: "34%"),
+        ])
         XCTAssertNotEqual(label.tiffRepresentation, other.tiffRepresentation)
 
         try render(
@@ -32,6 +35,66 @@ final class MenuBarLabelSnapshotTests: XCTestCase {
                 .accessibilityLabel(model.menuBarAccessibilityLabel),
             to: buildDirectory.appendingPathComponent("UsageBar-menubar.png")
         )
+    }
+
+    @MainActor
+    func testMenuBarLabelShowsClaudeWeeklyLimitWithoutASession() throws {
+        AppTheme.loadFont()
+        let model = UsageModel(
+            previewBuckets: [
+                LimitBucket(
+                    kind: .primary,
+                    name: "Weekly Limit",
+                    usedPercent: 38,
+                    resetAt: nil,
+                    resetAfterSeconds: nil,
+                    limitWindowSeconds: 604_800,
+                    reached: false
+                )
+            ],
+            planType: "pro",
+            lastUpdated: Date(),
+            claudeBuckets: [
+                LimitBucket(
+                    provider: .claude, kind: .weeklyAll, name: "Current week (all models)", usedPercent: 75,
+                    resetAt: nil, resetAfterSeconds: nil, limitWindowSeconds: 604_800, reached: false, isActive: true
+                ),
+                LimitBucket(
+                    provider: .claude, kind: .weeklyScoped, name: "Current week (Fable)", usedPercent: 0,
+                    resetAt: nil, resetAfterSeconds: nil, limitWindowSeconds: 604_800, reached: false
+                ),
+            ],
+            claudePlan: "Ultra"
+        )
+
+        XCTAssertEqual(model.menuBarSegments.map(\.value), ["62%", "25%"])
+        XCTAssertFalse(model.menuBarSegments.contains { $0.value == MenuBarSegment.placeholder })
+        XCTAssertEqual(
+            model.menuBarAccessibilityLabel,
+            "Codex limits, 62 percent left. Claude weekly limit, 25 percent left"
+        )
+
+        let label = MenuBarLabelImage.make(segments: model.menuBarSegments)
+        XCTAssertTrue(label.isTemplate)
+        try render(
+            Image(nsImage: label)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(model.menuBarAccessibilityLabel),
+            to: buildDirectory.appendingPathComponent("UsageBar-menubar-claude-weekly.png")
+        )
+    }
+
+    @MainActor
+    func testMenuBarMarksAProviderThatFailedWithoutData() {
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            menuBarProviders: [.codex],
+            errorMessage: "Could not reach ChatGPT. Check your internet connection."
+        )
+
+        XCTAssertEqual(model.menuBarText, MenuBarSegment.unavailable)
     }
 
     @MainActor

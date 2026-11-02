@@ -30,14 +30,16 @@ enum PlanBadgeLabel {
     }
 
     private static func claudeText(for key: String, original: String) -> String {
+        let name: String
         switch key {
         case "max5x":
-            return "Max 5x"
+            name = "Max 5x"
         case "max20x":
-            return "Max 20x"
+            name = "Max 20x"
         default:
-            return sharedText(for: key, original: original)
+            name = sharedText(for: key, original: original)
         }
+        return name.hasPrefix("Claude") ? name : "Claude \(name)"
     }
 
     private static func opencodeText(for key: String, original: String) -> String {

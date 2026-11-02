@@ -14,7 +14,7 @@ final class BucketIdentityTests: XCTestCase {
         XCTAssertEqual(cached.id, refreshed.id)
         XCTAssertEqual(cached.id, relabeled.id)
         XCTAssertEqual(cached.id, decoded.id)
-        XCTAssertEqual(relabeled.name, "Opus")
+        XCTAssertEqual(relabeled.name, "Current week (Opus)")
     }
 
     func testIdentityChangesWithProviderKindScopeOrWindow() {
@@ -50,8 +50,8 @@ final class BucketIdentityTests: XCTestCase {
             bucket(scope: nil, name: "Week · Sonnet")
         )
 
-        XCTAssertEqual(opus.name, "Opus")
-        XCTAssertEqual(sonnet.name, "Sonnet")
+        XCTAssertEqual(opus.name, "Current week (Opus)")
+        XCTAssertEqual(sonnet.name, "Current week (Sonnet)")
         XCTAssertEqual(opus.scope, "model-name:opus")
         XCTAssertEqual(sonnet.scope, "model-name:sonnet")
         XCTAssertNotEqual(opus.id, sonnet.id)

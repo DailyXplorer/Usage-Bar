@@ -111,7 +111,9 @@ if [ "$no_install" -eq 0 ]; then
     exit 1
   fi
 
+  was_running=0
   if pgrep -f "$installed_executable" >/dev/null 2>&1; then
+    was_running=1
     osascript -e 'tell application id "com.usagebar.app" to quit' >/dev/null 2>&1 || true
   fi
   attempt=0
@@ -139,12 +141,18 @@ if [ "$no_install" -eq 0 ]; then
     fi
     if [ "$restored" -eq 1 ]; then
       printf 'Installation failed; the previous app was restored.\n' >&2
+      if [ "$was_running" -eq 1 ]; then
+        open "$install_path" || true
+      fi
     else
       printf 'Installation failed before Usage Bar was installed.\n' >&2
     fi
     exit 1
   fi
   rm -rf "$backup_app"
+  if [ "$was_running" -eq 1 ]; then
+    open "$install_path" || printf 'Could not reopen Usage Bar. Open it from Applications.\n' >&2
+  fi
 fi
 
 if [ "$make_zip" -eq 1 ]; then

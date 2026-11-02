@@ -11,7 +11,7 @@ release_api="https://api.github.com/repos/${repo}/releases/latest"
 install_path="/Applications/UsageBar.app"
 expected_bundle_id="com.usagebar.app"
 expected_executable="UsageBar"
-installed_executable="$install_path/Contents/MacOS/$expected_executable"
+running_pattern="/UsageBar\\.app/Contents/MacOS/$expected_executable"
 
 tmp=$(mktemp -d)
 stage_root=""
@@ -115,11 +115,11 @@ if ! /usr/bin/codesign --verify --deep --strict "$staged_app" >/dev/null 2>&1; t
   exit 1
 fi
 
-if /usr/bin/pgrep -f "$installed_executable" >/dev/null 2>&1; then
+if /usr/bin/pgrep -f "$running_pattern" >/dev/null 2>&1; then
   /usr/bin/osascript -e 'tell application id "com.usagebar.app" to quit' >/dev/null 2>&1 || true
 fi
 attempt=0
-while /usr/bin/pgrep -f "$installed_executable" >/dev/null 2>&1; do
+while /usr/bin/pgrep -f "$running_pattern" >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 50 ]; then
     printf 'Usage Bar is still running. Quit it, then run the installer again.\n' >&2

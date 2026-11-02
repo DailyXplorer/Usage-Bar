@@ -94,7 +94,7 @@ struct AppInstallLocation {
         guard source.pathExtension == "app" else {
             throw AppInstallError.notAnApp
         }
-        if source.path == destination.path {
+        if source.path == destination.path || destinationIsNewer(than: source) {
             return destination
         }
         try AppBundleReplacement.install(
@@ -102,7 +102,14 @@ struct AppInstallLocation {
             to: destination,
             fileManager: fileManager
         )
+        try? AppBundleReplacement.clearQuarantine(at: destination)
         return destination
+    }
+
+    private func destinationIsNewer(than source: URL) -> Bool {
+        guard let installed = AppBundleReplacement.bundleVersion(at: destination) else { return false }
+        let running = AppBundleReplacement.bundleVersion(at: source) ?? AppVersion("0")
+        return running < installed
     }
 
     static func openAndQuit(at url: URL) throws {

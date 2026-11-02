@@ -83,6 +83,22 @@ final class ModelsTests: XCTestCase {
         )
     }
 
+    func testEveryWindowLabelUsesTitleCase() {
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 24 * 60 * 60, isSecondary: false), "Daily Limit")
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 365 * 24 * 60 * 60, isSecondary: true), "Annual Limit")
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: nil, isSecondary: false), "Primary Limit")
+        XCTAssertEqual(WindowLabels.label(forWindowSeconds: 1_234, isSecondary: true), "Secondary Limit")
+    }
+
+    func testCodexFractionalPercentDoesNotFailDecoding() throws {
+        let response = try JSONDecoder().decode(UsageResponse.self, from: Data(
+            #"{"rate_limit":{"primary_window":{"used_percent":42.5,"limit_window_seconds":604800}}}"#.utf8
+        ))
+        let bucket = try XCTUnwrap(CodexLimits.buckets(from: response).first)
+        XCTAssertEqual(bucket.usedPercent, 43)
+        XCTAssertEqual(bucket.remainingPercent, 57)
+    }
+
     func testLongDurationUsesDays() async {
         let duration = await UsageModel.durationString(seconds: 231_321)
         XCTAssertEqual(duration, "2d 16h")

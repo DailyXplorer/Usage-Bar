@@ -70,7 +70,7 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) { $0 == .upToDate }
 
         XCTAssertEqual(updater.state, .upToDate)
@@ -90,7 +90,7 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true, installIfAvailable: false)
+        updater.checkForUpdates(trigger: .manual, installIfAvailable: false)
         await waitForState(updater) { if case .available = $0 { return true }; return false }
 
         XCTAssertEqual(updater.availableRelease?.versionString, "1.4.0")
@@ -120,7 +120,7 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) {
             $0 == .failed(UpdateError.missingChecksum.localizedDescription)
         }
@@ -154,7 +154,7 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) {
             $0 == .failed(UpdateError.untrustedAsset.localizedDescription)
         }
@@ -173,9 +173,9 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) {
-            $0 == .failed(UpdateError.network("offline").localizedDescription)
+            $0 == .failed(UpdateError.network.localizedDescription)
         }
 
         XCTAssertNil(defaults.object(forKey: UpdatePreferences.lastCheckKey) as? Date)
@@ -230,10 +230,36 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuAppearanceCheckBypassesTheDailyThrottle() async throws {
+    func testMenuAppearanceChecksAtMostEverySixHours() async throws {
         let defaults = try makeDefaults(named: #function)
-        defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
-        defaults.set(Date(), forKey: UpdatePreferences.lastAttemptKey)
+        let clock = TestClock(Date(timeIntervalSince1970: 1_786_402_800))
+        defaults.set(clock.date.addingTimeInterval(-60 * 60), forKey: UpdatePreferences.lastAttemptKey)
+        let client = MockGitHub(release: sampleRelease(tag: "v1.0.0"))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            now: { clock.date },
+            currentVersion: "1.0.0"
+        )
+
+        updater.checkWhenMenuAppears()
+        XCTAssertEqual(client.callCount, 0)
+        XCTAssertEqual(updater.state, .idle)
+
+        clock.date = clock.date.addingTimeInterval(UpdatePreferences.menuCheckInterval)
+        updater.checkWhenMenuAppears()
+        await waitForState(updater) { $0 == .upToDate }
+        XCTAssertEqual(client.callCount, 1)
+
+        updater.checkWhenMenuAppears()
+        XCTAssertEqual(client.callCount, 1)
+        XCTAssertEqual(UpdatePreferences.menuCheckInterval, 6 * 60 * 60)
+    }
+
+    @MainActor
+    func testManualCheckRunsRightAfterAMenuCheck() async throws {
+        let defaults = try makeDefaults(named: #function)
         let client = MockGitHub(release: sampleRelease(tag: "v1.0.0"))
         let updater = AppUpdater(
             client: client,
@@ -244,9 +270,202 @@ final class AppUpdaterTests: XCTestCase {
 
         updater.checkWhenMenuAppears()
         await waitForState(updater) { $0 == .upToDate }
+        updater.performButtonAction()
+        await waitForState(updater) { $0 == .upToDate && client.callCount == 2 }
 
+        XCTAssertEqual(client.callCount, 2)
+    }
+
+    @MainActor
+    func testRateLimitPausesEveryCheckUntilGitHubResets() async throws {
+        let defaults = try makeDefaults(named: #function)
+        let clock = TestClock(Date(timeIntervalSince1970: 1_786_402_800))
+        let client = RateLimitedGitHub(until: clock.date.addingTimeInterval(10 * 60))
+        let updater = AppUpdater(
+            client: client,
+            installer: MockInstaller(),
+            defaults: defaults,
+            now: { clock.date },
+            currentVersion: "1.0.0"
+        )
+
+        updater.performButtonAction()
+        await waitForState(updater) {
+            $0 == .failed("GitHub is limiting update checks. Try again in 10 minutes.")
+        }
+        XCTAssertEqual(
+            defaults.object(forKey: UpdatePreferences.rateLimitedUntilKey) as? Date,
+            clock.date.addingTimeInterval(10 * 60)
+        )
+
+        clock.date = clock.date.addingTimeInterval(9 * 60 + 30)
+        defaults.set(
+            clock.date.addingTimeInterval(-UpdatePreferences.menuCheckInterval - 1),
+            forKey: UpdatePreferences.lastAttemptKey
+        )
+        updater.checkWhenMenuAppears()
+        updater.performButtonAction()
         XCTAssertEqual(client.callCount, 1)
-        XCTAssertEqual(updater.state, .upToDate)
+        XCTAssertEqual(updater.state, .failed("GitHub is limiting update checks. Try again in 1 minute."))
+
+        clock.date = clock.date.addingTimeInterval(31)
+        updater.performButtonAction()
+        await waitForState(updater) { _ in client.callCount == 2 }
+        XCTAssertEqual(client.callCount, 2)
+    }
+
+    @MainActor
+    func testFailingAutomaticInstallBacksOffForThatVersionWithoutDownloading() async throws {
+        let defaults = try makeDefaults(named: #function)
+        defer { UpdateURLProtocol.responses = [:] }
+        UpdateURLProtocol.responses = [:]
+        UpdateURLProtocol.requests.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UpdateURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let clock = TestClock(Date(timeIntervalSince1970: 1_786_402_800))
+        let installer = ReadOnlyInstaller()
+        defaults.set(true, forKey: UpdatePreferences.installsKey)
+        let client = MockGitHub(release: sampleRelease(tag: "v1.4.0"))
+        let firstLaunch = AppUpdater(
+            client: client,
+            installer: installer,
+            defaults: defaults,
+            session: session,
+            now: { clock.date },
+            currentVersion: "1.0.0"
+        )
+
+        firstLaunch.startAutomaticChecks()
+        await waitForState(firstLaunch) {
+            $0 == .failed(UpdateError.destinationNotWritable.localizedDescription)
+        }
+        XCTAssertEqual(installer.checkCount, 1)
+        XCTAssertEqual(UpdateURLProtocol.requests.value, 0)
+        XCTAssertTrue(firstLaunch.isInstallBackingOff(for: "1.4.0"))
+
+        clock.date = clock.date.addingTimeInterval(UpdatePreferences.menuCheckInterval + 1)
+        let secondLaunch = AppUpdater(
+            client: client,
+            installer: installer,
+            defaults: defaults,
+            session: session,
+            now: { clock.date },
+            currentVersion: "1.0.0"
+        )
+        secondLaunch.checkWhenMenuAppears()
+        await waitForState(secondLaunch) { if case .available = $0 { return true }; return false }
+        XCTAssertEqual(client.callCount, 2)
+        XCTAssertEqual(installer.checkCount, 1)
+
+        secondLaunch.performButtonAction()
+        await waitForState(secondLaunch) {
+            $0 == .failed(UpdateError.destinationNotWritable.localizedDescription)
+        }
+        XCTAssertEqual(installer.checkCount, 2)
+        XCTAssertEqual(UpdateURLProtocol.requests.value, 0)
+        XCTAssertEqual(defaults.integer(forKey: UpdatePreferences.failedInstallCountKey), 2)
+
+        clock.date = clock.date.addingTimeInterval(UpdatePreferences.installBackoff(afterFailures: 2))
+        XCTAssertFalse(secondLaunch.isInstallBackingOff(for: "1.4.0"))
+        XCTAssertFalse(secondLaunch.isInstallBackingOff(for: "1.5.0"))
+    }
+
+    func testInstallBackoffDoublesUpToAWeek() {
+        XCTAssertEqual(UpdatePreferences.installBackoff(afterFailures: 1), 24 * 60 * 60)
+        XCTAssertEqual(UpdatePreferences.installBackoff(afterFailures: 2), 48 * 60 * 60)
+        XCTAssertEqual(UpdatePreferences.installBackoff(afterFailures: 30), 7 * 24 * 60 * 60)
+    }
+
+    func testUpdateErrorsReadAsPlainSentences() {
+        let errors: [UpdateError] = [
+            .network, .unexpectedResponse, .rateLimited(until: Date()), .noReleases,
+            .missingAsset, .missingChecksum, .untrustedAsset, .downloadFailed,
+            .invalidChecksum, .checksumMismatch, .extractFailed, .invalidAppBundle,
+            .invalidCodeSignature, .quarantineRemovalFailed, .destinationNotWritable,
+            .installFailed,
+        ]
+        for error in errors {
+            let message = error.localizedDescription
+            XCTAssertTrue(message.hasSuffix("."), message)
+            XCTAssertNil(message.range(of: "HTTP", options: .caseInsensitive), message)
+            XCTAssertNil(message.range(of: "://"), message)
+            XCTAssertNil(message.range(of: ".zip"), message)
+            XCTAssertNil(message.rangeOfCharacter(from: .decimalDigits), message)
+        }
+        XCTAssertEqual(
+            UpdateError.plain(URLError(.notConnectedToInternet), fallback: .installFailed),
+            .installFailed
+        )
+    }
+
+    func testReleaseServiceTurnsAnExhaustedRateLimitIntoAPause() async throws {
+        let now = Date(timeIntervalSince1970: 1_786_402_800)
+        let reset = Int(now.timeIntervalSince1970) + 20 * 60
+        let service = stubbedService(now: now, status: 403, headers: [
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(reset),
+        ])
+
+        do {
+            _ = try await service.latestRelease()
+            XCTFail("expected a rate limit")
+        } catch {
+            XCTAssertEqual(
+                error as? UpdateError,
+                .rateLimited(until: Date(timeIntervalSince1970: TimeInterval(reset)))
+            )
+        }
+    }
+
+    func testReleaseServiceCapsRateLimitPausesAndHonorsRetryAfter() throws {
+        let now = Date(timeIntervalSince1970: 1_786_402_800)
+        let url = AppDistribution.latestReleaseURL
+        let farReset = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 403, httpVersion: nil, headerFields: [
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(Int(now.timeIntervalSince1970) + 86_400),
+        ]))
+        let retryAfter = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 429, httpVersion: nil, headerFields: [
+            "Retry-After": "120",
+        ]))
+        let forbidden = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 403, httpVersion: nil, headerFields: [
+            "X-RateLimit-Remaining": "12",
+        ]))
+
+        XCTAssertEqual(
+            GitHubReleaseService.rateLimitEnd(of: farReset, now: now),
+            now.addingTimeInterval(UpdatePreferences.maximumRateLimitWait)
+        )
+        XCTAssertEqual(GitHubReleaseService.rateLimitEnd(of: retryAfter, now: now), now.addingTimeInterval(120))
+        XCTAssertNil(GitHubReleaseService.rateLimitEnd(of: forbidden, now: now))
+    }
+
+    func testReleaseServiceReportsOtherFailuresWithoutTheirDetails() async {
+        let now = Date(timeIntervalSince1970: 1_786_402_800)
+        let forbidden = stubbedService(now: now, status: 403, headers: [:])
+        let offline = stubbedService(now: now, status: nil, headers: [:])
+
+        do {
+            _ = try await forbidden.latestRelease()
+            XCTFail("expected a failure")
+        } catch {
+            XCTAssertEqual(error as? UpdateError, .unexpectedResponse)
+        }
+        do {
+            _ = try await offline.latestRelease()
+            XCTFail("expected a failure")
+        } catch {
+            XCTAssertEqual(error as? UpdateError, .network)
+        }
+    }
+
+    func testReleaseServiceUsesTheUncachedProviderSession() {
+        XCTAssertTrue(GitHubReleaseService().session === ProviderSession.shared)
+        XCTAssertNil(AppUpdater.downloadSession.configuration.urlCache)
+        XCTAssertEqual(
+            AppUpdater.downloadSession.configuration.requestCachePolicy,
+            .reloadIgnoringLocalAndRemoteCacheData
+        )
     }
 
     @MainActor
@@ -278,7 +497,7 @@ final class AppUpdaterTests: XCTestCase {
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) { if case .available = $0 { return true }; return false }
 
         updater.checkWhenMenuAppears()
@@ -289,31 +508,35 @@ final class AppUpdaterTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuAppearanceCheckRetriesAFailedCheckImmediately() async throws {
+    func testMenuAppearanceWaitsSixHoursAfterAFailedCheck() async throws {
         let defaults = try makeDefaults(named: #function)
+        let clock = TestClock(Date(timeIntervalSince1970: 1_786_402_800))
         let client = FailingGitHub()
         let updater = AppUpdater(
             client: client,
             installer: MockInstaller(),
             defaults: defaults,
+            now: { clock.date },
             currentVersion: "1.0.0"
         )
 
-        updater.checkForUpdates(force: true)
-        await waitForState(updater) {
-            $0 == .failed(UpdateError.network("offline").localizedDescription)
-        }
-
         updater.checkWhenMenuAppears()
         await waitForState(updater) {
-            $0 == .failed(UpdateError.network("offline").localizedDescription) && client.callCount == 2
+            $0 == .failed(UpdateError.network.localizedDescription)
         }
 
+        clock.date = clock.date.addingTimeInterval(60 * 60)
+        updater.checkWhenMenuAppears()
+        XCTAssertEqual(client.callCount, 1)
+
+        clock.date = clock.date.addingTimeInterval(UpdatePreferences.menuCheckInterval)
+        updater.checkWhenMenuAppears()
+        await waitForState(updater) { _ in client.callCount == 2 }
         XCTAssertEqual(client.callCount, 2)
     }
 
     @MainActor
-    func testForcedCheckBypassesTheDailyThrottle() async throws {
+    func testManualCheckBypassesTheDailyThrottle() async throws {
         let defaults = try makeDefaults(named: #function)
         defaults.set(Date(), forKey: UpdatePreferences.lastCheckKey)
         defaults.set(Date(), forKey: UpdatePreferences.lastAttemptKey)
@@ -328,7 +551,7 @@ final class AppUpdaterTests: XCTestCase {
         updater.checkForUpdates()
         XCTAssertEqual(client.callCount, 0)
 
-        updater.checkForUpdates(force: true)
+        updater.checkForUpdates(trigger: .manual)
         await waitForState(updater) { $0 == .upToDate }
         XCTAssertEqual(client.callCount, 1)
     }
@@ -366,14 +589,41 @@ final class AppUpdaterTests: XCTestCase {
         }
     }
 
-    func testRelaunchWaitsForTheCurrentProcessWithoutMatchingItsOwnShell() {
+    func testRelaunchWaitsForTheCurrentProcessThenVerifiesTheNewOne() {
         let appURL = URL(fileURLWithPath: "/Applications/Usage Bar.app")
-        let arguments = AppRelaunchCommand.arguments(processIdentifier: 12_345, appURL: appURL)
+        let logURL = URL(fileURLWithPath: "/tmp/UsageBarTests/updater.log")
+        let arguments = AppRelaunchCommand.arguments(
+            processIdentifier: 12_345,
+            appURL: appURL,
+            logURL: logURL
+        )
 
         XCTAssertEqual(arguments[0], "-c")
-        XCTAssertTrue(arguments[1].contains("/bin/kill -0 \"$1\""))
-        XCTAssertFalse(arguments[1].contains("pgrep"))
-        XCTAssertEqual(arguments.suffix(2), ["12345", appURL.path])
+        XCTAssertEqual(arguments[2], "UsageBar updater")
+        XCTAssertEqual(arguments.suffix(4), ["12345", appURL.path, "UsageBar", logURL.path])
+        let script = arguments[1]
+        XCTAssertTrue(script.contains("/bin/kill -0 \"$pid\""))
+        XCTAssertTrue(script.contains("/usr/bin/pgrep -x \"$name\""))
+        XCTAssertFalse(script.contains("pgrep -f"))
+        XCTAssertTrue(script.contains("for attempt in 1 2; do"))
+        XCTAssertTrue(script.contains("/usr/bin/open \"$app\""))
+        XCTAssertTrue(script.contains(">> \"$log\""))
+    }
+
+    func testRelaunchLogsUnderTheUserLibraryLogs() {
+        XCTAssertTrue(AppRelaunchCommand.logURL.path.hasSuffix("/Library/Logs/UsageBar/updater.log"))
+    }
+
+    func testRelaunchScriptIsValidShell() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-n", "-c", AppRelaunchCommand.script]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 0)
     }
 
     func testInstallerRejectsABundleWithTheWrongIdentifier() throws {
@@ -491,6 +741,22 @@ final class AppUpdaterTests: XCTestCase {
         XCTFail("Timed out waiting for updater state, last state: \(updater.state)")
     }
 
+    private func stubbedService(
+        now: Date,
+        status: Int?,
+        headers: [String: String]
+    ) -> GitHubReleaseService {
+        let host = "\(UUID().uuidString.lowercased()).example"
+        GitHubStubProtocol.register(host, status: status, headers: headers)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GitHubStubProtocol.self]
+        return GitHubReleaseService(
+            session: URLSession(configuration: configuration),
+            endpoint: URL(string: "https://\(host)/releases/latest")!,
+            now: { now }
+        )
+    }
+
     private func makeDefaults(named name: String) throws -> UserDefaults {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defaults.removePersistentDomain(forName: name)
@@ -584,17 +850,124 @@ private final class FailingGitHub: GitHubReleasing, @unchecked Sendable {
 
     func latestRelease() async throws -> GitHubRelease {
         counter.increment()
-        throw UpdateError.network("offline")
+        throw UpdateError.network
     }
 }
 
 private struct MockInstaller: AppUpdateInstalling {
+    func checkCanInstall() throws {}
     func install(fromAppBundle url: URL) throws {}
     func relaunch() throws {}
 }
 
+private final class ReadOnlyInstaller: AppUpdateInstalling, @unchecked Sendable {
+    private let counter = LockedCounter()
+
+    var checkCount: Int { counter.value }
+
+    func checkCanInstall() throws {
+        counter.increment()
+        throw UpdateError.destinationNotWritable
+    }
+
+    func install(fromAppBundle url: URL) throws {
+        XCTFail("a read-only destination must not be installed into")
+    }
+
+    func relaunch() throws {
+        XCTFail("a read-only destination must not relaunch")
+    }
+}
+
+private final class RateLimitedGitHub: GitHubReleasing, @unchecked Sendable {
+    let until: Date
+    private let counter = LockedCounter()
+
+    var callCount: Int { counter.value }
+
+    init(until: Date) {
+        self.until = until
+    }
+
+    func latestRelease() async throws -> GitHubRelease {
+        counter.increment()
+        throw UpdateError.rateLimited(until: until)
+    }
+}
+
+private final class TestClock: @unchecked Sendable {
+    var date: Date
+
+    init(_ date: Date) {
+        self.date = date
+    }
+}
+
+private final class GitHubStubProtocol: URLProtocol {
+    private static let store = GitHubStubStore()
+
+    static func register(_ host: String, status: Int?, headers: [String: String]) {
+        store.set(GitHubStub(status: status, headers: headers), for: host)
+    }
+
+    private static func stub(for host: String) -> GitHubStub? {
+        store.stub(for: host)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url != nil
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url,
+              let stub = Self.stub(for: url.host ?? ""),
+              let status = stub.status,
+              let response = HTTPURLResponse(
+                url: url,
+                statusCode: status,
+                httpVersion: nil,
+                headerFields: stub.headers
+              ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"message\":\"API rate limit exceeded\"}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private struct GitHubStub {
+    let status: Int?
+    let headers: [String: String]
+}
+
+private final class GitHubStubStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stubs: [String: GitHubStub] = [:]
+
+    func set(_ stub: GitHubStub, for host: String) {
+        lock.lock()
+        stubs[host] = stub
+        lock.unlock()
+    }
+
+    func stub(for host: String) -> GitHubStub? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stubs[host]
+    }
+}
+
 private final class UpdateURLProtocol: URLProtocol {
     private static let responseStore = LockedResponses()
+    static let requests = LockedCounter()
 
     static var responses: [URL: Data] {
         get { responseStore.value }
@@ -610,6 +983,7 @@ private final class UpdateURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
+        Self.requests.increment()
         guard let url = request.url, let data = Self.responses[url],
               let response = HTTPURLResponse(
                 url: url,
@@ -659,6 +1033,12 @@ private final class LockedCounter: @unchecked Sendable {
     func increment() {
         lock.lock()
         storage += 1
+        lock.unlock()
+    }
+
+    func reset() {
+        lock.lock()
+        storage = 0
         lock.unlock()
     }
 }

@@ -19,8 +19,9 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     reached: false
                 ),
                 LimitBucket(
-                    kind: .lunaReserve,
-                    name: CodexLimits.lunaReserveDisplayName,
+                    kind: .additional,
+                    scope: "additional.model_x.primary",
+                    name: "Model X Weekly Limit",
                     usedPercent: 0,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 177_600,
@@ -174,8 +175,8 @@ final class UsageMenuSnapshotTests: XCTestCase {
             previewBuckets: [
                 bucket(kind: .primary, name: "Current Session"),
                 bucket(kind: .secondary, name: "Weekly Limit"),
-                bucket(kind: .spark, name: CodexLimits.sparkDisplayName),
-                bucket(kind: .lunaReserve, name: CodexLimits.lunaReserveDisplayName),
+                bucket(kind: .additional, name: "Model X Weekly Limit"),
+                bucket(kind: .spendLimit, name: CodexLimits.spendLimitDisplayName),
             ],
             planType: "prolite",
             lastUpdated: Date(),
@@ -213,8 +214,8 @@ final class UsageMenuSnapshotTests: XCTestCase {
             previewBuckets: [
                 bucket(kind: .primary, name: "Current Session"),
                 bucket(kind: .secondary, name: "Weekly Limit"),
-                bucket(kind: .spark, name: CodexLimits.sparkDisplayName),
-                bucket(kind: .lunaReserve, name: CodexLimits.lunaReserveDisplayName),
+                bucket(kind: .additional, name: "Model X Weekly Limit"),
+                bucket(kind: .spendLimit, name: CodexLimits.spendLimitDisplayName),
             ],
             planType: "prolite",
             lastUpdated: Date(),
@@ -240,6 +241,158 @@ final class UsageMenuSnapshotTests: XCTestCase {
         hostingView.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(containsScrollView(in: hostingView))
+    }
+
+    @MainActor
+    func testClaudeUltraWithoutSessionAndCodexProWeeklyOnly() throws {
+        let now = Date()
+        let model = UsageModel(
+            previewBuckets: try codexBuckets(Self.codexProWeeklyOnly, now: now),
+            planType: "pro",
+            lastUpdated: now.addingTimeInterval(-120),
+            claudeBuckets: try claudeBuckets(ClaudeFixtures.withoutSession, now: now),
+            claudePlan: "Ultra",
+            now: { now }
+        )
+
+        XCTAssertFalse(model.claudeBuckets.contains { $0.kind == .session })
+        XCTAssertEqual(model.menuBarClaudeText, "25%")
+        try renderBothModes(model, name: "claude-ultra-codex-pro")
+    }
+
+    @MainActor
+    func testClaudeMaxWithSessionAndCodexPlus() throws {
+        let now = Date()
+        let model = UsageModel(
+            previewBuckets: try codexBuckets(Self.codexPlus, now: now),
+            planType: "plus",
+            lastUpdated: now.addingTimeInterval(-60),
+            claudeBuckets: try claudeBuckets(ClaudeFixtures.withSession, now: now),
+            claudePlan: "Max",
+            now: { now }
+        )
+
+        XCTAssertEqual(model.claudeBuckets.first?.kind, .session)
+        try renderBothModes(model, name: "claude-max-codex-plus")
+    }
+
+    @MainActor
+    func testClaudePausedByAnthropicKeepsItsValues() throws {
+        let now = Date()
+        let model = UsageModel(
+            previewBuckets: try codexBuckets(Self.codexPlus, now: now),
+            planType: "plus",
+            lastUpdated: now.addingTimeInterval(-25 * 60),
+            claudeBuckets: try claudeBuckets(ClaudeFixtures.withoutSession, now: now),
+            claudePlan: "Ultra",
+            claudePausedUntil: now.addingTimeInterval(35 * 60),
+            now: { now }
+        )
+
+        XCTAssertTrue(model.sectionMessage(for: .claude)?.hasPrefix("Anthropic paused usage updates. Showing values from") == true)
+        XCTAssertFalse(model.claudeBuckets.isEmpty)
+        try renderBothModes(model, name: "claude-paused")
+    }
+
+    @MainActor
+    func testSettingsShowsPopoverAndMenuBarTogglesAndTheClaudeFallback() throws {
+        AppTheme.loadFont()
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = UsageModel(
+            previewBuckets: [],
+            planType: "pro",
+            lastUpdated: Date(),
+            menuBarProviders: [.codex, .claude],
+            popoverProviders: [.codex, .claude, .cursor],
+            defaults: defaults
+        )
+        let updater = stubUpdater(defaults: defaults)
+        for scheme in [ColorScheme.light, .dark] {
+            let view = SettingsView()
+                .environmentObject(model)
+                .environmentObject(updater)
+                .environment(\.colorScheme, scheme)
+            let hostingView = NSHostingView(rootView: view)
+            hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 448, height: 900)
+            hostingView.layoutSubtreeIfNeeded()
+            let representation = try XCTUnwrap(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+            hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+            let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+            try png.write(to: buildDirectory.appendingPathComponent("UsageBar-settings-\(scheme == .dark ? "dark" : "light").png"))
+        }
+        XCTAssertTrue(model.isVisibleInPopover(.cursor))
+        XCTAssertFalse(model.isVisibleInMenuBar(.cursor))
+        XCTAssertFalse(model.claudeQuotaCheckEnabled)
+    }
+
+    private static let codexProWeeklyOnly = """
+    {"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,
+     "primary_window":{"used_percent":38,"limit_window_seconds":604800,"reset_after_seconds":302400,"reset_at":null},
+     "secondary_window":null},
+     "credits":{"has_credits":false,"unlimited":false,"balance":null},
+     "spend_control":{"reached":false,"individual_limit":null},"rate_limit_reached_type":null}
+    """
+
+    private static let codexPlus = """
+    {"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,
+     "primary_window":{"used_percent":22,"limit_window_seconds":18000,"reset_after_seconds":7800,"reset_at":null},
+     "secondary_window":{"used_percent":41,"limit_window_seconds":604800,"reset_after_seconds":266400,"reset_at":null}},
+     "rate_limit_reached_type":null}
+    """
+
+    private func codexBuckets(_ json: String, now: Date) throws -> [LimitBucket] {
+        CodexLimits.buckets(from: try JSONDecoder().decode(UsageResponse.self, from: Data(json.utf8)), now: now)
+    }
+
+    private func claudeBuckets(_ json: String, now: Date) throws -> [LimitBucket] {
+        let fixtureNow = Date(timeIntervalSince1970: 1_793_500_000)
+        return ClaudeLimits.buckets(from: try ClaudeFixtures.decode(json), now: fixtureNow).map { bucket in
+            let resetAt = bucket.resetAt.map { now.addingTimeInterval($0.timeIntervalSince(fixtureNow)) }
+            return LimitBucket(
+                provider: bucket.provider,
+                kind: bucket.kind,
+                scope: bucket.scope,
+                name: bucket.name,
+                usedPercent: bucket.usedPercent,
+                resetAt: resetAt,
+                resetAfterSeconds: resetAt.map { Int($0.timeIntervalSince(now)) },
+                limitWindowSeconds: bucket.limitWindowSeconds,
+                reached: bucket.reached,
+                detail: bucket.detail,
+                isActive: bucket.isActive
+            )
+        }
+    }
+
+    @MainActor
+    private func renderBothModes(_ model: UsageModel, name: String) throws {
+        AppTheme.loadFont()
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let updater = stubUpdater(defaults: defaults)
+        for scheme in [ColorScheme.light, .dark] {
+            let url = buildDirectory.appendingPathComponent("UsageBar-\(name)-\(scheme == .dark ? "dark" : "light").png")
+            try render(
+                UsageMenuView()
+                    .environmentObject(model)
+                    .environmentObject(updater)
+                    .environment(\.colorScheme, scheme),
+                to: url
+            )
+            let image = try XCTUnwrap(NSImage(contentsOf: url))
+            XCTAssertEqual(image.size.width, UsageMenuView.width, accuracy: 0.5)
+        }
+    }
+
+    private var buildDirectory: URL {
+        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build", isDirectory: true)
     }
 
     private func bucket(

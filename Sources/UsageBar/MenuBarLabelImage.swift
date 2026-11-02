@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarSegment {
     static let placeholder = "--%"
+    static let unavailable = "!%"
 
     let provider: LimitBucket.Provider
     let logo: NSImage?
@@ -46,13 +47,6 @@ enum MenuBarLabelImage {
                 .padding(.leading, index == 0 ? 0 : 7)
             }
         }
-    }
-
-    static func make(codex: String, claude: String) -> NSImage {
-        make(segments: [
-            MenuBarSegment(provider: .codex, logo: AppTheme.codexLogo, value: codex),
-            MenuBarSegment(provider: .claude, logo: AppTheme.claudeLogo, value: claude),
-        ])
     }
 
     @ViewBuilder

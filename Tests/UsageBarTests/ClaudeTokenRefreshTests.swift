@@ -80,29 +80,65 @@ final class ClaudeTokenRefreshTests: XCTestCase {
         XCTAssertFalse(ClaudeTokenRefresh.allowsRedirect(to: nil))
     }
 
-    func testKeychainSaveUsesStdinLikeClaudeCode() {
-        let command = ClaudeKeychainCommand.save(Data("{}".utf8), account: "user", service: "Claude Code-credentials")
+    func testRefreshFinishesBeforeTheLockGoesStale() throws {
+        let configuration = ClaudeTokenRefresh.session.configuration
+
+        XCTAssertLessThan(configuration.timeoutIntervalForResource, ClaudeRefreshLock.staleAfter)
+        XCTAssertLessThanOrEqual(configuration.timeoutIntervalForRequest, configuration.timeoutIntervalForResource)
+        XCTAssertNil(configuration.urlCache)
+        XCTAssertNil(configuration.httpCookieStorage)
+    }
+
+    func testRefreshRequestPostsTheGrantToTheTokenEndpoint() throws {
+        let request = try ClaudeTokenRefresh.request(refreshToken: "refresh-1", scopes: ["user:profile"])
+
+        XCTAssertEqual(request.url, ClaudeTokenRefresh.endpoint)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(request.httpBody, try ClaudeTokenRefresh.requestBody(refreshToken: "refresh-1", scopes: ["user:profile"]))
+    }
+
+    func testKeychainSaveSendsThePasswordOnStdin() {
+        let command = ClaudeKeychainCommand.save(Data(#"{"a":"b"}"#.utf8), account: "user", service: "Claude Code-credentials")
 
         XCTAssertEqual(command, ClaudeKeychainCommand(
             arguments: ["-i"],
-            input: "add-generic-password -U -a \"user\" -s \"Claude Code-credentials\" -X \"7b7d\"\n"
+            input: "add-generic-password -U -a 'user' -s 'Claude Code-credentials' -w '{\"a\":\"b\"}'\n"
         ))
     }
 
-    func testKeychainSaveFallsBackToArgumentsForLargePayloads() {
-        let payload = Data(repeating: 0x61, count: 2100)
-        let command = ClaudeKeychainCommand.save(payload, account: "user", service: "Claude Code-credentials")
+    func testKeychainSaveKeepsPayloadsUpToTheLineLimitOnStdin() throws {
+        let payload = Data(repeating: 0x61, count: 3900)
+        let command = try XCTUnwrap(ClaudeKeychainCommand.save(payload, account: "user", service: "Claude Code-credentials"))
 
-        XCTAssertNil(command.input)
-        XCTAssertEqual(Array(command.arguments.prefix(7)), ["add-generic-password", "-U", "-a", "user", "-s", "Claude Code-credentials", "-X"])
-        XCTAssertEqual(command.arguments.last, String(repeating: "61", count: 2100))
+        XCTAssertEqual(command.arguments, ["-i"])
+        XCTAssertTrue(command.input.contains(String(repeating: "a", count: 3900)))
+        XCTAssertLessThanOrEqual(command.input.utf8.count, ClaudeKeychainCommand.lineLimit)
     }
 
-    func testKeychainSaveAvoidsStdinWhenAccountNeedsQuoting() {
-        let command = ClaudeKeychainCommand.save(Data("{}".utf8), account: "a\"b", service: "Claude Code-credentials")
+    func testKeychainSaveRefusesPayloadsThatWouldNotFitOnOneLine() {
+        let payload = Data(repeating: 0x61, count: ClaudeKeychainCommand.lineLimit)
 
-        XCTAssertEqual(command.arguments, ["add-generic-password", "-U", "-a", "a\"b", "-s", "Claude Code-credentials", "-X", "7b7d"])
-        XCTAssertNil(command.input)
+        XCTAssertNil(ClaudeKeychainCommand.save(payload, account: "user", service: "Claude Code-credentials"))
+    }
+
+    func testKeychainSaveEscapesQuotesAndBackslashes() {
+        let command = ClaudeKeychainCommand.save(Data(#"{"a":"it's \"x\""}"#.utf8), account: #"a'b\c"#, service: "Claude Code-credentials")
+
+        XCTAssertEqual(
+            command?.input,
+            #"add-generic-password -U -a 'a\'b\\c' -s 'Claude Code-credentials' -w '{"a":"it\'s \\"x\\""}'"# + "\n"
+        )
+    }
+
+    func testKeychainSaveUsesHexForNonPrintablePayloads() {
+        let command = ClaudeKeychainCommand.save(Data("é".utf8), account: "user", service: "Claude Code-credentials")
+
+        XCTAssertEqual(command?.input, "add-generic-password -U -a 'user' -s 'Claude Code-credentials' -X 'c3a9'\n")
+    }
+
+    func testKeychainSaveRefusesLineBreaksThatWouldSplitTheCommand() {
+        XCTAssertNil(ClaudeKeychainCommand.save(Data("{}".utf8), account: "a\nb", service: "Claude Code-credentials"))
     }
 
     func testKeychainAccountIsReadFromItemAttributes() {
