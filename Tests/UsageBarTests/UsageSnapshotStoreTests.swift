@@ -154,6 +154,19 @@ final class UsageSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(reloaded, migrated)
     }
 
+    func testUpgradeWithoutSavedProviderKeysKeepsTheOldCodexAndClaudeMenuBar() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: #function))
+        defaults.removePersistentDomain(forName: #function)
+        defer { defaults.removePersistentDomain(forName: #function) }
+        UsageSnapshotStore.save(UsageSnapshot(fetchedAt: Date()), to: defaults)
+
+        let migrated = ProviderPreferences.load(from: defaults, detected: { [.claude, .cursor] })
+
+        XCTAssertEqual(migrated.menuBar, [.codex, .claude])
+        XCTAssertEqual(migrated.popover, [.codex, .claude, .cursor])
+        XCTAssertEqual(ProviderPreferences.load(from: defaults, detected: { [] }), migrated)
+    }
+
     func testMenuBarStaysASubsetOfThePopover() {
         var preferences = ProviderPreferences(popover: [.codex], menuBar: [.codex])
 
@@ -568,5 +581,15 @@ final class UsageSnapshotStoreTests: XCTestCase {
         }
 
         XCTAssertEqual(backoff.blockedUntil, now.addingTimeInterval(60 * 60))
+    }
+
+    func testOpenCodeDatabaseAloneCountsAsADetectedSignIn() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let folder = home.appendingPathComponent(".local/share/opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data().write(to: folder.appendingPathComponent("opencode.db"))
+
+        XCTAssertEqual(ProviderCredentialDetector.detected(home: home, environment: [:]), [.opencode])
     }
 }

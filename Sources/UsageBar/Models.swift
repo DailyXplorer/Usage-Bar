@@ -30,7 +30,7 @@ struct UsageResponse: Decodable {
             forKey: .rateLimitResetCredits
         )
         additionalRateLimits = (try? container.decodeIfPresent(
-            [Failable<AdditionalRateLimit>].self,
+            [Lenient<AdditionalRateLimit>].self,
             forKey: .additionalRateLimits
         ))?.compactMap(\.value)
         credits = try? container.decodeIfPresent(CodexCredits.self, forKey: .credits)
@@ -211,14 +211,6 @@ struct SpendControlLimit: Decodable {
         remainingPercent = container.lenientDouble(forKey: .remainingPercent)
         resetAfterSeconds = CodexNumbers.seconds(container.lenientDouble(forKey: .resetAfterSeconds))
         resetAt = CodexNumbers.epochDate(container.lenientDouble(forKey: .resetAt))
-    }
-}
-
-private struct Failable<Value: Decodable>: Decodable {
-    let value: Value?
-
-    init(from decoder: Decoder) throws {
-        value = try? Value(from: decoder)
     }
 }
 

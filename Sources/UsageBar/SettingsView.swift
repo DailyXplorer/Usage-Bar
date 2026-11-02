@@ -61,6 +61,8 @@ struct SettingsView: View {
                 SettingsSectionHeader(title: "Claude")
             }
 
+            CursorSessionTokenSection()
+
             Section {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {

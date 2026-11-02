@@ -5,15 +5,67 @@ struct OpenCodeUsageResponse: Decodable {
         let rolling: OpenCodeWindow?
         let weekly: OpenCodeWindow?
         let monthly: OpenCodeWindow?
+
+        enum CodingKeys: String, CodingKey {
+            case rolling, weekly, monthly
+        }
+
+        init(rolling: OpenCodeWindow? = nil, weekly: OpenCodeWindow? = nil, monthly: OpenCodeWindow? = nil) {
+            self.rolling = rolling
+            self.weekly = weekly
+            self.monthly = monthly
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            rolling = try? container.decodeIfPresent(OpenCodeWindow.self, forKey: .rolling)
+            weekly = try? container.decodeIfPresent(OpenCodeWindow.self, forKey: .weekly)
+            monthly = try? container.decodeIfPresent(OpenCodeWindow.self, forKey: .monthly)
+        }
     }
 
     let usage: Usage
+
+    enum CodingKeys: String, CodingKey {
+        case usage
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usage = (try? container.decodeIfPresent(Usage.self, forKey: .usage)) ?? Usage()
+    }
 }
 
 struct OpenCodeWindow: Decodable {
     let status: String?
     let percent: Double?
     let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, percent, resetsAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try? container.decodeIfPresent(String.self, forKey: .status)
+        if let value = try? container.decodeIfPresent(Double.self, forKey: .percent) {
+            percent = value.isFinite ? value : nil
+        } else if let text = try? container.decodeIfPresent(String.self, forKey: .percent),
+                  let value = Double(text), value.isFinite {
+            percent = value
+        } else {
+            percent = nil
+        }
+        if let text = try? container.decodeIfPresent(String.self, forKey: .resetsAt) {
+            resetsAt = text
+        } else if let number = try? container.decodeIfPresent(Double.self, forKey: .resetsAt),
+                  number.isFinite, number > 0, number < 1e14 {
+            let seconds = number >= 1_000_000_000_000 ? number / 1_000 : number
+            resetsAt = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: seconds))
+        } else {
+            resetsAt = nil
+        }
+    }
 }
 
 enum OpenCodeLimits {

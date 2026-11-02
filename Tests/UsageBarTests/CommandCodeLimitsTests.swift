@@ -142,7 +142,7 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertEqual(buckets.map(\.usedPercent), [4, 0, 99])
     }
 
-    func testMonthlyBarUsesPlanCreditsAndIgnoresPurchasedExtras() {
+    func testMonthlyBarCountsRemainingAbovePlanCreditsAsUnused() {
         let buckets = CommandCodeLimits.buckets(
             from: goSnapshot(monthlyRemaining: 15, monthlyUsed: nil)
         )
@@ -161,17 +161,115 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertTrue(buckets[2].reached)
     }
 
-    func testPayAsYouGoAccountsAreHidden() {
-        let snapshot = goSnapshot(planId: "individual-provider")
+    func testProviderPlanShowsItsMonthlyPoolLikeTheCLI() {
+        let snapshot = goSnapshot(monthlyRemaining: 6, monthlyUsed: nil, planId: "individual-provider", limited: false)
+        let buckets = CommandCodeLimits.buckets(from: snapshot)
 
-        XCTAssertTrue(CommandCodeLimits.shouldHide(snapshot))
-        XCTAssertTrue(CommandCodeLimits.buckets(from: snapshot).isEmpty)
-        XCTAssertNil(CommandCodeLimits.displayName(for: snapshot.planId))
+        XCTAssertEqual(buckets.map(\.kind), [.monthly])
+        XCTAssertEqual(buckets[0].usedPercent, 60)
+        XCTAssertEqual(CommandCodeLimits.displayName(for: snapshot.planId), "Provider")
     }
 
-    func testUnlimitedAccountsAreHidden() {
-        XCTAssertTrue(CommandCodeLimits.shouldHide(goSnapshot(limited: false)))
-        XCTAssertTrue(CommandCodeLimits.buckets(from: goSnapshot(limited: false)).isEmpty)
+    func testExhaustedActivePlanShowsReachedBarWithoutSummary() {
+        let monthly = CommandCodeLimits.buckets(from: goSnapshot(monthlyRemaining: 0, monthlyUsed: nil)).last
+
+        XCTAssertEqual(monthly?.kind, .monthly)
+        XCTAssertEqual(monthly?.reached, true)
+    }
+
+    func testUnlimitedAccountsHideOnlyTheRollingWindows() {
+        XCTAssertEqual(CommandCodeLimits.buckets(from: goSnapshot(limited: false)).map(\.kind), [.monthly])
+    }
+
+    @MainActor
+    func testUnlimitedAccountWithNothingToShowStaysSignedIn() async throws {
+        let suiteName = "CommandCodeLimitsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        ProviderPreferences(popover: [.commandcode], menuBar: [.commandcode]).save(to: defaults)
+        let snapshot = goSnapshot(monthlyRemaining: nil, monthlyUsed: nil, limited: false)
+        let model = UsageModel(
+            defaults: defaults,
+            fetcher: UsageFetcher { _ in .commandcode(snapshot) },
+            automaticallySchedules: false,
+            detectedProviders: { [] }
+        )
+        model.refreshNow(force: true)
+        for _ in 0..<200 where model.isLoading {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertTrue(model.commandcodeBuckets.isEmpty)
+        XCTAssertEqual(model.popoverMessage(for: .commandcode), "Command Code returned no limits.")
+        XCTAssertNotEqual(model.popoverMessage(for: .commandcode), CommandCodeUsageError.notSignedIn.localizedDescription)
+    }
+
+    func testMonthlyPoolIncludesPurchasedAndFreeCreditsAsTheCLIDoes() {
+        var snapshot = goSnapshot(monthlyUsed: nil)
+        snapshot.credits = CommandCodeCreditsResponse.Credits(monthlyCredits: 5, purchasedCredits: 4, freeCredits: 1)
+
+        XCTAssertEqual(CommandCodeLimits.buckets(from: snapshot).last?.usedPercent, 33)
+    }
+
+    func testInactiveSubscriptionUsesSpentPlusPoolAsTotal() {
+        var snapshot = goSnapshot(monthlyRemaining: 3, monthlyUsed: 1)
+        snapshot.subscriptionStatus = "past_due"
+
+        XCTAssertEqual(CommandCodeLimits.buckets(from: snapshot).last?.usedPercent, 25)
+    }
+
+    func testSummaryReadsTotalCostWithTotalMonthlyCreditsFallback() throws {
+        let current = try JSONDecoder().decode(CommandCodeSummaryResponse.self, from: Data(#"{"totalCost":2.5,"totalCount":143}"#.utf8))
+        let legacy = try JSONDecoder().decode(CommandCodeSummaryResponse.self, from: Data(#"{"totalMonthlyCredits":"3"}"#.utf8))
+
+        XCTAssertEqual(current.spent, 2.5)
+        XCTAssertEqual(legacy.spent, 3)
+    }
+
+    func testOrgSpendLimitsBecomeRows() throws {
+        let whoami = try JSONDecoder().decode(CommandCodeWhoamiResponse.self, from: Data("""
+        {"org":{"id":"org_x"},"orgLimits":[
+          {"scope":"model","model":"model-x","modelLabel":"Model X","limit":20,"spent":5.5,"exceeded":false,"resetInterval":"monthly","resetAt":"2026-12-01T00:00:00Z"},
+          {"scope":"org","limit":0,"spent":1,"resetInterval":"total"},
+          {"scope":"org","spent":"broken"}
+        ]}
+        """.utf8))
+        var snapshot = goSnapshot()
+        snapshot.orgLimits = whoami.orgLimits
+        let rows = CommandCodeLimits.buckets(from: snapshot, now: Date(timeIntervalSince1970: 1_793_000_000))
+            .filter { $0.kind == .other }
+
+        XCTAssertEqual(whoami.orgLimits.count, 2)
+        XCTAssertEqual(rows.map(\.name), ["Model X spend limit", "Org-wide spend limit"])
+        XCTAssertEqual(rows[0].usedPercent, 27)
+        XCTAssertEqual(rows[0].detail, "$5.50 of $20.00/mo")
+        XCTAssertEqual(rows[0].resetAt, ISODate.parse("2026-12-01T00:00:00Z"))
+        XCTAssertTrue(rows[1].reached)
+        XCTAssertEqual(rows[1].detail, "$1.00 of $0.00")
+        XCTAssertNotEqual(rows[0].id, rows[1].id)
+    }
+
+    func testSubscriptionDatesAcceptNumbers() throws {
+        let response = try JSONDecoder().decode(CommandCodeSubscriptionsResponse.self, from: Data("""
+        {"data":{"planId":"individual-go-v1","status":"active","currentPeriodStart":1790000000000,"currentPeriodEnd":"2026-11-13T00:00:00Z"}}
+        """.utf8))
+
+        XCTAssertEqual(ISODate.parse(response.data?.currentPeriodStart), Date(timeIntervalSince1970: 1_790_000_000))
+        XCTAssertEqual(response.data?.currentPeriodEnd, "2026-11-13T00:00:00Z")
+    }
+
+    func testErrorTextHasNoStatusCodesOrExceptionText() {
+        let errors: [CommandCodeUsageError] = [
+            .notSignedIn, .invalidKey, .throttled(retryAfter: nil),
+            .network("The request timed out."), .httpStatus(500), .decoding("keyNotFound"),
+        ]
+        for error in errors {
+            let text = error.errorDescription ?? ""
+            XCTAssertFalse(text.contains("500"), text)
+            XCTAssertFalse(text.contains("HTTP"), text)
+            XCTAssertFalse(text.contains("timed out"), text)
+            XCTAssertFalse(text.contains("keyNotFound"), text)
+        }
     }
 
     func testCanonicalPlanIdsDoNotCollapseShorterPrefixes() {
@@ -183,9 +281,13 @@ final class CommandCodeLimitsTests: XCTestCase {
             CommandCodeLimits.canonicalPlanId(from: "individual-provider"),
             "individual-provider"
         )
-        XCTAssertEqual(CommandCodeLimits.displayName(for: "individual-max"), "Max 10x")
-        XCTAssertEqual(CommandCodeLimits.displayName(for: "individual-ultra"), "Max 20x")
-        XCTAssertEqual(CommandCodeLimits.displayName(for: "teams-pro"), "Team Pro")
+        XCTAssertEqual(CommandCodeLimits.canonicalPlanId(from: "individual-go-v1"), "individual-go-v1")
+        XCTAssertEqual(CommandCodeLimits.canonicalPlanId(from: "individual_pro_v1_annual"), "individual-pro-v1")
+        XCTAssertEqual(CommandCodeLimits.displayName(for: "individual-goat"), "GOAT")
+        XCTAssertEqual(CommandCodeLimits.displayName(for: "individual-max"), "Max")
+        XCTAssertEqual(CommandCodeLimits.displayName(for: "individual-ultra"), "Ultra")
+        XCTAssertEqual(CommandCodeLimits.displayName(for: "teams-pro"), "Teams Pro")
+        XCTAssertEqual(CommandCodeLimits.monthlyCredits(for: "individual-provider"), 15)
         XCTAssertEqual(CommandCodeLimits.monthlyCredits(for: "individual-go"), 10)
         XCTAssertEqual(CommandCodeLimits.monthlyCredits(for: "individual-pro-v1"), 80)
     }
@@ -250,6 +352,32 @@ final class CommandCodeLimitsTests: XCTestCase {
         XCTAssertEqual(response.windowLimits?.limited, true)
     }
 
+    func testCreditsResponseSurvivesWronglyTypedWindowFields() throws {
+        let payload = """
+        {
+          "credits": {"monthlyCredits": 8.5},
+          "windowLimits": {
+            "limited": "true",
+            "fiveHour": "soon",
+            "weekly": {"used": 1.2, "cap": 6, "exceeded": false, "resetAt": 1786800000000}
+          }
+        }
+        """
+        let response = try JSONDecoder().decode(CommandCodeCreditsResponse.self, from: Data(payload.utf8))
+
+        XCTAssertEqual(response.credits?.monthlyCredits, 8.5)
+        XCTAssertEqual(response.windowLimits?.limited, true)
+        XCTAssertNil(response.windowLimits?.fiveHour)
+        XCTAssertEqual(response.windowLimits?.weekly?.cap, 6)
+
+        let broken = try JSONDecoder().decode(
+            CommandCodeCreditsResponse.self,
+            from: Data(#"{"credits": {"monthlyCredits": 8.5, "windowLimits": 3}, "windowLimits": []}"#.utf8)
+        )
+        XCTAssertEqual(broken.credits?.monthlyCredits, 8.5)
+        XCTAssertNil(broken.windowLimits)
+    }
+
     func testCreditsResponseDecodesNestedWindowLimitsAndStringNumbers() throws {
         let payload = """
         {
@@ -280,13 +408,14 @@ final class CommandCodeLimitsTests: XCTestCase {
         let buckets = CommandCodeLimits.buckets(
             from: CommandCodeUsageSnapshot(
                 planId: "individual-go",
+                subscriptionStatus: "active",
                 credits: response.credits,
                 windowLimits: response.windowLimits,
                 monthlyUsed: nil
             )
         )
         XCTAssertEqual(buckets.map(\.kind), [.rolling, .weekly, .monthly])
-        XCTAssertEqual(buckets.map(\.usedPercent), [13, 20, 15])
+        XCTAssertEqual(buckets.map(\.usedPercent), [13, 20, 12])
     }
 
     func testNestedWindowLimitsAreUsedWhenRootWindowsAreMissing() {
@@ -585,7 +714,7 @@ final class CommandCodeLimitsTests: XCTestCase {
         )
         XCTAssertEqual(
             CommandCodeLimits.buckets(from: usage).map(\.usedPercent),
-            [13, 20, 15]
+            [13, 20, 12]
         )
     }
 }

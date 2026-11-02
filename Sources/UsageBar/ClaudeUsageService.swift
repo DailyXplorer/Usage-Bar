@@ -9,6 +9,7 @@ enum ClaudeUsageError: LocalizedError {
     case keychainUnavailable
     case forbidden
     case throttled(retryAfter: Date?)
+    case offline
     case network
     case server
     case decoding
@@ -16,25 +17,37 @@ enum ClaudeUsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "No Claude Code session. Run `claude`, then `/login`."
+            return "No Claude Code session. Run claude in Terminal, then /login."
         case .tokenExpired:
-            return "Claude Code sign-in expired. Run `claude`, then `/login`."
+            return "Claude Code sign-in expired. Run claude in Terminal, then /login."
         case .refreshInProgress:
             return "Claude Code is renewing its sign-in. Trying again shortly."
         case .credentialsNotSaved:
-            return "Could not save the renewed Claude Code sign-in. Run `claude` once to renew it."
+            return "Could not save the renewed Claude Code sign-in. Run claude in Terminal once to renew it."
         case .keychainUnavailable:
             return "Could not read the Claude Code sign-in from the Keychain. Trying again shortly."
         case .forbidden:
-            return "This Claude Code sign-in cannot read usage. Run `claude`, then `/login`."
+            return "This Claude Code sign-in cannot read usage. Run claude in Terminal, then /login."
         case .throttled:
             return "Anthropic paused usage updates. Trying again later."
-        case .network:
+        case .offline, .network:
             return "Could not reach Anthropic. Check your internet connection."
         case .server:
             return "Anthropic is not responding right now. Trying again shortly."
         case .decoding:
             return "Claude sent usage data in an unknown format. Check for a Usage Bar update."
+        }
+    }
+
+    init(transportError error: Error) {
+        let unsent: Set<URLError.Code> = [
+            .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost,
+            .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff,
+        ]
+        if let code = (error as? URLError)?.code, unsent.contains(code) {
+            self = .offline
+        } else {
+            self = .network
         }
     }
 }
@@ -290,7 +303,7 @@ actor ClaudeUsageService {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw ClaudeUsageError.network
+            throw ClaudeUsageError(transportError: error)
         }
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeUsageError.network

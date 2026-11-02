@@ -248,8 +248,6 @@ enum AppBundleReplacement {
     ) throws {
         let parent = destination.deletingLastPathComponent()
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
-        removeLeftovers(of: destination, fileManager: fileManager)
-        defer { removeLeftovers(of: destination, fileManager: fileManager) }
 
         let staging = parent.appendingPathComponent(
             ".\(destination.lastPathComponent).\(UUID().uuidString).staging"
@@ -281,6 +279,7 @@ enum AppBundleReplacement {
         } else {
             try fileManager.moveItem(at: staging, to: destination)
         }
+        removeLeftovers(of: destination, fileManager: fileManager)
     }
 
     static func checkCanReplace(_ destination: URL, fileManager: FileManager = .default) throws {

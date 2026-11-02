@@ -227,7 +227,7 @@ actor ClaudeCredentialStore {
         do {
             (data, response) = try await exchange(request)
         } catch {
-            throw ClaudeUsageError.network
+            throw ClaudeUsageError(transportError: error)
         }
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeUsageError.network

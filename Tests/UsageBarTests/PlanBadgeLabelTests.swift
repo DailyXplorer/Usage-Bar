@@ -39,12 +39,12 @@ final class PlanBadgeLabelTests: XCTestCase {
 
     func testCommandCodeMapsPlanIds() {
         XCTAssertEqual(PlanBadgeLabel.text(for: "individual-go", provider: .commandcode), "Go")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-goat", provider: .commandcode), "Goat")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-goat", provider: .commandcode), "GOAT")
         XCTAssertEqual(PlanBadgeLabel.text(for: "individual-pro", provider: .commandcode), "Pro")
         XCTAssertEqual(PlanBadgeLabel.text(for: "individual-pro-v1", provider: .commandcode), "Pro")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-max", provider: .commandcode), "Max 10x")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-ultra", provider: .commandcode), "Max 20x")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "teams-pro", provider: .commandcode), "Team Pro")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-max", provider: .commandcode), "Max")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "individual-ultra", provider: .commandcode), "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "teams-pro", provider: .commandcode), "Teams Pro")
         XCTAssertEqual(PlanBadgeLabel.text(for: "Go", provider: .commandcode), "Go")
     }
 

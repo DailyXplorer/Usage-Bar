@@ -101,6 +101,7 @@ struct ProviderPreferences: Equatable {
         detected: () -> Set<LimitBucket.Provider> = ProviderCredentialDetector.detected
     ) -> ProviderPreferences {
         let storedMenuBar = providers(defaults.array(forKey: menuBarKey))
+            ?? (isUpgrade(defaults) ? fallbackProviders : nil)
         let storedPopover = providers(defaults.array(forKey: popoverKey))
         var preferences: ProviderPreferences
         switch (storedPopover, storedMenuBar) {
@@ -157,6 +158,11 @@ struct ProviderPreferences: Equatable {
         popover.formUnion(menuBar)
     }
 
+    private static func isUpgrade(_ defaults: UserDefaults) -> Bool {
+        [UsageSnapshotStore.key, UpdatePreferences.lastAttemptKey, UpdatePreferences.checksKey]
+            .contains { defaults.object(forKey: $0) != nil }
+    }
+
     private static func providers(_ raw: [Any]?) -> Set<LimitBucket.Provider>? {
         guard let raw = raw as? [String] else { return nil }
         let parsed = Set(raw.compactMap(LimitBucket.Provider.init(rawValue:)))
@@ -188,7 +194,9 @@ enum ProviderCredentialDetector {
         if exists(home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")) {
             found.insert(.cursor)
         }
-        if OpenCodeUsageService.authFileCandidates(home: home, environment: environment).contains(where: exists) {
+        let opencodeFiles = OpenCodeUsageService.databaseCandidates(home: home, environment: environment)
+            + OpenCodeUsageService.authFileCandidates(home: home, environment: environment)
+        if opencodeFiles.contains(where: exists) {
             found.insert(.opencode)
         }
         let commandCodeKey = ["COMMAND_CODE_API_KEY", "COMMANDCODE_API_KEY"].contains {
@@ -202,7 +210,7 @@ enum ProviderCredentialDetector {
 }
 
 enum UsageSnapshotStore {
-    private static let key = "lastUsageSnapshot"
+    static let key = "lastUsageSnapshot"
 
     static func load(from defaults: UserDefaults = .standard) -> UsageSnapshot? {
         guard let data = defaults.data(forKey: key),

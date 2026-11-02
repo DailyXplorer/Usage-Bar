@@ -92,7 +92,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                     usedPercent: 19,
                     resetAt: Date(timeIntervalSince1970: 1_786_363_200),
                     resetAfterSeconds: 86_400,
-                    limitWindowSeconds: CursorLimits.grokBotWindowSeconds,
+                    limitWindowSeconds: CursorLimits.weekSeconds,
                     reached: false
                 ),
             ],
@@ -295,6 +295,88 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testEveryProviderAtOnce() throws {
+        AppTheme.loadFont()
+        let now = Date()
+        let model = UsageModel(
+            previewBuckets: try codexBuckets(Self.codexProWeeklyOnly, now: now),
+            planType: "pro",
+            lastUpdated: now.addingTimeInterval(-60),
+            claudeBuckets: try claudeBuckets(ClaudeFixtures.withoutSession, now: now),
+            claudePlan: "Ultra",
+            cursorBuckets: try unifiedCursorBuckets(now: now),
+            cursorPlan: "Ultra",
+            opencodeBuckets: try openCodeBuckets(now: now),
+            opencodePlan: OpenCodeLimits.planName,
+            commandcodeBuckets: CommandCodeLimits.buckets(from: commandCodeSnapshot(now: now), now: now),
+            commandcodePlan: "individual-pro",
+            menuBarProviders: Set(LimitBucket.Provider.allCases),
+            now: { now }
+        )
+
+        XCTAssertEqual(model.menuBarSegments.map(\.provider), LimitBucket.Provider.allCases)
+        XCTAssertFalse(model.menuBarSegments.contains { $0.value == MenuBarSegment.placeholder })
+        try renderBothModes(model, name: "all-providers")
+        try renderBothModes(model, name: "all-providers-full", contentMaxHeight: 2_000)
+
+        let label = MenuBarLabelImage.make(segments: model.menuBarSegments)
+        XCTAssertTrue(label.isTemplate)
+        for scheme in [ColorScheme.light, .dark] {
+            let view = Image(nsImage: label)
+                .renderingMode(.template)
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+                .padding(6)
+                .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.93))
+            try render(view, to: buildDirectory.appendingPathComponent("UsageBar-menubar-all-providers-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+
+    private func unifiedCursorBuckets(now: Date) throws -> [LimitBucket] {
+        let iso = ISO8601DateFormatter()
+        let cycleEnd = Int64(now.addingTimeInterval(18 * 86_400).timeIntervalSince1970 * 1_000)
+        let period = """
+        {"billingCycleStart":"\(cycleEnd - 30 * 86_400_000)","billingCycleEnd":"\(cycleEnd)","spendLimitUsage":{"individualLimit":5000,"individualUsed":1200},"enabled":true}
+        """
+        let sand = """
+        {"currentPeriodStart":"\(iso.string(from: now.addingTimeInterval(-3 * 86_400)))","nextResetTimestampUtc":"\(iso.string(from: now.addingTimeInterval(4 * 86_400)))","usagePercent":37.5,"cursorPlanName":"Ultra","isUnified":true}
+        """
+        let snapshot = CursorUsageSnapshot(
+            period: try JSONDecoder().decode(CursorUsageResponse.self, from: Data(period.utf8)),
+            sand: try JSONDecoder().decode(CursorSandUsageStatus.self, from: Data(sand.utf8)),
+            planInfo: nil,
+            membershipType: nil
+        )
+        return CursorLimits.layout(for: snapshot, now: now).buckets
+    }
+
+    private func openCodeBuckets(now: Date) throws -> [LimitBucket] {
+        let iso = ISO8601DateFormatter()
+        let payload = """
+        {"usage":{
+          "rolling":{"status":"ok","percent":18,"resetsAt":"\(iso.string(from: now.addingTimeInterval(3 * 3_600)))"},
+          "weekly":{"status":"ok","percent":9,"resetsAt":"\(iso.string(from: now.addingTimeInterval(5 * 86_400)))"},
+          "monthly":{"status":"ok","percent":4,"resetsAt":"\(iso.string(from: now.addingTimeInterval(20 * 86_400)))"}}}
+        """
+        return OpenCodeLimits.buckets(from: try JSONDecoder().decode(OpenCodeUsageResponse.self, from: Data(payload.utf8)), now: now)
+    }
+
+    private func commandCodeSnapshot(now: Date) -> CommandCodeUsageSnapshot {
+        func millis(_ offset: TimeInterval) -> Double { (now.timeIntervalSince1970 + offset) * 1_000 }
+        return CommandCodeUsageSnapshot(
+            planId: "individual-pro",
+            subscriptionStatus: "active",
+            currentPeriodEnd: ISO8601DateFormatter().string(from: now.addingTimeInterval(16 * 86_400)),
+            credits: CommandCodeCreditsResponse.Credits(monthlyCredits: 21, purchasedCredits: 0, freeCredits: 0),
+            windowLimits: CommandCodeCreditsResponse.WindowLimits(
+                limited: true,
+                fiveHour: CommandCodeWindow(used: 1.2, cap: 4, exceeded: false, resetAt: millis(2 * 3_600)),
+                weekly: CommandCodeWindow(used: 5, cap: 12, exceeded: false, resetAt: millis(3 * 86_400))
+            ),
+            monthlyUsed: 9
+        )
+    }
+
+    @MainActor
     func testSettingsShowsPopoverAndMenuBarTogglesAndTheClaudeFallback() throws {
         AppTheme.loadFont()
         let suiteName = UUID().uuidString
@@ -349,7 +431,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     private func claudeBuckets(_ json: String, now: Date) throws -> [LimitBucket] {
-        let fixtureNow = Date(timeIntervalSince1970: 1_793_500_000)
+        let fixtureNow = Date(timeIntervalSince1970: 1_793_570_400)
         return ClaudeLimits.buckets(from: try ClaudeFixtures.decode(json), now: fixtureNow).map { bucket in
             let resetAt = bucket.resetAt.map { now.addingTimeInterval($0.timeIntervalSince(fixtureNow)) }
             return LimitBucket(
@@ -369,7 +451,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    private func renderBothModes(_ model: UsageModel, name: String) throws {
+    private func renderBothModes(_ model: UsageModel, name: String, contentMaxHeight: CGFloat = 434) throws {
         AppTheme.loadFont()
         let suiteName = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -379,7 +461,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
         for scheme in [ColorScheme.light, .dark] {
             let url = buildDirectory.appendingPathComponent("UsageBar-\(name)-\(scheme == .dark ? "dark" : "light").png")
             try render(
-                UsageMenuView()
+                UsageMenuView(contentMaxHeight: contentMaxHeight)
                     .environmentObject(model)
                     .environmentObject(updater)
                     .environment(\.colorScheme, scheme),

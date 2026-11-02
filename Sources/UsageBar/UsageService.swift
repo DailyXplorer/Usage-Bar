@@ -19,13 +19,13 @@ enum UsageError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAuthFile:
-            return "No Codex sign-in found. Run `codex` and sign in."
+            return "No Codex sign-in found. Open Codex and sign in."
         case .missingTokens:
-            return "Codex is not signed in with ChatGPT. Run `codex` and sign in."
+            return "Codex is not signed in with ChatGPT. Open Codex and sign in."
         case .signInExpired:
             return "Codex sign-in expired. Open Codex to renew it."
         case .forbidden:
-            return "This Codex sign-in cannot read usage. Run `codex` and sign in again."
+            return "This Codex sign-in cannot read usage. Open Codex and sign in again."
         case .network:
             return "Could not reach ChatGPT. Check your internet connection."
         case .throttled:

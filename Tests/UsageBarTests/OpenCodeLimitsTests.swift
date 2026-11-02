@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import UsageBar
 
@@ -262,5 +263,139 @@ final class OpenCodeLimitsTests: XCTestCase {
         )
 
         XCTAssertEqual(model.sectionMessage(for: .opencode), "OpenCode returned no limits.")
+    }
+    func testDatabaseCandidatesHonourOverrideThenDataDirectories() {
+        let home = URL(fileURLWithPath: "/tmp/opencode-home", isDirectory: true)
+        let files = OpenCodeUsageService.databaseCandidates(
+            home: home,
+            environment: ["OPENCODE_DB": "/tmp/custom/opencode.db", "XDG_DATA_HOME": "/tmp/xdg"]
+        )
+
+        XCTAssertEqual(files.map(\.path), [
+            "/tmp/custom/opencode.db",
+            "/tmp/xdg/opencode/opencode.db",
+            "/tmp/opencode-home/.local/share/opencode/opencode.db",
+            "/tmp/opencode-home/Library/Application Support/opencode/opencode.db",
+        ])
+        XCTAssertFalse(
+            OpenCodeUsageService.databaseCandidates(home: home, environment: ["OPENCODE_DB": ":memory:"])
+                .contains { $0.path.hasSuffix(":memory:") }
+        )
+    }
+
+    func testDatabaseKeyWinsOverLegacyAuthFile() async throws {
+        let directory = try temporaryDirectory()
+        let database = directory.appendingPathComponent("opencode.db")
+        try createCredentialTable(at: database, rows: [
+            ("c1", "opencode-go", #"{"type":"key","key":"sk-old"}"#, 0, 100),
+            ("c2", "opencode-go", #"{"type":"key","key":"sk-new"}"#, 0, 200),
+            ("c3", "cursor", #"{"type":"oauth","access":"other"}"#, 1, 300),
+        ])
+        let auth = directory.appendingPathComponent("auth.json")
+        try Data(#"{"opencode-go":{"type":"api","key":"sk-legacy"}}"#.utf8).write(to: auth)
+
+        let credentials = try await OpenCodeUsageService.loadCredentials(databases: [database], authFiles: [auth])
+
+        XCTAssertEqual(credentials.apiKey, "sk-new")
+    }
+
+    func testActiveDatabaseCredentialIsPreferred() async throws {
+        let directory = try temporaryDirectory()
+        let database = directory.appendingPathComponent("opencode.db")
+        try createCredentialTable(at: database, rows: [
+            ("c1", "opencode-go", #"{"type":"key","key":"sk-active"}"#, 1, 100),
+            ("c2", "opencode-go", #"{"type":"key","key":"sk-newer"}"#, 0, 200),
+        ])
+
+        let credentials = try await OpenCodeUsageService.loadCredentials(databases: [database], authFiles: [])
+
+        XCTAssertEqual(credentials.apiKey, "sk-active")
+    }
+
+    func testAuthFileIsTheFallbackWhenTheDatabaseHasNoGoKey() async throws {
+        let directory = try temporaryDirectory()
+        let database = directory.appendingPathComponent("opencode.db")
+        try createCredentialTable(at: database, rows: [
+            ("c1", "opencode-go", #"{"type":"oauth","access":"not-a-key"}"#, 1, 100),
+        ])
+        let auth = directory.appendingPathComponent("auth.json")
+        try Data(#"{"opencode-go":{"type":"api","key":"sk-legacy"}}"#.utf8).write(to: auth)
+        let missing = directory.appendingPathComponent("missing.db")
+
+        let credentials = try await OpenCodeUsageService.loadCredentials(databases: [missing, database], authFiles: [auth])
+
+        XCTAssertEqual(credentials.apiKey, "sk-legacy")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missing.path))
+    }
+
+    func testDatabaseReadLeavesTheFileUnchanged() async throws {
+        let directory = try temporaryDirectory()
+        let database = directory.appendingPathComponent("opencode.db")
+        try createCredentialTable(at: database, rows: [
+            ("c1", "opencode-go", #"{"type":"key","key":"sk-test"}"#, 1, 100),
+        ])
+        let before = try Data(contentsOf: database)
+
+        _ = try await OpenCodeUsageService.loadCredentials(databases: [database], authFiles: [])
+
+        XCTAssertEqual(try Data(contentsOf: database), before)
+    }
+
+    func testMissingOrMalformedWindowsDoNotFailTheResponse() throws {
+        let json = """
+        {"usage":{"rolling":{"status":"ok","percent":"12.5","resetsAt":1793570400000},"weekly":"broken","monthly":{"status":"new-status","percent":30}}}
+        """
+        let response = try JSONDecoder().decode(OpenCodeUsageResponse.self, from: Data(json.utf8))
+        let buckets = OpenCodeLimits.buckets(from: response, now: Date(timeIntervalSince1970: 1_793_560_000))
+
+        XCTAssertEqual(buckets.map(\.kind), [.rolling, .monthly])
+        XCTAssertEqual(buckets[0].usedPercent, 12)
+        XCTAssertEqual(buckets[0].resetAt, Date(timeIntervalSince1970: 1_793_570_400))
+        XCTAssertFalse(buckets[1].reached)
+
+        let empty = try JSONDecoder().decode(OpenCodeUsageResponse.self, from: Data("{}".utf8))
+        XCTAssertTrue(OpenCodeLimits.buckets(from: empty).isEmpty)
+    }
+
+    func testErrorTextHasNoStatusCodesOrExceptionText() {
+        let errors: [OpenCodeUsageError] = [
+            .notSignedIn, .invalidKey, .notSubscribed, .throttled(retryAfter: nil),
+            .network("The request timed out."), .httpStatus(502), .decoding("keyNotFound"),
+        ]
+        for error in errors {
+            let text = error.errorDescription ?? ""
+            XCTAssertFalse(text.contains("502"), text)
+            XCTAssertFalse(text.contains("HTTP"), text)
+            XCTAssertFalse(text.contains("timed out"), text)
+            XCTAssertFalse(text.contains("keyNotFound"), text)
+        }
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private func createCredentialTable(
+        at file: URL,
+        rows: [(String, String, String, Int, Int)]
+    ) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(file.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        var statements = [
+            "CREATE TABLE credential (id TEXT PRIMARY KEY, integration_id TEXT, label TEXT NOT NULL, value TEXT NOT NULL, connector_id TEXT, method_id TEXT, active INTEGER, time_created INTEGER, time_updated INTEGER)",
+        ]
+        for row in rows {
+            statements.append(
+                "INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated) VALUES ('\(row.0)', '\(row.1)', 'label', '\(row.2)', \(row.3), \(row.4), \(row.4))"
+            )
+        }
+        for sql in statements {
+            XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
     }
 }
