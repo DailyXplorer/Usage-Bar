@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 enum ClaudeUsageError: LocalizedError {
@@ -7,7 +6,7 @@ enum ClaudeUsageError: LocalizedError {
     case refreshInProgress
     case credentialsNotSaved
     case keychainUnavailable
-    case forbidden
+    case forbidden(errorType: String?)
     case throttled(retryAfter: Date?)
     case offline
     case network
@@ -26,8 +25,9 @@ enum ClaudeUsageError: LocalizedError {
             return "Could not save the renewed Claude Code sign-in. Run claude in Terminal once to renew it."
         case .keychainUnavailable:
             return "Could not read the Claude Code sign-in from the Keychain. Trying again shortly."
-        case .forbidden:
-            return "This Claude Code sign-in cannot read usage. Run claude in Terminal, then /login."
+        case .forbidden(let errorType):
+            let detail = errorType.map { " (\($0))" } ?? ""
+            return "This Claude Code sign-in cannot read usage\(detail). Run claude in Terminal, then /login."
         case .throttled:
             return "Anthropic paused usage updates. Trying again later."
         case .offline, .network:
@@ -36,6 +36,15 @@ enum ClaudeUsageError: LocalizedError {
             return "Anthropic is not responding right now. Trying again shortly."
         case .decoding:
             return "Claude sent usage data in an unknown format. Check for a Usage Bar update."
+        }
+    }
+
+    var holdsAuthRejection: Bool {
+        switch self {
+        case .tokenExpired, .forbidden:
+            return true
+        default:
+            return false
         }
     }
 
@@ -120,8 +129,18 @@ struct ClaudeCodeState {
 
 enum ClaudeAccountKey {
     static func make(_ identifier: String) -> String? {
-        guard !identifier.isEmpty else { return nil }
-        return SHA256.hash(data: Data(identifier.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+        CredentialFingerprint.make(identifier)
+    }
+}
+
+enum AnthropicErrorEnvelope {
+    static func type(in data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = root["error"] as? [String: Any],
+              let type = error["type"] as? String else {
+            return nil
+        }
+        return type
     }
 }
 
@@ -232,22 +251,18 @@ actor ClaudeUsageService {
                 accountKey: local.accountKey
             )
         }
-        let (data, http, credentials) = try await send(ClaudeRequests.usage)
-        guard http.statusCode == 200 else {
-            throw Self.error(for: http)
-        }
-        let usage: ClaudeUsageResponse
-        do {
-            usage = try JSONDecoder().decode(ClaudeUsageResponse.self, from: data)
-        } catch {
-            throw ClaudeUsageError.decoding
-        }
+        let (data, http, credentials) = try await send(ClaudeRequests.usage, endpoint: "usage")
         let accountKey = local.accountKey ?? Self.accountKey(for: credentials)
+        let outcome = usage(from: data, http)
+        if case .failure(let error) = outcome, error.holdsAuthRejection {
+            throw error
+        }
+        let plan = await plan(for: credentials, accountKey: accountKey)
         return ClaudeFetch(
-            usage: usage,
+            usage: try outcome.get(),
             source: .usageEndpoint,
             dataDate: now(),
-            plan: await plan(for: credentials, accountKey: accountKey),
+            plan: plan,
             accountKey: accountKey
         )
     }
@@ -264,33 +279,41 @@ actor ClaudeUsageService {
             )
         }
         guard quotaCheck else {
-            return ClaudeFetch(usage: nil, source: .claudeCode, dataDate: now(), accountKey: local.accountKey)
+            let identity = await pausedIdentity(local: local)
+            return ClaudeFetch(
+                usage: nil,
+                source: .claudeCode,
+                dataDate: now(),
+                plan: identity.plan,
+                accountKey: identity.accountKey
+            )
         }
-        let (_, http, credentials) = try await send(ClaudeRequests.quotaCheck)
+        let (data, http, credentials) = try await send(ClaudeRequests.quotaCheck, endpoint: "quota-check")
         let accountKey = local.accountKey ?? Self.accountKey(for: credentials)
         guard let usage = ClaudeUnifiedHeaders.response(from: http.allHeaderFields, scopedModelName: scopedModelName) else {
             if http.statusCode == 200 {
                 return ClaudeFetch(usage: nil, source: .quotaCheck, dataDate: now(), accountKey: accountKey)
             }
-            throw Self.error(for: http)
+            throw error(for: http, data: data)
         }
         return ClaudeFetch(
             usage: usage,
             source: .quotaCheck,
             dataDate: now(),
-            plan: await localPlan(accountKey: accountKey, signedIn: credentials),
+            plan: await plan(for: credentials, accountKey: accountKey),
             accountKey: accountKey
         )
     }
 
     private func send(
-        _ makeRequest: (String) -> URLRequest
+        _ makeRequest: (String) -> URLRequest,
+        endpoint: String
     ) async throws -> (Data, HTTPURLResponse, ClaudeCredentials) {
         var current = try await credentials.usable()
-        var (data, http) = try await perform(makeRequest(current.accessToken))
+        var (data, http) = try await perform(makeRequest(current.accessToken), endpoint: endpoint)
         if http.statusCode == 401 {
             current = try await credentials.afterRejection(current)
-            (data, http) = try await perform(makeRequest(current.accessToken))
+            (data, http) = try await perform(makeRequest(current.accessToken), endpoint: endpoint)
             if http.statusCode == 401 {
                 throw ClaudeUsageError.tokenExpired
             }
@@ -298,7 +321,7 @@ actor ClaudeUsageService {
         return (data, http, current)
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    private func perform(_ request: URLRequest, endpoint: String) async throws -> (Data, HTTPURLResponse) {
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: request)
@@ -308,7 +331,22 @@ actor ClaudeUsageService {
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeUsageError.network
         }
+        ProviderLog.rejected(.claude, endpoint: endpoint, response: http, body: data)
         return (data, http)
+    }
+
+    private func pausedIdentity(local: ClaudeCodeState) async -> (plan: String?, accountKey: String?) {
+        if let key = local.accountKey,
+           let cache = ClaudeProfilePlanCache.load(from: defaults),
+           cache.isCurrent(for: key, at: now()),
+           let planName = cache.planName {
+            return (planName, key)
+        }
+        guard let signedIn = try? await credentials.withoutRenewal() else {
+            return (await localPlan(accountKey: local.accountKey), local.accountKey)
+        }
+        let accountKey = local.accountKey ?? Self.accountKey(for: signedIn)
+        return (await plan(for: signedIn, accountKey: accountKey), accountKey)
     }
 
     private func localPlan(accountKey: String?, signedIn: ClaudeCredentials? = nil) async -> String? {
@@ -329,8 +367,11 @@ actor ClaudeUsageService {
         if let cache = ClaudeProfilePlanCache.load(from: defaults), cache.isCurrent(for: accountKey, at: date) {
             return cache.planName ?? fallback
         }
+        guard !credentials.isExpired(at: date) else {
+            return await localPlan(accountKey: accountKey, signedIn: credentials)
+        }
         var planName: String?
-        if let (data, http) = try? await perform(ClaudeRequests.profile(accessToken: credentials.accessToken)),
+        if let (data, http) = try? await perform(ClaudeRequests.profile(accessToken: credentials.accessToken), endpoint: "profile"),
            http.statusCode == 200,
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let organization = root["organization"] as? [String: Any],
@@ -346,14 +387,27 @@ actor ClaudeUsageService {
         ClaudeAccountKey.make(credentials.refreshToken ?? credentials.accessToken)
     }
 
-    private static func error(for http: HTTPURLResponse) -> ClaudeUsageError {
+    private func usage(from data: Data, _ http: HTTPURLResponse) -> Result<ClaudeUsageResponse, ClaudeUsageError> {
+        guard http.statusCode == 200 else {
+            return .failure(error(for: http, data: data))
+        }
+        guard let usage = try? JSONDecoder().decode(ClaudeUsageResponse.self, from: data) else {
+            return .failure(.decoding)
+        }
+        return .success(usage)
+    }
+
+    private func error(for http: HTTPURLResponse, data: Data) -> ClaudeUsageError {
         switch http.statusCode {
         case 401:
             return .tokenExpired
         case 403:
-            return .forbidden
+            guard let type = AnthropicErrorEnvelope.type(in: data) else {
+                return .throttled(retryAfter: RetryAfter.date(from: http, now: now()))
+            }
+            return .forbidden(errorType: ProviderRejection.safeErrorType(type))
         case 429:
-            return .throttled(retryAfter: RetryAfter.date(from: http))
+            return .throttled(retryAfter: RetryAfter.date(from: http, now: now()))
         default:
             return .server
         }

@@ -68,7 +68,7 @@ final class ClaudeUsageServiceTests: XCTestCase {
 
         let fetch = try await service().fetchUsage(ownDataDate: nil)
 
-        XCTAssertEqual(fetch.plan, "max_20x")
+        XCTAssertEqual(fetch.plan, "Ultra")
     }
 
     func testRecentClaudeCodeCopyForTheSameAccountAvoidsTheNetworkAndRenewal() async throws {
@@ -86,7 +86,7 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertEqual(fetch.source, .claudeCode)
         XCTAssertEqual(fetch.dataDate, now.addingTimeInterval(-600))
         XCTAssertEqual(fetch.accountKey, ClaudeAccountKey.make("account-1"))
-        XCTAssertEqual(fetch.plan, "max_20x")
+        XCTAssertEqual(fetch.plan, "Ultra")
         XCTAssertEqual(fetch.usage.map { ClaudeLimits.buckets(from: $0, now: now).map(\.kind) }, [.weeklyAll, .weeklyScoped, .spendLimit])
     }
 
@@ -123,9 +123,9 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
         let renewalCount = await renewals.value
         XCTAssertEqual(renewalCount, 0)
-        XCTAssertEqual(fetch.plan, "max_20x")
+        XCTAssertEqual(fetch.plan, "Ultra")
         XCTAssertEqual(paused.source, .claudeCode)
-        XCTAssertEqual(paused.plan, "max_20x")
+        XCTAssertEqual(paused.plan, "Ultra")
     }
 
     func testClaudeCodeCopyIsIgnoredWhenOldForeignOrOlderThanOurs() async throws {
@@ -182,7 +182,10 @@ final class ClaudeUsageServiceTests: XCTestCase {
                 guard case ClaudeUsageError.throttled(let date) = $0 else { return false }
                 return date != nil
             }),
-            (403, [:], { if case ClaudeUsageError.forbidden = $0 { return true }; return false }),
+            (403, [:], {
+                guard case ClaudeUsageError.throttled = $0 else { return false }
+                return true
+            }),
             (503, [:], { if case ClaudeUsageError.server = $0 { return true }; return false }),
         ]
         for (status, headers, matches) in cases {
@@ -190,17 +193,210 @@ final class ClaudeUsageServiceTests: XCTestCase {
             ClaudeStubProtocol.respond(status: status, json: "{}", headers: headers)
             await assertThrows(try await service().fetchUsage(ownDataDate: nil), matches)
         }
-        for error in [ClaudeUsageError.forbidden, .server, .network, .decoding, .throttled(retryAfter: nil)] {
+        for error in [ClaudeUsageError.forbidden(errorType: "permission_error"), .forbidden(errorType: nil), .server, .network, .decoding, .throttled(retryAfter: nil)] {
             let text = error.localizedDescription
             XCTAssertNil(text.range(of: #"\d{3}"#, options: .regularExpression), text)
             XCTAssertFalse(text.contains("http"), text)
         }
     }
 
-    func testWhilePausedNothingIsSentUnlessTheQuotaCheckIsOn() async throws {
+    func testEnvelope403IsAnAuthRejectionThatNamesTheErrorType() async throws {
+        ClaudeStubProtocol.respond(
+            status: 403,
+            json: #"{"type":"error","error":{"type":"permission_error","message":"nope"}}"#
+        )
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.forbidden(let type) = $0 else { return false }
+            let text = $0.localizedDescription
+            return type == "permission_error" && text.contains("permission_error") && text.contains("/login")
+        }
+        XCTAssertEqual(ClaudeStubProtocol.requests.count, 1)
+    }
+
+    func testEnvelope403WithUnsafeErrorTypeKeepsTheTypeOutOfTheMessage() async throws {
+        ClaudeStubProtocol.respond(status: 403, json: #"{"error":{"type":"Bearer sk-ant-secret value with spaces"}}"#)
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.forbidden(let type) = $0 else { return false }
+            return type == nil && !$0.localizedDescription.contains("sk-ant")
+        }
+    }
+
+    func testAny403WithoutAnErrorEnvelopeIsAThrottleThatHonoursRetryAfter() async throws {
+        let bodies = ["{}", "", "<html>blocked</html>", #"{"error":"forbidden"}"#, #"{"error":{"message":"no type"}}"#, #"{"error":{"type":7}}"#]
+        for body in bodies {
+            ClaudeStubProtocol.reset()
+            ClaudeStubProtocol.respond(status: 403, json: body, headers: ["Retry-After": "120"])
+            ClaudeStubProtocol.respond(json: "{}")
+
+            await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+                guard case ClaudeUsageError.throttled(let date) = $0 else { return false }
+                return date == self.now.addingTimeInterval(120)
+            }
+        }
+    }
+
+    func testThrottle403WithoutRetryAfterCarriesNoDate() async throws {
+        ClaudeStubProtocol.respond(status: 403, json: "{}")
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.throttled(let date) = $0 else { return false }
+            return date == nil
+        }
+    }
+
+    func testProfileIsFetchedWhilePausedAndAtMostOncePerDay() async throws {
+        ClaudeStubProtocol.respond(json: #"{"organization":{"plan_display_name":"Ultra"}}"#)
+
+        let first = try await service().fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+        let sameDay = try await service(now: now.addingTimeInterval(23 * 3600))
+            .fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+
+        XCTAssertEqual(ClaudeStubProtocol.requests.map { $0.url?.path }, ["/api/oauth/profile"])
+        XCTAssertNil(first.usage)
+        XCTAssertEqual(first.plan, "Ultra")
+        XCTAssertEqual(sameDay.plan, "Ultra")
+
+        ClaudeStubProtocol.respond(json: #"{"organization":{"plan_display_name":"Max"}}"#)
+        let nextDay = try await service(now: now.addingTimeInterval(25 * 3600))
+            .fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+
+        XCTAssertEqual(ClaudeStubProtocol.requests.count, 2)
+        XCTAssertEqual(nextDay.plan, "Max")
+    }
+
+    func testProfileFailureWhilePausedIsSilentAndShowsTheCredentialPlan() async throws {
+        ClaudeStubProtocol.respond(status: 500, json: "{}")
+
         let fetch = try await service().fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
 
         XCTAssertNil(fetch.usage)
+        XCTAssertEqual(fetch.plan, "Ultra")
+    }
+
+    func testProfileIsNotRequestedWithAnExpiredToken() async throws {
+        let fetch = try await service(expired: true)
+            .fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+
+        XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
+        XCTAssertNil(fetch.usage)
+    }
+
+    func testProfileIsFetchedAfterAThrottledUsageCall() async throws {
+        ClaudeStubProtocol.respond(status: 403, json: "{}")
+        ClaudeStubProtocol.respond(json: #"{"organization":{"plan_display_name":"Ultra"}}"#)
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.throttled = $0 else { return false }
+            return true
+        }
+
+        XCTAssertEqual(ClaudeStubProtocol.requests.map { $0.url?.path }, ["/api/oauth/usage", "/api/oauth/profile"])
+        XCTAssertEqual(ClaudeProfilePlanCache.load(from: defaults)?.planName, "Ultra")
+    }
+
+    func testProfileIsSkippedWhileAnAuthRejectionIsHeld() async throws {
+        ClaudeStubProtocol.respond(status: 403, json: #"{"error":{"type":"permission_error"}}"#)
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.forbidden = $0 else { return false }
+            return true
+        }
+        XCTAssertEqual(ClaudeStubProtocol.requests.map { $0.url?.path }, ["/api/oauth/usage"])
+    }
+
+    func testProfileIsSkippedWhenTheSignInExpired() async throws {
+        ClaudeStubProtocol.respond(status: 401, json: "{}")
+        ClaudeStubProtocol.respond(status: 401, json: "{}")
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.tokenExpired = $0 else { return false }
+            return true
+        }
+        XCTAssertEqual(ClaudeStubProtocol.requests.map { $0.url?.path }, ["/api/oauth/usage", "/api/oauth/usage"])
+    }
+
+    func testProfileIsFetchedAfterAServerErrorButNotWhenOffline() async throws {
+        ClaudeStubProtocol.respond(status: 503, json: "{}")
+        ClaudeStubProtocol.respond(json: #"{"organization":{"plan_display_name":"Ultra"}}"#)
+
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.server = $0 else { return false }
+            return true
+        }
+        XCTAssertEqual(ClaudeStubProtocol.requests.count, 2)
+        XCTAssertEqual(ClaudeProfilePlanCache.load(from: defaults)?.planName, "Ultra")
+
+        ClaudeStubProtocol.reset()
+        defaults.removePersistentDomain(forName: suiteName)
+        await assertThrows(try await service().fetchUsage(ownDataDate: nil)) {
+            guard case ClaudeUsageError.offline = $0 else { return false }
+            return true
+        }
+        XCTAssertEqual(ClaudeStubProtocol.requests.count, 1)
+    }
+
+    func testFailureLogLinesCarryOnlyPublicFields() {
+        let rejection = ProviderRejection(
+            provider: "claude",
+            endpoint: "usage",
+            status: 403,
+            errorType: "permission_error",
+            retryAfter: "120"
+        )
+
+        XCTAssertEqual(rejection.line, "claude usage status=403 error_type=permission_error retry_after=120")
+        XCTAssertEqual(
+            ProviderRejection(provider: "codex", endpoint: "usage", status: 500, errorType: nil, retryAfter: nil).line,
+            "codex usage status=500"
+        )
+    }
+
+    func testFailureLogLinesDropAnythingThatCouldCarryASecret() {
+        let secret = "sk-ant-oat01-AbCdEf Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig user@example.com"
+        let line = ProviderRejection(
+            provider: "claude",
+            endpoint: "profile",
+            status: 403,
+            errorType: secret,
+            retryAfter: secret
+        ).line
+
+        XCTAssertEqual(line, "claude profile status=403")
+        XCTAssertFalse(line.contains("sk-ant"))
+        XCTAssertFalse(line.contains("Bearer"))
+        XCTAssertFalse(line.contains("@"))
+    }
+
+    func testFailureLogReadsTheErrorTypeAndRetryAfterFromTheResponseOnly() throws {
+        let url = try XCTUnwrap(URL(string: "https://api.anthropic.com/api/oauth/usage"))
+        let http = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 403,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Retry-After": "90"]
+        ))
+        let body = Data(#"{"error":{"type":"permission_error","message":"org 1234 token abc"},"request_id":"req_1"}"#.utf8)
+
+        let rejection = ProviderRejection(provider: "claude", endpoint: "usage", response: http, body: body)
+
+        XCTAssertEqual(rejection.line, "claude usage status=403 error_type=permission_error retry_after=90")
+        XCTAssertFalse(rejection.line.contains("1234"))
+        XCTAssertFalse(rejection.line.contains("req_1"))
+    }
+
+    func testWhilePausedNothingIsSentWhenTheProfileIsKnownAndTheQuotaCheckIsOff() async throws {
+        ClaudeProfilePlanCache(
+            accountKey: ClaudeAccountKey.make("refresh"),
+            planName: "Ultra",
+            checkedAt: now.addingTimeInterval(-3600)
+        ).save(to: defaults)
+
+        let fetch = try await service().fetchWhilePaused(ownDataDate: nil, quotaCheck: false, scopedModelName: nil)
+
+        XCTAssertNil(fetch.usage)
+        XCTAssertEqual(fetch.plan, "Ultra")
         XCTAssertTrue(ClaudeStubProtocol.requests.isEmpty)
     }
 
@@ -233,7 +429,12 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertNil(configuration.httpCookieStorage)
     }
 
-    private func service(now date: Date? = nil, renewals: Counter = Counter(), reads: Counter = Counter()) -> ClaudeUsageService {
+    private func service(
+        now date: Date? = nil,
+        renewals: Counter = Counter(),
+        reads: Counter = Counter(),
+        expired: Bool = false
+    ) -> ClaudeUsageService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ClaudeStubProtocol.self]
         let fixed = date ?? now
@@ -241,13 +442,13 @@ final class ClaudeUsageServiceTests: XCTestCase {
             credentials: ClaudeCredentialProvider(
                 usable: {
                     await reads.increment()
-                    return Self.credentials("token-1")
+                    return Self.credentials("token-1", expired: expired)
                 },
                 afterRejection: { _ in
                     await renewals.increment()
                     return Self.credentials("token-2")
                 },
-                withoutRenewal: { Self.credentials("token-1") }
+                withoutRenewal: { Self.credentials("token-1", expired: expired) }
             ),
             session: URLSession(configuration: configuration),
             claudeCodeFile: directory.appendingPathComponent(".claude.json"),
@@ -256,12 +457,12 @@ final class ClaudeUsageServiceTests: XCTestCase {
         )
     }
 
-    private static func credentials(_ token: String) -> ClaudeCredentials {
+    private static func credentials(_ token: String, expired: Bool = false) -> ClaudeCredentials {
         ClaudeCredentials(
             accessToken: token,
             subscriptionType: "max",
             rateLimitTier: "default_claude_max_20x",
-            expiresAt: nil,
+            expiresAt: expired ? Date(timeIntervalSince1970: 1_000_000_000) : nil,
             refreshToken: "refresh"
         )
     }

@@ -14,7 +14,7 @@ struct ClaudeCredentials: Equatable {
         guard let multiplier = Self.maxMultiplier(from: rateLimitTier) else {
             return subscriptionType
         }
-        return "max_\(multiplier)"
+        return multiplier == "20x" ? "Ultra" : "max_\(multiplier)"
     }
 
     func isExpired(at now: Date) -> Bool {

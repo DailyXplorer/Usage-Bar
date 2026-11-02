@@ -22,7 +22,8 @@ final class PlanBadgeLabelTests: XCTestCase {
 
     func testClaudeMapsMaxMultipliersWithoutTheBrand() {
         XCTAssertEqual(PlanBadgeLabel.text(for: "max_5x", provider: .claude), "Max 5x")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "max-20x", provider: .claude), "Max 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "max-20x", provider: .claude), "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "max_20x", provider: .claude), "Ultra")
         XCTAssertEqual(PlanBadgeLabel.text(for: "max", provider: .claude), "Max")
         XCTAssertEqual(PlanBadgeLabel.text(for: "pro", provider: .claude), "Pro")
     }
@@ -30,7 +31,7 @@ final class PlanBadgeLabelTests: XCTestCase {
     func testClaudeShowsTheProfilePlanNameWithoutTheBrand() {
         XCTAssertEqual(PlanBadgeLabel.text(for: "Ultra", provider: .claude), "Ultra")
         XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Ultra", provider: .claude), "Ultra")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Max 20x", provider: .claude), "Max 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Max 20x", provider: .claude), "Ultra")
         XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Team", provider: .claude), "Team")
         XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Enterprise", provider: .claude), "Enterprise")
     }

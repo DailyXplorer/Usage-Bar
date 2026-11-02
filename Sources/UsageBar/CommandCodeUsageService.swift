@@ -2,11 +2,17 @@ import Foundation
 
 struct CommandCodeCredentials {
     let apiKey: String
+
+    var fingerprint: String {
+        CredentialFingerprint.make(apiKey) ?? ""
+    }
 }
 
 enum CommandCodeUsageError: LocalizedError {
     case notSignedIn
-    case invalidKey
+    case invalidKey(fingerprint: String)
+    case keyOnHold
+    case signedOut
     case throttled(retryAfter: Date?)
     case network(String)
     case httpStatus(Int)
@@ -18,6 +24,10 @@ enum CommandCodeUsageError: LocalizedError {
             return "No Command Code key found. Run cmd login in Terminal."
         case .invalidKey:
             return "Command Code rejected the key. Run cmd login again in Terminal."
+        case .keyOnHold:
+            return "Command Code is waiting before trying the saved key again."
+        case .signedOut:
+            return "Signed out of Command Code: the saved key no longer works. Run cmd login in Terminal, or hide Command Code in Settings."
         case .throttled:
             return "Command Code paused usage updates. Usage Bar will try again later."
         case .network:
@@ -59,7 +69,8 @@ actor CommandCodeUsageService {
 
     func fetchUsage(
         from files: [URL] = CommandCodeUsageService.authFileCandidates(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        holdingKey heldFingerprint: String? = nil
     ) async throws -> (usage: CommandCodeUsageSnapshot, credentials: CommandCodeCredentials) {
         let generation = beginFetch()
         let credentials: CommandCodeCredentials
@@ -70,6 +81,9 @@ actor CommandCodeUsageService {
             throw error
         }
         try Task.checkCancellation()
+        if let heldFingerprint, heldFingerprint == credentials.fingerprint {
+            throw CommandCodeUsageError.keyOnHold
+        }
         clearCachesForChangedCredentials(credentials, generation: generation)
 
         do {
@@ -96,9 +110,9 @@ actor CommandCodeUsageService {
                 orgLimits: account.orgLimits
             )
             return (snapshot, credentials)
-        } catch CommandCodeUsageError.invalidKey {
+        } catch CommandCodeUsageError.invalidKey(let fingerprint) {
             clearCaches(ifCurrent: generation)
-            throw CommandCodeUsageError.invalidKey
+            throw CommandCodeUsageError.invalidKey(fingerprint: fingerprint)
         } catch {
             throw error
         }
@@ -176,8 +190,9 @@ actor CommandCodeUsageService {
             throw CommandCodeUsageError.network("invalid response")
         }
         guard http.statusCode == 200 else {
+            ProviderLog.rejected(.commandcode, endpoint: trimmed, response: http)
             if http.statusCode == 401 {
-                throw CommandCodeUsageError.invalidKey
+                throw CommandCodeUsageError.invalidKey(fingerprint: CredentialFingerprint.make(token) ?? "")
             }
             if http.statusCode == 429 {
                 throw CommandCodeUsageError.throttled(retryAfter: RetryAfter.date(from: http, now: now()))

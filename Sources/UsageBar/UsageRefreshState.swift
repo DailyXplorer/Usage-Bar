@@ -41,12 +41,31 @@ struct RefreshPolicy: Equatable {
     }
 }
 
+struct KeyRejection: Codable, Equatable {
+    static let rejectionsBeforeSignOut = 2
+    static let retryInterval: TimeInterval = 60 * 60
+
+    var fingerprint: String
+    var count: Int
+    var lastRejectedAt: Date
+
+    var isSignedOut: Bool {
+        count >= Self.rejectionsBeforeSignOut
+    }
+
+    func holdsRequests(at now: Date) -> Bool {
+        let elapsed = now.timeIntervalSince(lastRejectedAt)
+        return isSignedOut && elapsed >= 0 && elapsed < Self.retryInterval
+    }
+}
+
 struct UsageRefreshState: Codable {
     var lastSuccess: Date?
     var lastAttempt: Date?
     var nextRefresh: Date?
     var lastError: String?
     var backoff = ThrottleBackoff()
+    var keyRejection: KeyRejection?
 
     func nextEligible(policy: RefreshPolicy) -> Date {
         let floor = policy.minimumGap.flatMap { gap in lastAttempt.map { $0.addingTimeInterval(gap) } }
@@ -80,6 +99,7 @@ struct UsageRefreshState: Codable {
     mutating func succeed(at now: Date, dataDate: Date? = nil, interval: TimeInterval, resetsBackoff: Bool = true) {
         lastSuccess = min(dataDate ?? now, now)
         lastError = nil
+        keyRejection = nil
         nextRefresh = now.addingTimeInterval(interval)
         if resetsBackoff {
             backoff.reset()
@@ -93,6 +113,11 @@ struct UsageRefreshState: Codable {
     mutating func fail(_ message: String?, at now: Date, retryAfter delay: TimeInterval) {
         lastError = message
         nextRefresh = now.addingTimeInterval(delay)
+    }
+
+    mutating func rejectKey(fingerprint: String, at now: Date) {
+        let previous = keyRejection?.fingerprint == fingerprint ? keyRejection?.count ?? 0 : 0
+        keyRejection = KeyRejection(fingerprint: fingerprint, count: previous + 1, lastRejectedAt: now)
     }
 
     mutating func throttle(_ message: String, retryAfter: Date?, at now: Date, interval: TimeInterval, scope: String? = nil) {
@@ -118,6 +143,7 @@ struct UsageFetchContext {
     var dataDate: Date?
     var claudeQuotaCheck = false
     var claudeScopedModelName: String?
+    var heldKeyFingerprint: String?
 }
 
 enum UsageFetchResult {
@@ -167,9 +193,9 @@ struct UsageFetcher {
             case .cursor:
                 return .cursor(try await cursor.fetchUsage())
             case .opencode:
-                return .opencode(try await opencode.fetchUsage().usage)
+                return .opencode(try await opencode.fetchUsage(holdingKey: context.heldKeyFingerprint).usage)
             case .commandcode:
-                return .commandcode(try await commandcode.fetchUsage().usage)
+                return .commandcode(try await commandcode.fetchUsage(holdingKey: context.heldKeyFingerprint).usage)
             }
         }
     }

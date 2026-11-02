@@ -173,8 +173,11 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
      read the session and weekly limits from its response headers. That request
      counts toward your Claude plan. It cannot see per-model weekly limits, so
      those rows keep their last values.
-- When the usage endpoint answers 429, Usage Bar pauses it until `Retry-After`,
-  or 5, 15, 30 then 60 minutes on repeated 429s, never more than an hour. The
+- When the usage endpoint answers 429, or 403 without an Anthropic error body
+  (Claude Code treats that 403 as a throttle too), Usage Bar pauses it until
+  `Retry-After`, or 5, 15, 30 then 60 minutes on repeated answers, never more
+  than an hour. A 403 that carries an Anthropic error body is a sign-in problem
+  instead: the section names the error type and nothing is paused. The
   pause is stored per Claude account and survives a restart; the refresh button
   does not skip it. The Claude section keeps the last values and says
   "Anthropic paused usage updates. Showing values from ‹time›. Next try at
@@ -187,10 +190,11 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   (for example `$12.50 / $50.00 spent`) and Claude credit windows appear when
   enabled.
 - The plan badge comes from Anthropic's profile (for example **Ultra**),
-  checked at most once a day, else from the sign-in's plan fields. When the
-  usage comes from Claude Code's saved copy or the quota check, the badge uses the profile name
-  already stored for that account, or the sign-in's plan fields; Usage Bar
-  sends no profile request then.
+  checked at most once a day whenever a Claude token is available, even while
+  the usage endpoint is paused or failing, else from the sign-in's plan fields
+  (Max 20x shows as **Ultra**). When the usage comes from Claude Code's saved
+  copy, the badge uses the profile name already stored for that account, or the
+  sign-in's plan fields; Usage Bar sends no profile request then.
 - If there is no Claude Code session, the section says how to sign in.
 
 ### Cursor
@@ -249,9 +253,17 @@ Grok token. When no source works, the section says how to sign in.
   session window.
 - If there is no `opencode-go` key, the menu bar segment stays hidden and the
   popover section says how to add one.
+- If OpenCode's saved key is rejected twice in a row, the section says "Signed
+  out of OpenCode Go" and how to reconnect, its values are dropped and the menu
+  bar shows `--%`. The saved key is tried again at most once an hour, or at
+  once when the key changes.
 
 ### Command Code
 
+- If the saved key is rejected twice in a row, the section says "Signed out of
+  Command Code", its values are dropped and the menu bar shows `--%`. The key
+  is tried again at most once an hour, or at once after `cmd login` writes a new
+  one.
 - Reads the API key the Command Code CLI writes to `~/.commandcode/auth.json`
   on `cmd login` (`apiKey`). `COMMAND_CODE_API_KEY` (or `COMMANDCODE_API_KEY`)
   overrides that file when set. No key is ever copied or rewritten.
@@ -373,11 +385,24 @@ open. Missing reset times are omitted until a response supplies a reliable date.
   saved in Settings. If it has expired, the section says so until Cursor
   renews it or you paste a new token. Usage Bar does not renew it.
 - The `opencode-go` key is read from OpenCode's local database or `auth.json`.
-  If it is missing or rejected, the section says how to add one or that the
-  key is invalid until the next `/connect`.
+  If it is missing, the section says how to add one. If it is rejected twice,
+  the provider shows as signed out until `/connect` writes a new key.
 - The Command Code key is read from `~/.commandcode/auth.json`. If it is
-  missing or rejected, the section says how to sign in or that the key is
-  invalid until the next `cmd login`.
+  missing, the section says how to sign in. If it is rejected twice, the
+  provider shows as signed out until the next `cmd login`.
+- **Troubleshooting Claude**: "Anthropic paused usage updates" after a 403 is
+  Anthropic throttling the usage endpoint, not a sign-in problem. Leave it
+  alone: Usage Bar retries on its own, and re-running `/login` does not help.
+  "This Claude Code sign-in cannot read usage (‹type›)" means Anthropic
+  rejected the sign-in itself: run `claude`, then `/login`.
+- **Troubleshooting signed-out providers**: OpenCode and Command Code leave
+  their key on disk after you sign out, so a dead key still counts as a saved
+  one. Reconnect (`/connect` or `cmd login`) or turn the provider off under
+  Settings → Popover.
+- **Diagnosing a failed request**: every non-2xx answer is logged with its
+  provider, endpoint, status, Anthropic error type and `Retry-After`, never a
+  token or a body. In Terminal:
+  `log show --last 1h --predicate 'subsystem == "com.usagebar.app"'`.
 
 ## License
 

@@ -391,7 +391,8 @@ final class UsageModel: ObservableObject {
     }
 
     private func placeholder(for provider: LimitBucket.Provider) -> String {
-        guard !isLoading(for: provider), buckets(for: provider).isEmpty, errorMessage(for: provider) != nil else {
+        guard !isLoading(for: provider), buckets(for: provider).isEmpty, errorMessage(for: provider) != nil,
+              !isSignedOut(provider) else {
             return MenuBarSegment.placeholder
         }
         return MenuBarSegment.unavailable
@@ -589,7 +590,8 @@ final class UsageModel: ObservableObject {
         let context = UsageFetchContext(
             dataDate: dataDate(for: endpoint.provider),
             claudeQuotaCheck: claudeQuotaCheckEnabled,
-            claudeScopedModelName: claudeScopedModelName
+            claudeScopedModelName: claudeScopedModelName,
+            heldKeyFingerprint: state.keyRejection.flatMap { $0.holdsRequests(at: date) ? $0.fingerprint : nil }
         )
         let fetch = fetcher.fetch
         let id = UUID()
@@ -705,6 +707,9 @@ final class UsageModel: ObservableObject {
             }
         case .failure(let error):
             receiveFailure(error, from: endpoint, state: &state, at: date)
+            if endpoint.provider == .claude {
+                adoptStoredClaudePlan()
+            }
         }
         refreshStates[endpoint] = state
         updateLastUpdated()
@@ -739,6 +744,7 @@ final class UsageModel: ObservableObject {
             }
             claudeAccountKey = key
         }
+        claudePlan = fetch.plan ?? claudePlan
         if endpoint == .claude {
             claudeErrorMessage = nil
         }
@@ -748,7 +754,6 @@ final class UsageModel: ObservableObject {
         }
         let fresh = ClaudeLimits.buckets(from: usage, now: date)
         claudeAvailable = true
-        claudePlan = fetch.plan ?? claudePlan
         claudeBuckets = fetch.source == .quotaCheck
             ? ClaudeLimits.merged(
                 fresh: fresh,
@@ -765,6 +770,12 @@ final class UsageModel: ObservableObject {
         )
     }
 
+    private func adoptStoredClaudePlan() {
+        guard let cache = ClaudeProfilePlanCache.load(from: defaults), let planName = cache.planName,
+              claudeAccountKey == nil || cache.accountKey == claudeAccountKey else { return }
+        claudePlan = planName
+    }
+
     private func receiveFailure(
         _ error: Error,
         from endpoint: UsageEndpoint,
@@ -772,6 +783,17 @@ final class UsageModel: ObservableObject {
         at date: Date
     ) {
         let interval = endpoint.policy.interval
+        if let fingerprint = Self.rejectedKey(error) {
+            state.rejectKey(fingerprint: fingerprint, at: date)
+            let shown: Error = state.keyRejection?.isSignedOut == true ? Self.signedOutError(for: endpoint) : error
+            state.fail(shown.localizedDescription, at: date, retryAfter: interval)
+            applyError(shown, to: endpoint)
+            return
+        }
+        if Self.isKeyOnHold(error) {
+            state.fail(state.lastError, at: date, retryAfter: interval)
+            return
+        }
         let message = error.localizedDescription
         if let retryAfter = Self.throttleRetryAfter(error) {
             let scope = endpoint == .claude ? claudeAccountKey : nil
@@ -807,6 +829,28 @@ final class UsageModel: ObservableObject {
         default:
             return nil
         }
+    }
+
+    private static func rejectedKey(_ error: Error) -> String? {
+        switch error {
+        case OpenCodeUsageError.invalidKey(let fingerprint), CommandCodeUsageError.invalidKey(let fingerprint):
+            return fingerprint
+        default:
+            return nil
+        }
+    }
+
+    private static func isKeyOnHold(_ error: Error) -> Bool {
+        switch error {
+        case OpenCodeUsageError.keyOnHold, CommandCodeUsageError.keyOnHold:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func signedOutError(for endpoint: UsageEndpoint) -> Error {
+        endpoint == .opencode ? OpenCodeUsageError.signedOut : CommandCodeUsageError.signedOut
     }
 
     private static func mayHaveReachedAnthropic(_ error: Error, from endpoint: UsageEndpoint) -> Bool {
@@ -867,6 +911,11 @@ final class UsageModel: ObservableObject {
                 opencodeBuckets = []
                 opencodePlan = nil
                 opencodeErrorMessage = nil
+            } else if case OpenCodeUsageError.signedOut = error {
+                opencodeAvailable = false
+                opencodeBuckets = []
+                opencodePlan = nil
+                opencodeErrorMessage = error.localizedDescription
             } else {
                 opencodeAvailable = true
                 opencodeErrorMessage = error.localizedDescription
@@ -877,6 +926,11 @@ final class UsageModel: ObservableObject {
                 commandcodeBuckets = []
                 commandcodePlan = nil
                 commandcodeErrorMessage = nil
+            } else if case CommandCodeUsageError.signedOut = error {
+                commandcodeAvailable = false
+                commandcodeBuckets = []
+                commandcodePlan = nil
+                commandcodeErrorMessage = error.localizedDescription
             } else {
                 commandcodeAvailable = true
                 commandcodeErrorMessage = error.localizedDescription
@@ -919,6 +973,10 @@ final class UsageModel: ObservableObject {
         case .opencode: return opencodeErrorMessage
         case .commandcode: return commandcodeErrorMessage
         }
+    }
+
+    func isSignedOut(_ provider: LimitBucket.Provider) -> Bool {
+        UsageEndpoint(rawValue: provider.rawValue).flatMap { refreshStates[$0]?.keyRejection?.isSignedOut } == true
     }
 
     func claudePausedUntil(at date: Date) -> Date? {

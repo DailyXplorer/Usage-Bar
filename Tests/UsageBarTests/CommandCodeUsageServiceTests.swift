@@ -268,6 +268,46 @@ final class CommandCodeUsageServiceTests: XCTestCase {
         XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/billing/subscriptions"), 2)
     }
 
+    func testRejectedKeyCarriesItsFingerprintAndNeverTheKey() async throws {
+        let clock = CommandCodeUsageServiceTestClock(start)
+        CommandCodeUsageServiceStubURLProtocol.configure { _ in .status(401) }
+        let service = makeService(clock: clock)
+
+        do {
+            _ = try await fetchUsage(service, key: "secret-key-one")
+            XCTFail("Expected a rejection")
+        } catch CommandCodeUsageError.invalidKey(let fingerprint) {
+            XCTAssertEqual(fingerprint, CredentialFingerprint.make("secret-key-one"))
+            XCTAssertFalse(fingerprint.contains("secret"))
+        }
+    }
+
+    func testHeldKeyIsNotSentButAChangedKeyIsRetriedAtOnce() async throws {
+        let clock = CommandCodeUsageServiceTestClock(start)
+        CommandCodeUsageServiceStubURLProtocol.configure { request in
+            self.standardResponse(
+                for: request,
+                periodStart: "2026-09-01T00:00:00Z",
+                periodEnd: "2026-09-06T02:00:00Z"
+            )
+        }
+        let service = makeService(clock: clock)
+        let held = CredentialFingerprint.make("key-one")
+
+        do {
+            _ = try await service.fetchUsage(from: [], environment: ["COMMAND_CODE_API_KEY": "key-one"], holdingKey: held)
+            XCTFail("Expected the key to stay on hold")
+        } catch CommandCodeUsageError.keyOnHold {
+            XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 0)
+        }
+
+        _ = try await service.fetchUsage(from: [], environment: ["COMMAND_CODE_API_KEY": "key-two"], holdingKey: held)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 1)
+
+        _ = try await service.fetchUsage(from: [], environment: ["COMMAND_CODE_API_KEY": "key-one"], holdingKey: nil)
+        XCTAssertEqual(CommandCodeUsageServiceStubURLProtocol.requestCount(for: "/alpha/whoami"), 2)
+    }
+
     func testWhoamiAsksForSpendLimitsOnEveryRefresh() async throws {
         let clock = CommandCodeUsageServiceTestClock(start)
         CommandCodeUsageServiceStubURLProtocol.configure { request in

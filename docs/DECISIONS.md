@@ -55,7 +55,7 @@ In this order:
 
 ### D4 Claude 429 pause
 
-A 429 on the usage endpoint pauses it until `Retry-After` when that is greater
+A 429 (or a 403 without an error envelope, D22) on the usage endpoint pauses it until `Retry-After` when that is greater
 than zero, otherwise for 5, 15, 30, then 60 minutes on consecutive 429s. Any
 pause is capped at 60 minutes. The pause is stored per account (a hash of the
 account id from `~/.claude.json`, or of the sign-in's refresh token when no
@@ -70,11 +70,12 @@ time is not today. The backoff resets on the next success.
 
 From `GET /api/oauth/profile` → `organization.plan_display_name` (for example
 "Ultra", shown as "Ultra"; see D5b), requested with Claude Code's profile request
-shape and cached for 24 hours. Otherwise the label derived from the sign-in's
-`subscriptionType` and `rateLimitTier`. When Claude Code's saved copy or the
-quota check supplies the usage, the stored profile name for that account is
-used without a profile request; without one, the sign-in is read (never
-renewed) for its label.
+shape. D23 says when it is requested. Otherwise the label derived from the
+sign-in's `subscriptionType` and `rateLimitTier`: `max` with the 20x tier is
+"Ultra", the 5x tier is "Max 5x", any other plan keeps its own name. A raw key
+such as `max_20x` is never shown. When Claude Code's saved copy supplies the
+usage, the stored profile name for that account is used without a profile
+request; without one, the sign-in is read (never renewed) for its label.
 
 ### D6 Claude usage credits
 
@@ -92,6 +93,30 @@ write-back cannot be cancelled by a caller; the stored credential is re-read
 just before writing and a newer token written by Claude Code wins; every unknown
 field (for example `mcpOAuth`) is preserved; rotated tokens are never lost when
 a verification read fails; a 401 triggers one renewal and one retry.
+
+### D22 Claude 403 on the usage endpoint
+
+A 403 is classified the way Claude Code classifies it. When the body carries an
+Anthropic error envelope (`{"error":{"type":…}}`), it is an auth rejection: the
+section says "This Claude Code sign-in cannot read usage (‹error type›). Run
+claude in Terminal, then /login." and nothing is paused. The error type is shown
+only when it is a plain lowercase identifier. Any other 403 is a throttle,
+handled exactly like a 429 (D4, D10): it pauses until `Retry-After` when that is
+greater than zero, otherwise for 5, 15, 30, then 60 minutes; the attempt counter
+advances with every throttle of either kind and resets on the next success; the
+section shows the throttle text of D4. The "/login" hint appears only for an
+auth rejection.
+
+### D23 Claude plan refresh
+
+The profile request (D5) is sent at most once every 24 hours whenever a usable
+Claude token is available, whatever the usage call returned: after a 200, a
+throttle, a server error or an undecodable reply, and also while the usage
+endpoint is paused. The result is stored per account and survives a restart. It
+is not sent while an auth rejection (a 401 after renewal, or a 403 with an error
+envelope) is the usage call's answer, with an expired token, or when the usage
+request never reached Anthropic. After a failed profile request the next try
+comes an hour later. A profile failure is never shown to the user.
 
 ## All providers
 
@@ -123,6 +148,16 @@ Every server-requested pause (`Retry-After` or backoff, any provider) is capped
 at 60 minutes and expires; nothing can block a provider forever, including a
 pause restored from an earlier run.
 
+### D10b Rejected responses are logged
+
+Every non-2xx answer to a usage or profile request of any provider is logged
+through `os.Logger` (subsystem: the bundle id, category: the provider) as one
+line with the provider, the endpoint name, the HTTP status, Anthropic's error
+type when the body has one, and `Retry-After` when present, all marked public.
+Nothing else is logged: no token, key, account or organization id, email, body
+text or usage value. The error type and `Retry-After` pass a strict pattern
+before they are written.
+
 ### D11 Reset windows
 
 A window whose reset time has passed since its data was fetched is shown as
@@ -143,7 +178,7 @@ exception text.
 ### D5b Plan badges name the plan only
 
 Every provider's plan badge shows the plan name and never the provider brand:
-"Ultra", "Max 20x", "Max 5x", "Pro", "Plus", "Team", "Enterprise", "Go";
+"Ultra" (the former Max 20x), "Max 5x", "Pro", "Plus", "Team", "Enterprise", "Go";
 never "Claude Ultra" or "Cursor Pro". The provider icon beside the badge
 already names the service. A leading brand word in a server or sign-in value
 ("Claude ", "Cursor ", "ChatGPT ", "Codex ", "OpenCode ", "Command Code ") is
@@ -276,6 +311,23 @@ Go limits are per model and change over time.
   interval). The 5-hour and weekly
   windows are hidden when `windowLimits.limited` is false; the monthly pool
   still shows.
+
+### D24 Signed-out OpenCode Go and Command Code
+
+- Two consecutive 401s on the same saved key mean the provider is signed out.
+  A 401 on a different key starts the count again, and any success clears it.
+  The key is compared through a short SHA-256 fingerprint, which is the only
+  thing stored; the key itself is never persisted.
+- The signed-out provider drops its values, its plan and its persisted
+  snapshot rows, and its section shows one line: "Signed out of OpenCode Go:
+  the saved key no longer works. Run /connect in OpenCode, or hide OpenCode Go
+  in Settings." (Command Code: "Run cmd login in Terminal"). Its menu bar
+  segment shows `--%`, as Cursor does when signed out.
+- While signed out, the saved key is sent to the provider at most once an
+  hour. The normal 5-minute cycle still reads the credential locally, so a new
+  key is tried at once. The provider returns to normal as soon as a request
+  succeeds.
+- The state survives a restart.
 
 ## Notifications and pace
 

@@ -37,7 +37,7 @@ enum PlanBadgeLabel {
         case "max5x":
             return "Max 5x"
         case "max20x":
-            return "Max 20x"
+            return "Ultra"
         default:
             return sharedText(for: key, original: original)
         }

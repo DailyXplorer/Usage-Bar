@@ -92,6 +92,7 @@ actor UsageService {
             throw UsageError.network("invalid response")
         }
         guard http.statusCode == 200 else {
+            ProviderLog.rejected(.codex, endpoint: "usage", response: http)
             switch http.statusCode {
             case 401:
                 throw UsageError.signInExpired

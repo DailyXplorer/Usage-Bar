@@ -360,6 +360,100 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeBadgeFromTheCredentialFallbackThenThrottledAfterA403() async throws {
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        ClaudeStubProtocol.reset()
+        defer { ClaudeStubProtocol.reset() }
+        let clock = SharedClock(Date())
+        let reset = ISO8601DateFormatter().string(from: clock.date.addingTimeInterval(2 * 86_400))
+        let usage = ClaudeFixtures.withoutSession
+            .replacingOccurrences(of: "2026-11-02T23:00:00.000000+00:00", with: reset)
+            .replacingOccurrences(of: "2026-11-02T23:00:00+00:00", with: reset)
+        ClaudeStubProtocol.respond(json: usage)
+        ClaudeStubProtocol.respond(status: 500, json: "{}")
+        ClaudeStubProtocol.respond(status: 403, json: "{}")
+        let model = makeClaudeModel(
+            clock: clock,
+            defaults: defaults,
+            claudeCodeFile: FileManager.default.temporaryDirectory.appendingPathComponent("missing-\(UUID().uuidString).json")
+        )
+
+        model.refreshNow(force: true)
+        try await waitForIdle(model)
+        XCTAssertEqual(model.claudePlan, "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: model.claudePlan ?? "", provider: .claude), "Ultra")
+        try renderBothModes(model, name: "claude-ultra-credential-fallback")
+
+        clock.advance(by: 16 * 60)
+        model.refreshNow(force: true)
+        try await waitForIdle(model)
+        XCTAssertNotNil(model.claudePausedUntil(at: clock.date))
+        XCTAssertFalse(model.claudeBuckets.isEmpty)
+        XCTAssertTrue(model.sectionMessage(for: .claude)?.hasPrefix("Anthropic paused usage updates. Showing values from") == true)
+        try renderBothModes(model, name: "claude-throttled-after-403")
+    }
+
+    @MainActor
+    func testOpenCodeAndCommandCodeSignedOutAfterTwoRejectedKeys() async throws {
+        let suiteName = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let clock = SharedClock(Date())
+        let script = ScriptedFetches()
+        let codex = try JSONDecoder().decode(
+            UsageResponse.self,
+            from: Data(Self.codexPlus.utf8)
+        )
+        for _ in 0..<2 {
+            await script.queue(.codex, .success(.codex(codex)))
+            await script.queue(.opencode, .failure(OpenCodeUsageError.invalidKey(fingerprint: "0123456789abcdef")))
+            await script.queue(.commandcode, .failure(CommandCodeUsageError.invalidKey(fingerprint: "fedcba9876543210")))
+        }
+        let everyProvider: Set<LimitBucket.Provider> = [.codex, .opencode, .commandcode]
+        ProviderPreferences(popover: everyProvider, menuBar: everyProvider).save(to: defaults)
+        let model = UsageModel(
+            defaults: defaults,
+            fetcher: UsageFetcher { endpoint, context in try await script.next(endpoint, context) },
+            now: { clock.date },
+            automaticallySchedules: false
+        )
+
+        for _ in 0..<2 {
+            model.refreshNow(force: true)
+            try await waitForIdle(model)
+            clock.advance(by: 301)
+        }
+
+        XCTAssertTrue(model.isSignedOut(.opencode))
+        XCTAssertTrue(model.isSignedOut(.commandcode))
+        try renderBothModes(model, name: "opencode-command-code-signed-out")
+        let label = MenuBarLabelImage.make(segments: model.menuBarSegments)
+        XCTAssertEqual(
+            model.menuBarSegments.filter { $0.provider != .codex }.map(\.value),
+            [MenuBarSegment.placeholder, MenuBarSegment.placeholder]
+        )
+        for scheme in [ColorScheme.light, .dark] {
+            let view = Image(nsImage: label)
+                .renderingMode(.template)
+                .foregroundStyle(scheme == .dark ? Color.white : Color.black)
+                .padding(6)
+                .background(scheme == .dark ? Color(white: 0.16) : Color(white: 0.93))
+            try render(view, to: buildDirectory.appendingPathComponent("UsageBar-menubar-signed-out-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+
+    @MainActor
+    private func waitForIdle(_ model: UsageModel) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while model.isLoading, Date() < deadline {
+            await Task.yield()
+        }
+        XCTAssertFalse(model.isLoading)
+    }
+
+    @MainActor
     func testEveryProviderAtOnce() throws {
         AppTheme.loadFont()
         let now = Date()
