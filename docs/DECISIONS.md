@@ -69,7 +69,7 @@ time is not today. The backoff resets on the next success.
 ### D5 Claude plan name
 
 From `GET /api/oauth/profile` → `organization.plan_display_name` (for example
-"Ultra", shown as "Claude Ultra"), requested with Claude Code's profile request
+"Ultra", shown as "Ultra"; see D5b), requested with Claude Code's profile request
 shape and cached for 24 hours. Otherwise the label derived from the sign-in's
 `subscriptionType` and `rateLimitTier`. When Claude Code's saved copy or the
 quota check supplies the usage, the stored profile name for that account is
@@ -139,6 +139,16 @@ windows.
 
 Error text says what happened and what to do, with no HTTP codes, URLs or
 exception text.
+
+### D5b Plan badges name the plan only
+
+Every provider's plan badge shows the plan name and never the provider brand:
+"Ultra", "Max 20x", "Max 5x", "Pro", "Plus", "Team", "Enterprise", "Go";
+never "Claude Ultra" or "Cursor Pro". The provider icon beside the badge
+already names the service. A leading brand word in a server or sign-in value
+("Claude ", "Cursor ", "ChatGPT ", "Codex ", "OpenCode ", "Command Code ") is
+dropped when a plan name remains after it. A plan whose own name contains a
+brand, such as "SuperGrok", stays as written.
 
 ## Codex
 

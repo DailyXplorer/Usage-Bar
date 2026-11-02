@@ -186,7 +186,7 @@ Agent workflow, tests, and GitHub releases are in [AGENTS.md](AGENTS.md).
   limit kinds Anthropic adds appear with a readable name. **Usage Credits**
   (for example `$12.50 / $50.00 spent`) and Claude credit windows appear when
   enabled.
-- The plan badge comes from Anthropic's profile (for example **Claude Ultra**),
+- The plan badge comes from Anthropic's profile (for example **Ultra**),
   checked at most once a day, else from the sign-in's plan fields. When the
   usage comes from Claude Code's saved copy or the quota check, the badge uses the profile name
   already stored for that account, or the sign-in's plan fields; Usage Bar
