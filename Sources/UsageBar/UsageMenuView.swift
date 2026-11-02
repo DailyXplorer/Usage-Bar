@@ -298,10 +298,21 @@ private struct LimitCard: View {
 
             UsageProgressBar(value: shown.remainingPercent, color: color)
 
-            Text("\(shown.remainingPercent)% Left")
-                .font(AppTheme.font(size: 11, weight: .medium))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(shown.remainingPercent)% Left")
+                    .font(AppTheme.font(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+
+                if let paceText {
+                    Spacer(minLength: 8)
+
+                    Text(paceText)
+                        .font(AppTheme.font(size: 10.5))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                }
+            }
 
             if let detail = bucket.detail {
                 Text(detail)
@@ -334,6 +345,11 @@ private struct LimitCard: View {
         }
     }
 
+    private var paceText: String? {
+        guard !hasReset, resetText != nil else { return nil }
+        return PaceForecast.text(for: bucket, at: date)
+    }
+
     static let resetCaption = "Reset, waiting for new data"
 
     private var resetText: String? {
@@ -350,6 +366,9 @@ private struct LimitCard: View {
             parts.append("limit reached")
         } else if let resetText {
             parts.append(resetText)
+            if let paceText {
+                parts.append(paceText)
+            }
         }
         return parts.joined(separator: ", ")
     }

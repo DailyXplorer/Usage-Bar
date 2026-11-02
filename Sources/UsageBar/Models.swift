@@ -444,6 +444,15 @@ struct LimitBucket: Identifiable, Codable {
         }
     }
 
+    var isTimeWindow: Bool {
+        drivesMenuBar && resetAt != nil
+    }
+
+    var alertKey: String {
+        [provider.rawValue, kind.rawValue, id.scope ?? "", WindowLabels.knownLabel(forWindowSeconds: limitWindowSeconds) ?? ""]
+            .joined(separator: "|")
+    }
+
     func remainingResetSeconds(at date: Date) -> Int? {
         guard let resetAt else { return nil }
         return Self.clampedSeconds(resetAt.timeIntervalSince(date))
@@ -495,7 +504,7 @@ enum WindowLabels {
     static let minutesPer5Hours: Int = 5 * minutesPerHour
     static let minutesPerDay: Int = 24 * minutesPerHour
     static let minutesPerWeek: Int = 7 * minutesPerDay
-    static let minutesPerMonth: Int = 30 * minutesPerDay
+    static let minutesPerCalendarMonth: ClosedRange<Int> = 28 * minutesPerDay...31 * minutesPerDay
     static let minutesPerYear: Int = 365 * minutesPerDay
 
     static func label(forWindowSeconds windowSeconds: Int?, isSecondary: Bool) -> String {
@@ -514,7 +523,7 @@ enum WindowLabels {
         if isApproximate(minutes, expected: minutesPerWeek) {
             return weeklyLimit
         }
-        if isApproximate(minutes, expected: minutesPerMonth) {
+        if isApproximate(minutes, within: minutesPerCalendarMonth) {
             return monthlyLimit
         }
         if isApproximate(minutes, expected: minutesPerYear) {
@@ -528,9 +537,12 @@ enum WindowLabels {
     }
 
     private static func isApproximate(_ minutes: Int, expected: Int) -> Bool {
+        isApproximate(minutes, within: expected...expected)
+    }
+
+    private static func isApproximate(_ minutes: Int, within expected: ClosedRange<Int>) -> Bool {
         let m = Double(minutes)
-        let e = Double(expected)
-        return m >= e * 0.95 && m <= e * 1.05
+        return m >= Double(expected.lowerBound) * 0.95 && m <= Double(expected.upperBound) * 1.05
     }
 }
 

@@ -14,6 +14,7 @@ struct UsageBarApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appDelegate.usageModel)
+                .environmentObject(appDelegate.usageModel.alerts)
                 .environmentObject(appDelegate.appUpdater)
                 .onDisappear {
                     NSApp.setActivationPolicy(.accessory)
@@ -33,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         menuBarController = MenuBarController(model: usageModel, updater: appUpdater)
+        usageModel.alerts.openPopover = { [weak self] in
+            self?.menuBarController?.showPanel()
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(workspaceWillSleep(_:)),

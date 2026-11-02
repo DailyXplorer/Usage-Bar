@@ -164,8 +164,8 @@ struct CursorLayout {
 }
 
 enum CursorLimits {
-    static let weeklyUsageDisplayName = "Weekly usage"
-    static let additionalUsageDisplayName = "Additional usage"
+    static let weeklyUsageDisplayName = "Weekly Usage"
+    static let additionalUsageDisplayName = "Additional Usage"
     static let grokBotDisplayName = "Grok Bot"
     static let weekSeconds = 7 * 24 * 60 * 60
     static let accountMergeNotice = "Account merge in progress. Usage appears once Cursor finishes it."
@@ -280,18 +280,28 @@ enum CursorLimits {
         let usedCents = max(0, spend.individualUsed ?? 0)
         let resetAt = CursorTimestamp.parse(response.billingCycleEnd)
         return bucket(
-            kind: .other,
+            kind: .spendLimit,
             name: additionalUsageDisplayName,
             used: usedCents / limitCents * 100,
             resetAt: resetAt,
             windowSeconds: windowSeconds(from: response.billingCycleStart, to: resetAt),
             now: now,
-            detail: "\(dollars(cents: usedCents)) / \(dollars(cents: limitCents))"
+            detail: MoneyText.spent(usedCents / 100, of: limitCents / 100)
         )
     }
 
-    static func dollars(cents: Double) -> String {
-        String(format: "$%.2f", cents / 100)
+    static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
+        guard bucket.provider == .cursor else { return bucket }
+        var copy = bucket
+        switch bucket.kind {
+        case .weekly:
+            copy.name = weeklyUsageDisplayName
+        case .spendLimit:
+            copy.name = additionalUsageDisplayName
+        default:
+            return bucket
+        }
+        return copy
     }
 
     private static func bucket(

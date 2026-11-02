@@ -237,15 +237,15 @@ final class CommandCodeLimitsTests: XCTestCase {
         var snapshot = goSnapshot()
         snapshot.orgLimits = whoami.orgLimits
         let rows = CommandCodeLimits.buckets(from: snapshot, now: Date(timeIntervalSince1970: 1_793_000_000))
-            .filter { $0.kind == .other }
+            .filter { $0.kind == .spendLimit }
 
         XCTAssertEqual(whoami.orgLimits.count, 2)
-        XCTAssertEqual(rows.map(\.name), ["Model X spend limit", "Org-wide spend limit"])
+        XCTAssertEqual(rows.map(\.name), ["Model X Spend Limit", "Org-Wide Spend Limit"])
         XCTAssertEqual(rows[0].usedPercent, 27)
-        XCTAssertEqual(rows[0].detail, "$5.50 of $20.00/mo")
+        XCTAssertEqual(rows[0].detail, "$5.50 / $20.00 spent this month")
         XCTAssertEqual(rows[0].resetAt, ISODate.parse("2026-12-01T00:00:00Z"))
         XCTAssertTrue(rows[1].reached)
-        XCTAssertEqual(rows[1].detail, "$1.00 of $0.00")
+        XCTAssertEqual(rows[1].detail, "$1.00 / $0.00 spent")
         XCTAssertNotEqual(rows[0].id, rows[1].id)
     }
 

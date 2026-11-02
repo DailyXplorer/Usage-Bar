@@ -63,6 +63,8 @@ struct SettingsView: View {
 
             CursorSessionTokenSection()
 
+            NotificationSettingsSection()
+
             Section {
                 Toggle(isOn: launchAtLoginBinding) {
                     Label {

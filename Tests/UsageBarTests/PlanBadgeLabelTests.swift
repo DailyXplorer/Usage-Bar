@@ -20,16 +20,35 @@ final class PlanBadgeLabelTests: XCTestCase {
         XCTAssertEqual(PlanBadgeLabel.text(for: "proplus", provider: .cursor), "Pro+")
     }
 
-    func testClaudeMapsMaxMultipliers() {
-        XCTAssertEqual(PlanBadgeLabel.text(for: "max_5x", provider: .claude), "Claude Max 5x")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "max-20x", provider: .claude), "Claude Max 20x")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "max", provider: .claude), "Claude Max")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "pro", provider: .claude), "Claude Pro")
+    func testClaudeMapsMaxMultipliersWithoutTheBrand() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "max_5x", provider: .claude), "Max 5x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "max-20x", provider: .claude), "Max 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "max", provider: .claude), "Max")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "pro", provider: .claude), "Pro")
     }
 
-    func testClaudeUsesTheProfilePlanName() {
-        XCTAssertEqual(PlanBadgeLabel.text(for: "Ultra", provider: .claude), "Claude Ultra")
-        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Team", provider: .claude), "Claude Team")
+    func testClaudeShowsTheProfilePlanNameWithoutTheBrand() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Ultra", provider: .claude), "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Ultra", provider: .claude), "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Max 20x", provider: .claude), "Max 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Team", provider: .claude), "Team")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude Enterprise", provider: .claude), "Enterprise")
+    }
+
+    func testEveryProviderDropsALeadingBrandWord() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "ChatGPT Plus", provider: .codex), "Plus")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Codex Pro", provider: .codex), "Pro 20x")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Cursor Pro+", provider: .cursor), "Pro+")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "cursor ultra", provider: .cursor), "Ultra")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "OpenCode Go", provider: .opencode), "Go")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Command Code Pro", provider: .commandcode), "Pro")
+    }
+
+    func testABrandAloneOrInsideAPlanNameStays() {
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claude", provider: .claude), "Claude")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "SuperGrok", provider: .cursor), "SuperGrok")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "SuperGrok Heavy", provider: .cursor), "SuperGrok Heavy")
+        XCTAssertEqual(PlanBadgeLabel.text(for: "Claudette", provider: .claude), "Claudette")
     }
 
     func testOpenCodeMapsGo() {

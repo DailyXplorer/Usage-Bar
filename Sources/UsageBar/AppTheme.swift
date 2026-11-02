@@ -21,12 +21,7 @@ enum AppTheme {
         guard let url = bundle.url(forResource: "DMSans", withExtension: "ttf") else {
             return
         }
-        var error: Unmanaged<CFError>?
-        guard let provider = CGDataProvider(url: url as CFURL) else { return }
-        guard let font = CGFont(provider) else { return }
-        if !CTFontManagerRegisterGraphicsFont(font, &error) {
-            return
-        }
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
     }
 
     static let codexLogo: NSImage? = logo(named: "codex")

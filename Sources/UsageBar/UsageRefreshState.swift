@@ -126,6 +126,13 @@ enum UsageFetchResult {
     case cursor(CursorUsageSnapshot)
     case opencode(OpenCodeUsageResponse)
     case commandcode(CommandCodeUsageSnapshot)
+
+    var carriesUsage: Bool {
+        if case .claude(let fetch) = self {
+            return fetch.usage != nil
+        }
+        return true
+    }
 }
 
 struct UsageFetcher {

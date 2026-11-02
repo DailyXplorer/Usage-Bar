@@ -14,8 +14,10 @@ a session row and shows an error only when the response holds no window at all
 `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`,
 `seven_day_oauth_apps` and `seven_day_cowork` are the fallback when `limits`
 gives no usable entry. Unknown `kind` values are kept and get a readable label
-from their kind or group. Labels follow Claude Code's `/usage`: "Current
-session", "Current week (all models)", "Current week (‹model display name›)".
+from their kind or group. Labels follow Claude Code's `/usage` wording in the
+app's Title Case: "Current Session", "Current Week (All Models)", "Current Week
+(‹model display name›)". A name the server provides, such as a model display
+name, keeps its own spelling inside the label.
 Decoding is lenient: a malformed entry drops only that entry.
 
 ### D2 Claude menu bar value
@@ -67,7 +69,7 @@ time is not today. The backoff resets on the next success.
 ### D5 Claude plan name
 
 From `GET /api/oauth/profile` → `organization.plan_display_name` (for example
-"Ultra", shown as "Claude Ultra"), requested with Claude Code's profile request
+"Ultra", shown as "Ultra"; see D5b), requested with Claude Code's profile request
 shape and cached for 24 hours. Otherwise the label derived from the sign-in's
 `subscriptionType` and `rateLimitTier`. When Claude Code's saved copy or the
 quota check supplies the usage, the stored profile name for that account is
@@ -76,10 +78,11 @@ renewed) for its label.
 
 ### D6 Claude usage credits
 
-"Usage credits" (`extra_usage`, when `is_enabled`: spent / monthly limit in the
+"Usage Credits" (`extra_usage`, when `is_enabled`: spent / monthly limit in the
 account currency, amounts in minor units) and the credit windows `cinder_cove`
 and `wattle_ember` appear as rows in the Claude section when present. They never
-drive the menu bar.
+drive the menu bar. Their amounts read "$12.50 / $50.00 spent", the one format
+every money row uses for every provider.
 
 ### D7 Claude token renewal
 
@@ -108,7 +111,11 @@ Codex every 3 minutes; Claude per D3; Cursor, OpenCode Go and Command Code every
 5 minutes. After wake or a network change, fetching waits until the network path
 is satisfied, and a network error in the first seconds after wake is never
 shown. The popover footer states the last update time ("Updated 2 min ago"),
-not a fixed interval.
+not a fixed interval. A provider section adds its own freshness line only when
+it tells more than the footer: its data is older than twice its refresh
+interval or its last attempt failed ("Saved data from …"), it has only saved
+data with no successful refresh yet, or it is paused (the pause line). While
+every provider is fresh, only the footer states the time.
 
 ### D10 Server pauses expire
 
@@ -132,6 +139,16 @@ windows.
 
 Error text says what happened and what to do, with no HTTP codes, URLs or
 exception text.
+
+### D5b Plan badges name the plan only
+
+Every provider's plan badge shows the plan name and never the provider brand:
+"Ultra", "Max 20x", "Max 5x", "Pro", "Plus", "Team", "Enterprise", "Go";
+never "Claude Ultra" or "Cursor Pro". The provider icon beside the badge
+already names the service. A leading brand word in a server or sign-in value
+("Claude ", "Cursor ", "ChatGPT ", "Codex ", "OpenCode ", "Command Code ") is
+dropped when a plan name remains after it. A plan whose own name contains a
+brand, such as "SuperGrok", stays as written.
 
 ## Codex
 
@@ -164,13 +181,13 @@ new process started and retries once.
 Cursor and Grok accounts can be combined into one plan (The X Subscription).
 `GetSandUsageStatus.isUnified` tells the two account shapes apart.
 
-- Unified account (`isUnified == true`): one **Weekly usage** bar from
+- Unified account (`isUnified == true`): one **Weekly Usage** bar from
   `usagePercent`, reset at `nextResetTimestampUtc`, with `cursorPlanName` as
   the plan badge. This bar is the Cursor value in the menu bar. **Cursor
   Models**, **Other Models** and a separate **Grok Bot** bar are not shown.
   When `GetCurrentPeriodUsage.spendLimitUsage.individualLimit` is above zero,
-  an **Additional usage** row shows `individualUsed / individualLimit` in
-  dollars, reset at the end of the billing cycle. A pooled Enterprise
+  an **Additional Usage** row shows `individualUsed / individualLimit` in
+  dollars ("$12.00 / $50.00 spent"), reset at the end of the billing cycle. A pooled Enterprise
   allowance or a missing percentage shows no weekly bar.
 - Pending account merge (`unifyPendingMerge` present on an account that is not
   unified): the section says "Account merge in progress" instead of a 0 % bar.
@@ -255,6 +272,61 @@ Go limits are per model and change over time.
   rolling window, monthly pool or org limit keeps its section (per D8) and says
   that Command Code returned no limits.
 - `whoami?limits=1` runs on every refresh, and each `orgLimits` entry becomes a
-  spend-limit row (`$spent of $limit` with its interval). The 5-hour and weekly
+  spend-limit row ("$5.50 / $20.00 spent this month", the period taken from its
+  interval). The 5-hour and weekly
   windows are hidden when `windowLimits.limited` is false; the monthly pool
   still shows.
+
+## Notifications and pace
+
+### D20 Threshold notifications
+
+- Usage Bar posts macOS notifications through `UNUserNotificationCenter`,
+  behind the `UsageNotifying` protocol. Settings → Notifications holds
+  **Notify when a limit runs low** (default on) with **Warn at** 50%, 30%, 20%
+  (default) or 10% left, and **Notify when a limit resets** (default on).
+- A low warning is sent when a window's percentage left is at or below the
+  chosen threshold. A second notification is sent when the limit is reached
+  (0% left or the provider's limit-reached status). Both follow the first
+  switch.
+- A reset notification is sent only for a window that warned or reached its
+  limit in the period that ended, when fresh data shows the next period. A
+  window that comes back idle after its period ended (0% used, no reset time)
+  also counts as reset.
+- Covered: every time window with a percentage and a reset time of a provider
+  shown in the popover (D8): sessions, weeklies, model-scoped weeklies, Codex
+  primary, secondary and additional windows, Cursor weekly, OpenCode Go and
+  Command Code windows. Credit, balance and spend-limit rows never notify
+  (Cursor's additional usage and Command Code org limits are spend limits).
+- One notification per window, threshold and reset period. The record is kept
+  in `UserDefaults` across relaunches and dropped once its period has passed.
+  A window is identified by provider, row and length class (5 hours, day,
+  week, calendar month of 28 to 31 days, year), never the exact length, so a
+  billing cycle of another length is still the same window.
+  A reset time that drifts by less than 30 minutes is the same period. Lowering
+  the threshold can warn again at the new one; raising it does not repeat a
+  warning.
+- Only fresh data notifies: never saved data from launch, a reply that carried
+  no usage, data older than
+  twice its refresh interval, a failed read, a paused provider, or a window
+  in the D11 "reset, waiting for new data" state.
+- Text: provider, window, what happened, reset time. For example "Claude
+  weekly limit: 20% left" / "Resets Tue at 14:00.", "Codex 5-hour limit
+  reached" / "Resets at 15:30.", "Claude weekly limit has reset".
+- Permission is requested when the first notification is due, or when the
+  user turns a switch on. If macOS denies it, Settings shows one line saying
+  notifications are off for Usage Bar in System Settings, with a button that
+  opens that pane. Clicking a notification opens the popover.
+
+### D21 Pace forecast
+
+- For a time window with a known length and reset time, past the first 5% of
+  the window and at 3% used or more, usage is projected linearly to the reset.
+- Only when the projection exceeds 100% does the row show "Runs out in
+  ~<duration> at this pace" in the warning colour, at the trailing edge of its
+  "% Left" line under the reset time. Otherwise nothing extra shows.
+- Window length comes from the data (Codex `limit_window_seconds`, a period
+  start and end where given) or the documented fixed lengths (5-hour session,
+  7-day week, 30-day month). Unknown length means no forecast. Reached limits
+  and credit or spend rows never forecast.
+- Popover only; the menu bar is unchanged. No new badges, ticks or rows.

@@ -45,7 +45,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .weeklyAll,
-                    name: "All Models",
+                    name: "Current Week (All Models)",
                     usedPercent: 40,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 177_600,
@@ -55,7 +55,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
                 LimitBucket(
                     provider: .claude,
                     kind: .weeklyScoped,
-                    name: "Fable",
+                    name: "Current Week (Fable)",
                     usedPercent: 91,
                     resetAt: Date(timeIntervalSince1970: 1_786_402_800),
                     resetAfterSeconds: 177_600,
@@ -261,6 +261,71 @@ final class UsageMenuSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeWeeklyRunsOutAtThisPaceWhileCodexIsOnPace() throws {
+        let now = Date()
+        let model = UsageModel(
+            previewBuckets: try codexBuckets(Self.codexProWeeklyOnly, now: now),
+            planType: "pro",
+            lastUpdated: now.addingTimeInterval(-120),
+            claudeBuckets: try claudeBuckets(Self.claudeUltraAheadOfPace, now: now),
+            claudePlan: "Ultra",
+            now: { now }
+        )
+
+        XCTAssertFalse(model.claudeBuckets.contains { $0.kind == .session })
+        XCTAssertEqual(
+            model.claudeBuckets.map { PaceForecast.text(for: $0, at: now) },
+            ["Runs out in ~1d 4h at this pace", nil]
+        )
+        XCTAssertEqual(model.buckets.map { PaceForecast.text(for: $0, at: now) }, [nil])
+        try renderBothModes(model, name: "pace-claude-ultra-codex-pro")
+    }
+
+    @MainActor
+    func testSettingsNotificationsInTheGrantedAndDeniedStates() throws {
+        AppTheme.loadFont()
+        for permission in [NotificationPermission.granted, .denied] {
+            let suiteName = UUID().uuidString
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+            defaults.removePersistentDomain(forName: suiteName)
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let alerts = UsageAlertCenter(
+                defaults: defaults,
+                notifier: FixedPermissionNotifier(fixed: permission),
+                permission: permission
+            )
+            let model = UsageModel(
+                previewBuckets: [],
+                planType: "pro",
+                lastUpdated: Date(),
+                menuBarProviders: [.codex, .claude],
+                defaults: defaults,
+                alerts: alerts
+            )
+            let updater = stubUpdater(defaults: defaults)
+            let name = permission == .granted ? "granted" : "denied"
+            for scheme in [ColorScheme.light, .dark] {
+                let view = SettingsView()
+                    .environmentObject(model)
+                    .environmentObject(alerts)
+                    .environmentObject(updater)
+                    .environment(\.colorScheme, scheme)
+                let hostingView = NSHostingView(rootView: view)
+                hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+                hostingView.frame = NSRect(x: 0, y: 0, width: 448, height: 1_250)
+                hostingView.layoutSubtreeIfNeeded()
+                let representation = try XCTUnwrap(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+                hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+                let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
+                try png.write(to: buildDirectory.appendingPathComponent(
+                    "UsageBar-settings-notifications-\(name)-\(scheme == .dark ? "dark" : "light").png"
+                ))
+            }
+            XCTAssertEqual(alerts.preferences, UsageAlertPreferences())
+        }
+    }
+
+    @MainActor
     func testClaudeMaxWithSessionAndCodexPlus() throws {
         let now = Date()
         let model = UsageModel(
@@ -395,6 +460,7 @@ final class UsageMenuSnapshotTests: XCTestCase {
         for scheme in [ColorScheme.light, .dark] {
             let view = SettingsView()
                 .environmentObject(model)
+                .environmentObject(model.alerts)
                 .environmentObject(updater)
                 .environment(\.colorScheme, scheme)
             let hostingView = NSHostingView(rootView: view)
@@ -417,6 +483,13 @@ final class UsageMenuSnapshotTests: XCTestCase {
      "secondary_window":null},
      "credits":{"has_credits":false,"unlimited":false,"balance":null},
      "spend_control":{"reached":false,"individual_limit":null},"rate_limit_reached_type":null}
+    """
+
+    private static let claudeUltraAheadOfPace = """
+    {"five_hour":null,
+     "limits":[
+      {"kind":"weekly_all","group":"weekly","percent":75,"severity":"normal","resets_at":"2026-11-05T10:00:00Z","scope":null,"is_active":true},
+      {"kind":"weekly_scoped","group":"weekly","percent":0,"severity":"normal","resets_at":"2026-11-05T10:00:00Z","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}]}
     """
 
     private static let codexPlus = """
@@ -521,6 +594,20 @@ private func stubUpdater(defaults: UserDefaults) -> AppUpdater {
         defaults: defaults,
         currentVersion: "1.0.0"
     )
+}
+
+@MainActor
+private final class FixedPermissionNotifier: UsageNotifying {
+    var onOpen: (() -> Void)?
+    let fixed: NotificationPermission
+
+    init(fixed: NotificationPermission) {
+        self.fixed = fixed
+    }
+
+    func permission() async -> NotificationPermission { fixed }
+    func requestPermission() async -> NotificationPermission { fixed }
+    func post(_ alert: UsageAlert) {}
 }
 
 private struct SilentGitHub: GitHubReleasing {

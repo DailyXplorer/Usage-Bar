@@ -1,7 +1,10 @@
 import Foundation
 
 enum PlanBadgeLabel {
-    static func text(for plan: String, provider: LimitBucket.Provider) -> String {
+    private static let brandPrefixes = ["Command Code", "OpenCode", "ChatGPT", "Claude", "Cursor", "Codex"]
+
+    static func text(for rawPlan: String, provider: LimitBucket.Provider) -> String {
+        let plan = withoutBrand(rawPlan)
         let key = normalized(plan)
         switch provider {
         case .codex:
@@ -30,16 +33,14 @@ enum PlanBadgeLabel {
     }
 
     private static func claudeText(for key: String, original: String) -> String {
-        let name: String
         switch key {
         case "max5x":
-            name = "Max 5x"
+            return "Max 5x"
         case "max20x":
-            name = "Max 20x"
+            return "Max 20x"
         default:
-            name = sharedText(for: key, original: original)
+            return sharedText(for: key, original: original)
         }
-        return name.hasPrefix("Claude") ? name : "Claude \(name)"
     }
 
     private static func opencodeText(for key: String, original: String) -> String {
@@ -68,8 +69,21 @@ enum PlanBadgeLabel {
         case "max":
             return "Max"
         default:
-            return original.capitalized
+            let isMixedCase = original != original.lowercased() && original != original.uppercased()
+            return isMixedCase ? original : original.capitalized
         }
+    }
+
+    private static func withoutBrand(_ plan: String) -> String {
+        let trimmed = plan.trimmingCharacters(in: .whitespaces)
+        for brand in brandPrefixes {
+            guard trimmed.lowercased().hasPrefix(brand.lowercased() + " ") else { continue }
+            let rest = trimmed.dropFirst(brand.count).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty {
+                return rest
+            }
+        }
+        return trimmed
     }
 
     private static func normalized(_ plan: String) -> String {

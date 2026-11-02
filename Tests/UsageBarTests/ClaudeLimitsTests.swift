@@ -63,9 +63,9 @@ final class ClaudeLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
         XCTAssertEqual(buckets.map(\.displayName), [
-            "Current session",
-            "Current week (all models)",
-            "Current week (Fable)",
+            "Current Session",
+            "Current Week (All Models)",
+            "Current Week (Fable)",
         ])
         XCTAssertEqual(buckets.map(\.remainingPercent), [68, 94, 100])
         XCTAssertEqual(buckets.map(\.isActive), [true, false, false])
@@ -85,26 +85,26 @@ final class ClaudeLimitsTests: XCTestCase {
         let buckets = ClaudeLimits.buckets(from: try ClaudeFixtures.decode(ClaudeFixtures.credits), now: now)
 
         let credits = try XCTUnwrap(buckets.first { $0.kind == .spendLimit })
-        XCTAssertEqual(credits.name, "Usage credits")
+        XCTAssertEqual(credits.name, "Usage Credits")
         XCTAssertEqual(credits.usedPercent, 25)
         XCTAssertEqual(credits.detail, "$12.50 / $50.00 spent")
         XCTAssertNil(credits.resetAt)
         XCTAssertFalse(credits.drivesMenuBar)
 
         let creditWindows = buckets.filter { $0.kind == .credit }
-        XCTAssertEqual(creditWindows.map(\.name), ["Claude Code and Cowork credit", "Credit"])
+        XCTAssertEqual(creditWindows.map(\.name), ["Claude Code and Cowork Credit", "Credit"])
         XCTAssertEqual(creditWindows.map(\.usedPercent), [12, 30])
         XCTAssertEqual(creditWindows[1].detail, "$15.00 / $50.00 spent")
     }
 
     func testDisabledOrUnlimitedUsageCredits() throws {
         let disabled = try ClaudeFixtures.decode(ClaudeFixtures.withSession)
-        XCTAssertFalse(ClaudeLimits.buckets(from: disabled, now: now).contains { $0.name == "Usage credits" })
+        XCTAssertFalse(ClaudeLimits.buckets(from: disabled, now: now).contains { $0.name == "Usage Credits" })
 
         let unlimited = try ClaudeFixtures.decode(
             #"{"seven_day":{"utilization":5},"extra_usage":{"is_enabled":true,"monthly_limit":null,"used_credits":0}}"#
         )
-        let row = try XCTUnwrap(ClaudeLimits.buckets(from: unlimited, now: now).first { $0.name == "Usage credits" })
+        let row = try XCTUnwrap(ClaudeLimits.buckets(from: unlimited, now: now).first { $0.name == "Usage Credits" })
         XCTAssertEqual(row.kind, .balance)
         XCTAssertEqual(row.detail, "Unlimited")
     }
@@ -114,7 +114,7 @@ final class ClaudeLimitsTests: XCTestCase {
 
         XCTAssertEqual(buckets.map(\.kind), [.session, .weeklyAll, .weeklyScoped])
         XCTAssertEqual(buckets.map(\.remainingPercent), [75, 60, 90])
-        XCTAssertEqual(buckets[2].displayName, "Current week (Sonnet)")
+        XCTAssertEqual(buckets[2].displayName, "Current Week (Sonnet)")
     }
 
     func testLegacyWindowsAreUsedWhenNoLimitEntryHasAPercent() throws {
@@ -145,7 +145,7 @@ final class ClaudeLimitsTests: XCTestCase {
         XCTAssertEqual(buckets[0].usedPercent, 40)
         XCTAssertEqual(buckets[0].resetAt, Date(timeIntervalSince1970: 1_793_600_000))
         XCTAssertEqual(buckets[1].usedPercent, 8)
-        XCTAssertEqual(buckets[1].displayName, "Current week (one model)")
+        XCTAssertEqual(buckets[1].displayName, "Current Week (One Model)")
     }
 
     func testUnknownKindsGetAReadableLabelAndAreKept() throws {
@@ -155,7 +155,7 @@ final class ClaudeLimitsTests: XCTestCase {
         let first = ClaudeLimits.buckets(from: response, now: now)
         let second = ClaudeLimits.buckets(from: response, now: now)
 
-        XCTAssertEqual(first.map(\.displayName), ["Daily routines", "Monthly credits"])
+        XCTAssertEqual(first.map(\.displayName), ["Daily Routines", "Monthly Credits"])
         XCTAssertEqual(first[0].limitWindowSeconds, 86_400)
         XCTAssertEqual(Set(first.map(\.id)).count, 2)
         XCTAssertEqual(first.map(\.id), second.map(\.id))
@@ -209,7 +209,7 @@ final class ClaudeLimitsTests: XCTestCase {
         let response = try XCTUnwrap(ClaudeUnifiedHeaders.response(from: headers, scopedModelName: "Fable"))
         let scoped = try XCTUnwrap(ClaudeLimits.buckets(from: response, now: now).first { $0.kind == .weeklyScoped })
 
-        XCTAssertEqual(scoped.displayName, "Current week (Fable)")
+        XCTAssertEqual(scoped.displayName, "Current Week (Fable)")
         XCTAssertEqual(scoped.usedPercent, 100)
         XCTAssertTrue(scoped.reached)
         XCTAssertTrue(scoped.isActive)
@@ -238,7 +238,7 @@ final class ClaudeLimitsTests: XCTestCase {
     func testQuotaCheckNeverRevivesAKeptRowThatResetMeanwhile() {
         let fetchedAt = now.addingTimeInterval(-3_600)
         let fable = LimitBucket(
-            provider: .claude, kind: .weeklyScoped, scope: "model-name:fable", name: "Current week (Fable)",
+            provider: .claude, kind: .weeklyScoped, scope: "model-name:fable", name: "Current Week (Fable)",
             usedPercent: 100, resetAt: now.addingTimeInterval(-600), resetAfterSeconds: 0,
             limitWindowSeconds: 604_800, reached: true, isActive: true
         )
@@ -251,15 +251,19 @@ final class ClaudeLimitsTests: XCTestCase {
     }
 
     func testRelabeledRewritesCachedNames() {
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.session, "Current Session")).name, "Current session")
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.session, "Session 5h")).name, "Current session")
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyAll, "All Models")).name, "Current week (all models)")
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Week · Fable")).name, "Current week (Fable)")
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Fable")).name, "Current week (Fable)")
-        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Pinned Model")).name, "Current week (one model)")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.session, "Current session")).name, "Current Session")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.session, "Session 5h")).name, "Current Session")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyAll, "All Models")).name, "Current Week (All Models)")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Week · Fable")).name, "Current Week (Fable)")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Fable")).name, "Current Week (Fable)")
+        XCTAssertEqual(ClaudeLimits.relabeled(cached(.weeklyScoped, "Pinned Model")).name, "Current Week (One Model)")
         XCTAssertEqual(
             ClaudeLimits.relabeled(cached(.weeklyScoped, "Current week (Fable)")).name,
-            "Current week (Fable)"
+            "Current Week (Fable)"
+        )
+        XCTAssertEqual(
+            ClaudeLimits.relabeled(cached(.weeklyAll, "Current week (all models)")).name,
+            "Current Week (All Models)"
         )
     }
 
@@ -294,8 +298,8 @@ final class ClaudeLimitsTests: XCTestCase {
     func testMenuBarFallsBackFromSessionToWeeklyToMostUsedModel() {
         let session = bucket(.session, used: 10)
         let weekly = bucket(.weeklyAll, used: 30)
-        let fable = bucket(.weeklyScoped, used: 70, name: "Current week (Fable)")
-        let sonnet = bucket(.weeklyScoped, used: 20, name: "Current week (Sonnet)")
+        let fable = bucket(.weeklyScoped, used: 70, name: "Current Week (Fable)")
+        let sonnet = bucket(.weeklyScoped, used: 20, name: "Current Week (Sonnet)")
 
         XCTAssertEqual(model(with: [weekly, session, fable]).menuBarClaudeText, "90%")
         XCTAssertEqual(model(with: [fable, weekly]).menuBarClaudeText, "70%")
@@ -315,7 +319,7 @@ final class ClaudeLimitsTests: XCTestCase {
     @MainActor
     func testMenuBarShowsAFullWindowOnceItHasReset() {
         let reset = LimitBucket(
-            provider: .claude, kind: .session, name: "Current session", usedPercent: 90,
+            provider: .claude, kind: .session, name: "Current Session", usedPercent: 90,
             resetAt: Date().addingTimeInterval(-60), resetAfterSeconds: 0,
             limitWindowSeconds: 18_000, reached: true, isActive: true
         )

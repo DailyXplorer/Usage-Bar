@@ -11,7 +11,7 @@ final class CursorSnapshotTests: XCTestCase {
         let model = try menuModel(cursor: unifiedLayout())
         let light = try renderBothSchemes(UsageMenuView(), model: model, name: "cursor-unified")
 
-        XCTAssertEqual(model.cursorBuckets.map(\.kind), [.weekly, .other])
+        XCTAssertEqual(model.cursorBuckets.map(\.kind), [.weekly, .spendLimit])
         XCTAssertGreaterThan(light.size.height, 200)
     }
 

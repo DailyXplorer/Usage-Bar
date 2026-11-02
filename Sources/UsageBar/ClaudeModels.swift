@@ -167,7 +167,7 @@ enum ClaudeLimits {
     static let sessionKind = "session"
     static let weeklyAllKind = "weekly_all"
     static let weeklyScopedKind = "weekly_scoped"
-    static let usageCreditsName = "Usage credits"
+    static let usageCreditsName = "Usage Credits"
 
     private static let hour = 60 * 60
     private static let week = 7 * 24 * hour
@@ -206,7 +206,7 @@ enum ClaudeLimits {
             (.weeklyAll, response.sevenDay, nil, label(kind: weeklyAllKind, scopeModel: nil), week),
             (.weeklyScoped, response.sevenDayOpus, legacyModelScope("Opus"), weeklyLabel("Opus"), week),
             (.weeklyScoped, response.sevenDaySonnet, legacyModelScope("Sonnet"), weeklyLabel("Sonnet"), week),
-            (.other, response.sevenDayOAuthApps, "seven_day_oauth_apps", weeklyLabel("OAuth apps"), week),
+            (.other, response.sevenDayOAuthApps, "seven_day_oauth_apps", weeklyLabel("OAuth Apps"), week),
             (.other, response.sevenDayCowork, "seven_day_cowork", weeklyLabel("Cowork"), week),
         ]
         return windows.compactMap { kind, window, scope, name, seconds in
@@ -243,7 +243,7 @@ enum ClaudeLimits {
                     resetAfterSeconds: nil,
                     limitWindowSeconds: nil,
                     reached: percent >= 100,
-                    detail: "\(money(used / scale, currency: currency)) / \(money(limit / scale, currency: currency)) spent"
+                    detail: MoneyText.spent(used / scale, of: limit / scale, currency: currency)
                 ))
             } else {
                 result.append(LimitBucket(
@@ -261,14 +261,14 @@ enum ClaudeLimits {
             }
         }
         let credits: [(key: String, window: ClaudeWindow?, fallbackName: String)] = [
-            ("cinder_cove", response.cinderCove, "Claude Code and Cowork credit"),
+            ("cinder_cove", response.cinderCove, "Claude Code and Cowork Credit"),
             ("wattle_ember", response.wattleEmber, "Credit"),
         ]
         for (key, window, fallbackName) in credits {
             guard let window, let utilization = window.utilization else { continue }
             var detail: String?
             if let used = window.usedDollars, let limit = window.limitDollars {
-                detail = "\(money(used, currency: "USD")) / \(money(limit, currency: "USD")) spent"
+                detail = MoneyText.spent(used, of: limit)
             }
             result.append(LimitBucket(
                 provider: .claude,
@@ -289,15 +289,16 @@ enum ClaudeLimits {
     static func label(kind: String?, group: String? = nil, scopeModel: String?) -> String {
         switch kind {
         case sessionKind:
-            return "Current session"
+            return "Current Session"
         case weeklyAllKind:
-            return weeklyLabel("all models")
+            return weeklyLabel("All Models")
         case weeklyScopedKind:
-            return weeklyLabel(nonEmpty(scopeModel) ?? "one model")
+            return weeklyLabel(nonEmpty(scopeModel) ?? "One Model")
         default:
             guard let raw = nonEmpty(kind) ?? nonEmpty(group) else { return "Limit" }
-            let words = raw.replacingOccurrences(of: "_", with: " ")
-            return words.prefix(1).uppercased() + words.dropFirst()
+            return raw.split(separator: "_")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
         }
     }
 
@@ -319,7 +320,7 @@ enum ClaudeLimits {
     }
 
     static func weeklyLabel(_ subject: String) -> String {
-        "Current week (\(subject))"
+        "Current Week (\(subject))"
     }
 
     static func relabeled(_ bucket: LimitBucket) -> LimitBucket {
@@ -337,6 +338,9 @@ enum ClaudeLimits {
             let model = scopedModel(fromStoredName: bucket.name)
             nextName = label(kind: weeklyScopedKind, scopeModel: model)
             nextScope = bucket.scope ?? model.map(legacyModelScope)
+        case .spendLimit where bucket.scope == "extra_usage", .balance where bucket.scope == "extra_usage":
+            nextName = usageCreditsName
+            nextScope = bucket.scope
         default:
             return bucket
         }
@@ -352,8 +356,8 @@ enum ClaudeLimits {
         for prefix in ["Week · ", "Week • "] where remainder.hasPrefix(prefix) {
             remainder = String(remainder.dropFirst(prefix.count))
         }
-        if remainder.hasPrefix("Current week ("), remainder.hasSuffix(")") {
-            remainder = String(remainder.dropFirst("Current week (".count).dropLast())
+        for prefix in ["Current Week (", "Current week ("] where remainder.hasPrefix(prefix) && remainder.hasSuffix(")") {
+            remainder = String(remainder.dropFirst(prefix.count).dropLast())
         }
         if remainder.isEmpty { return nil }
         for placeholder in ["pinned model", "one model"]
@@ -408,16 +412,6 @@ enum ClaudeLimits {
         case "monthly": return 30 * 24 * hour
         default: return nil
         }
-    }
-
-    private static func money(_ amount: Double, currency: String) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.currencyCode = currency
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f %@", amount, currency)
     }
 
     private static func clampPercent(_ value: Double) -> Int {
