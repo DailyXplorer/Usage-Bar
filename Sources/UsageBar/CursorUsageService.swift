@@ -124,6 +124,7 @@ actor CursorUsageService {
         guard let http = response as? HTTPURLResponse else {
             throw CursorUsageError.network("invalid response")
         }
+        ProviderLog.rejected(.cursor, endpoint: method, response: http)
         switch http.statusCode {
         case 200:
             return data

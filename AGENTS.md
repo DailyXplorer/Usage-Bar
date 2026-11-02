@@ -145,6 +145,8 @@ broken. If you must, generate both files together and keep the exact
 | `Sources/UsageBar/MenuBarPanelPlacement.swift` | Pure panel placement across screens |
 | `Sources/UsageBar/UsageRefreshState.swift` | Per-endpoint cadence (`RefreshPolicy`), pauses, fetch routing |
 | `Sources/UsageBar/ProviderSession.swift` | Ephemeral, cache-free `URLSession` for provider requests |
+| `Sources/UsageBar/ProviderLog.swift` | `os.Logger` line for every non-2xx provider response; public fields only, strict patterns |
+| `Sources/UsageBar/CredentialFingerprint.swift` | Short SHA-256 of a key or token; the only form of a credential Usage Bar stores |
 | `Sources/UsageBar/ClaudeUsageService.swift` | Claude sources: Claude Code's saved copy, usage endpoint, profile, quota check |
 | `Sources/UsageBar/ClaudeCredentialStore.swift` | Claude sign-in read, renewal and write-back |
 | `Sources/UsageBar/Subprocess.swift` | Time-limited subprocess runner (`/usr/bin/security`) |
@@ -167,9 +169,11 @@ the AppKit status item with `MenuBarExtra`.
 
 Every provider request goes through `ProviderSession.shared` (no URL cache, no
 cookies). A new provider request must use it too. Refresh cadence lives in `UsageEndpoint.policy`; read
-[docs/DECISIONS.md](docs/DECISIONS.md) (D3, D4, D9, D10) before changing it.
+[docs/DECISIONS.md](docs/DECISIONS.md) (D3, D4, D9, D10, D22, D24) before changing it.
 Usage Bar renews only the Claude token, through `ClaudeCredentialStore`; it
-never renews Codex, Cursor or other tokens.
+never renews Codex, Cursor or other tokens. A new provider request must also
+log its non-2xx answers through `ProviderLog.rejected`; never log a token, key,
+id, email, body or usage value.
 
 ## Out of scope unless asked
 

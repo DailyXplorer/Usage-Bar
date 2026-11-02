@@ -2,11 +2,17 @@ import Foundation
 
 struct OpenCodeCredentials {
     let apiKey: String
+
+    var fingerprint: String {
+        CredentialFingerprint.make(apiKey) ?? ""
+    }
 }
 
 enum OpenCodeUsageError: LocalizedError {
     case notSignedIn
-    case invalidKey
+    case invalidKey(fingerprint: String)
+    case keyOnHold
+    case signedOut
     case notSubscribed
     case throttled(retryAfter: Date?)
     case network(String)
@@ -19,6 +25,10 @@ enum OpenCodeUsageError: LocalizedError {
             return "No OpenCode Go key found. In OpenCode, run /connect and choose OpenCode Go."
         case .invalidKey:
             return "OpenCode Go rejected the key. In OpenCode, run /connect again."
+        case .keyOnHold:
+            return "OpenCode Go is waiting before trying the saved key again."
+        case .signedOut:
+            return "Signed out of OpenCode Go: the saved key no longer works. Run /connect in OpenCode, or hide OpenCode Go in Settings."
         case .notSubscribed:
             return "This OpenCode workspace has no Go subscription. Subscribe to OpenCode Go, then try again."
         case .throttled:
@@ -38,13 +48,26 @@ actor OpenCodeUsageService {
     static let integrationID = "opencode-go"
 
     private let session: URLSession
+    private let databases: [URL]
+    private let authFiles: [URL]
 
-    init(session: URLSession = ProviderSession.shared) {
+    init(
+        session: URLSession = ProviderSession.shared,
+        databases: [URL] = OpenCodeUsageService.databaseCandidates(),
+        authFiles: [URL] = OpenCodeUsageService.authFileCandidates()
+    ) {
         self.session = session
+        self.databases = databases
+        self.authFiles = authFiles
     }
 
-    func fetchUsage() async throws -> (usage: OpenCodeUsageResponse, credentials: OpenCodeCredentials) {
-        let credentials = try await Self.loadCredentials()
+    func fetchUsage(
+        holdingKey heldFingerprint: String? = nil
+    ) async throws -> (usage: OpenCodeUsageResponse, credentials: OpenCodeCredentials) {
+        let credentials = try await Self.loadCredentials(databases: databases, authFiles: authFiles)
+        if let heldFingerprint, heldFingerprint == credentials.fingerprint {
+            throw OpenCodeUsageError.keyOnHold
+        }
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
@@ -63,8 +86,9 @@ actor OpenCodeUsageService {
             throw OpenCodeUsageError.network("invalid response")
         }
         guard http.statusCode == 200 else {
+            ProviderLog.rejected(.opencode, endpoint: "usage", response: http)
             if http.statusCode == 401 {
-                throw OpenCodeUsageError.invalidKey
+                throw OpenCodeUsageError.invalidKey(fingerprint: credentials.fingerprint)
             }
             if http.statusCode == 403 {
                 throw OpenCodeUsageError.notSubscribed

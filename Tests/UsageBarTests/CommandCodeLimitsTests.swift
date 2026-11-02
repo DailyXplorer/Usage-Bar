@@ -260,7 +260,7 @@ final class CommandCodeLimitsTests: XCTestCase {
 
     func testErrorTextHasNoStatusCodesOrExceptionText() {
         let errors: [CommandCodeUsageError] = [
-            .notSignedIn, .invalidKey, .throttled(retryAfter: nil),
+            .notSignedIn, .invalidKey(fingerprint: "a1"), .keyOnHold, .signedOut, .throttled(retryAfter: nil),
             .network("The request timed out."), .httpStatus(500), .decoding("keyNotFound"),
         ]
         for error in errors {

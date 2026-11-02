@@ -359,7 +359,8 @@ final class OpenCodeLimitsTests: XCTestCase {
 
     func testErrorTextHasNoStatusCodesOrExceptionText() {
         let errors: [OpenCodeUsageError] = [
-            .notSignedIn, .invalidKey, .notSubscribed, .throttled(retryAfter: nil),
+            .notSignedIn, .invalidKey(fingerprint: "a1"), .keyOnHold, .signedOut, .notSubscribed,
+            .throttled(retryAfter: nil),
             .network("The request timed out."), .httpStatus(502), .decoding("keyNotFound"),
         ]
         for error in errors {

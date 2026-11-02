@@ -4,8 +4,8 @@ import XCTest
 final class ClaudeCredentialsTests: XCTestCase {
     func testPlanTokenUsesRateLimitTierForMax() {
         XCTAssertEqual(credentials(subscription: "max", tier: "default_claude_max_5x").planToken, "max_5x")
-        XCTAssertEqual(credentials(subscription: "max", tier: "default_claude_max_20x").planToken, "max_20x")
-        XCTAssertEqual(credentials(subscription: "MAX", tier: "DEFAULT_CLAUDE_MAX_20X").planToken, "max_20x")
+        XCTAssertEqual(credentials(subscription: "max", tier: "default_claude_max_20x").planToken, "Ultra")
+        XCTAssertEqual(credentials(subscription: "MAX", tier: "DEFAULT_CLAUDE_MAX_20X").planToken, "Ultra")
     }
 
     func testPlanTokenFallsBackToMaxWithoutTier() {
@@ -25,7 +25,7 @@ final class ClaudeCredentialsTests: XCTestCase {
     }
 
     func testPrefers20xWhenBothTokensCouldMatch() {
-        XCTAssertEqual(credentials(subscription: "max", tier: "max_20x_preview").planToken, "max_20x")
+        XCTAssertEqual(credentials(subscription: "max", tier: "max_20x_preview").planToken, "Ultra")
     }
 
     func testExpiryUsesTheStoredDeadline() {
